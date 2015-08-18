@@ -1,0 +1,959 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r764 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r764%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701061641.l06GfAWP004473%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000750.html">
+   <LINK REL="Next"  HREF="000752.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r764 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r764%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701061641.l06GfAWP004473%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r764 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 17:41:10 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000750.html">[Stgt-svn] r763 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000752.html">[Stgt-svn] r765 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#751">[ date ]</a>
+              <a href="thread.html#751">[ thread ]</a>
+              <a href="subject.html#751">[ subject ]</a>
+              <a href="author.html#751">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 17:41:10 +0100 (Sat, 06 Jan 2007)
+New Revision: 764
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Use I_T nexus instead host_no for mainly FC HBAs.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/driver.h	2007-01-06 16:41:10 UTC (rev 764)
+@@ -17,9 +17,9 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
+-	int (*cmd_end_notify)(int host_no, int len, int result, int rw, uint64_t addr,
++	int (*cmd_end_notify)(uint64_t nid, int len, int result, int rw, uint64_t addr,
+ 			      uint64_t tag);
+-	int (*mgmt_end_notify)(int host_no, uint64_t mid, int result);
++	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+ 
+ 	struct backedio_template *default_bdt;
+ };
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/iscsi/conn.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -157,17 +157,12 @@
+ int conn_take_fd(struct iscsi_connection *conn, int fd)
+ {
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
+-	int err;
+ 
+ 	dprintf(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64 &quot;\n&quot;,
+ 		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+-
+ 	conn-&gt;session-&gt;conn_cnt++;
+ 
+-	err = tgt_target_bind(conn-&gt;session-&gt;target-&gt;tid, conn-&gt;tsih, lld_index);
+-	if (err)
+-		eprintf(&quot;fail to bind %d\n&quot;, err);
+-	return err;
++	return 0;
+ }
+ 
+ void conn_read_pdu(struct iscsi_connection *conn)
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/iscsi/iscsi.h	2007-01-06 16:41:10 UTC (rev 764)
+@@ -6,9 +6,9 @@
+ extern int iscsi_target_update(int, char *);
+ extern int iscsi_mgmt_account(uint32_t op, int tid, uint32_t uid, char *param,
+ 			      char *buf, int len);
+-extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
++extern int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
+-extern int iscsi_tm_done(int host_no, uint64_t mid, int result);
++extern int iscsi_tm_done(uint64_t nid, uint64_t mid, int result);
+ 
+ struct tgt_driver iscsi = {
+ 	.name			= &quot;iscsi&quot;,
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/iscsi/iscsid.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -865,7 +865,7 @@
+ {
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 
+-	target_cmd_done(conn-&gt;session-&gt;tsih, task-&gt;tag);
++	target_cmd_done(conn-&gt;session-&gt;iscsi_nexus_id, task-&gt;tag);
+ 	list_del(&amp;task-&gt;c_hlist);
+ 	if (task-&gt;c_buffer) {
+ 		if ((unsigned long) task-&gt;c_buffer != task-&gt;addr)
+@@ -874,15 +874,15 @@
+ 	iscsi_free_task(task);
+ }
+ 
+-int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
++int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw, uint64_t addr,
+ 			uint64_t tag)
+ {
+ 	struct iscsi_session *session;
+ 	struct iscsi_task *task;
+ 
+-	dprintf(&quot;%u %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, host_no, len, result,
+-		rw, addr, tag);
+-	session = session_lookup(host_no);
++	dprintf(&quot;%&quot; PRIu64 &quot; %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, nid,
++		len, result, rw, addr, tag);
++	session = session_lookup(nid);
+ 	if (!session)
+ 		return -EINVAL;
+ 
+@@ -952,13 +952,15 @@
+ 			else
+ 				list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 		} else
+-			err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
++			err = target_cmd_queue(conn-&gt;session-&gt;iscsi_nexus_id,
++					       req-&gt;cdb,
+ 					       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+ 					       uaddr, req-&gt;lun,
+ 					       ntohl(req-&gt;data_length),
+ 					       cmd_attr(task), req-&gt;itt);
+ 	} else
+-		err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
++		err = target_cmd_queue(conn-&gt;session-&gt;iscsi_nexus_id,
++				       req-&gt;cdb,
+ 				       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+ 				       uaddr, req-&gt;lun, ntohl(req-&gt;data_length),
+ 				       cmd_attr(task), req-&gt;itt);
+@@ -968,7 +970,7 @@
+ 	return err;
+ }
+ 
+-extern int iscsi_tm_done(int host_no, uint64_t mid, int result)
++extern int iscsi_tm_done(uint64_t nid, uint64_t mid, int result)
+ {
+ 	struct iscsi_task *task = (struct iscsi_task *) (unsigned long) mid;
+ 
+@@ -1032,8 +1034,8 @@
+ 	if (err)
+ 		task-&gt;result = err;
+ 	else
+-		target_mgmt_request(conn-&gt;session-&gt;tsih, (unsigned long) task,
+-				    fn, req-&gt;lun, req-&gt;itt);
++		target_mgmt_request(conn-&gt;session-&gt;iscsi_nexus_id,
++				    (unsigned long) task, fn, req-&gt;lun, req-&gt;itt);
+ 	return err;
+ }
+ 
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/iscsi/iscsid.h	2007-01-06 16:41:10 UTC (rev 764)
+@@ -256,7 +256,7 @@
+ /* session.c */
+ extern struct iscsi_session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern int session_create(struct iscsi_connection *conn);
+-extern struct iscsi_session *session_lookup(uint16_t tsih);
++extern struct iscsi_session *session_lookup(uint64_t nexus_id);
+ extern void session_get(struct iscsi_session *session);
+ extern void session_put(struct iscsi_session *session);
+ 
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/iscsi/session.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -40,10 +40,20 @@
+ 	return NULL;
+ }
+ 
+-struct iscsi_session *session_lookup(uint16_t tsih)
++struct iscsi_session *session_lookup(uint64_t nexus_id)
+ {
+ 	struct iscsi_session *session;
+ 	list_for_each_entry(session, &amp;sessions_list, hlist) {
++		if (session-&gt;iscsi_nexus_id == nexus_id)
++			return session;
++	}
++	return NULL;
++}
++
++static struct iscsi_session *session_lookup_by_tsih(uint16_t tsih)
++{
++	struct iscsi_session *session;
++	list_for_each_entry(session, &amp;sessions_list, hlist) {
+ 		if (session-&gt;tsih == tsih)
+ 			return session;
+ 	}
+@@ -66,7 +76,7 @@
+ 	for (tsih = last_tsih + 1; tsih != last_tsih; tsih++) {
+ 		if (!tsih)
+ 			continue;
+-		session = session_lookup(tsih);
++		session = session_lookup_by_tsih(tsih);
+ 		if (!session)
+ 			break;
+ 	}
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/scsi.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -476,7 +476,7 @@
+ 	return fn(p);
+ }
+ 
+-int scsi_cmd_perform(int tid, int lid, int host_no, uint8_t *pdu,
++int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu,
+ 		     int *len, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+ 		     struct tgt_device *dev, struct list_head *dev_list, int *async,
+@@ -513,7 +513,7 @@
+ 	} else {
+ 		int reserved;
+ 
+-		reserved = device_reserved(tid, dev-&gt;lun, host_no);
++		reserved = device_reserved(nid, dev-&gt;lun, host_no);
+ 		if (reserved) {
+ 			switch (scb[0]) {
+ 			case INQUIRY:
+@@ -588,14 +588,14 @@
+ 		break;
+ 	case RESERVE:
+ 	case RESERVE_10:
+-		result = device_reserve(tid, dev-&gt;lun, host_no);
++		result = device_reserve(nid, dev-&gt;lun, nid);
+ 		if (result)
+ 			result = SAM_STAT_RESERVATION_CONFLICT;
+ 		*len = 0;
+ 		break;
+ 	case RELEASE:
+ 	case RELEASE_10:
+-		result = device_release(tid, dev-&gt;lun, host_no, 0);
++		result = device_release(nid, dev-&gt;lun, host_no, 0);
+ 		if (result)
+ 			result = SAM_STAT_RESERVATION_CONFLICT;
+ 		*len = 0;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/target.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -36,7 +36,6 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-static struct target *hostt[MAX_NR_HOST];
+ static LIST_HEAD(target_list);
+ 
+ static struct target *target_lookup(int tid)
+@@ -48,6 +47,73 @@
+ 	return NULL;
+ }
+ 
++static struct it_nexus *it_nexus_lookup(uint64_t nid)
++{
++	int32_t tid;
++	int32_t nid32;
++	struct target *target;
++	struct it_nexus *nexus;
++
++	tid = NID2TID(nid);
++
++	target = target_lookup(tid);
++	if (!target)
++		return NULL;
++
++	nid32 = nid &amp; NID_MASK;
++	list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
++		if (nexus-&gt;nexus_id == nid32)
++			return nexus;
++	}
++	return NULL;
++}
++
++int it_nexus_create(int tid, char *info, uint64_t *rsp_nid)
++{
++	struct target *target;
++	struct it_nexus *nexus;
++	uint64_t nexus_id;
++
++	target = target_lookup(tid);
++	if (!target)
++		return -ENOENT;
++
++	for (nexus_id = 0; nexus_id &lt;= UINT32_MAX; nexus_id++) {
++		nexus = it_nexus_lookup(NID64(tid, nexus_id));
++		if (!nexus)
++			goto found;
++	}
++
++	eprintf(&quot;can't find free nexus id\n&quot;);
++	return -EINVAL;
++found:
++	nexus = zalloc(sizeof(*nexus));
++	if (!nexus)
++		return -ENOMEM;
++
++	nexus-&gt;nexus_id = nexus_id;
++	nexus-&gt;nexus_target = target;
++	nexus-&gt;info = info;
++
++	list_add_tail(&amp;nexus-&gt;nexus_siblings, &amp;target-&gt;it_nexus_list);
++	*rsp_nid = NID64(tid, nexus_id);
++
++	return 0;
++}
++
++int it_nexus_destroy(uint64_t nid)
++{
++	struct it_nexus *nexus;
++
++	nexus = it_nexus_lookup(nid);
++	if (nexus) {
++		list_del(&amp;nexus-&gt;nexus_siblings);
++		free(nexus);
++		return 0;
++	} else
++		return -ENOENT;
++}
++
+ static struct tgt_device *device_lookup(struct target *target, uint64_t lun)
+ {
+ 	struct tgt_device *device;
+@@ -80,14 +146,6 @@
+ 	list_del(&amp;cmd-&gt;c_hlist);
+ }
+ 
+-static struct target *host_to_target(int host_no)
+-{
+-	if (host_no &lt; MAX_NR_HOST)
+-		return hostt[host_no];
+-
+-	return NULL;
+-}
+-
+ static void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
+ {
+ 	q-&gt;active_cmd = 0;
+@@ -215,12 +273,12 @@
+ 	return 0;
+ }
+ 
+-int device_reserve(int tid, uint64_t lun, uint64_t reserve_id)
++int device_reserve(uint64_t nid, uint64_t lun, uint64_t reserve_id)
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
+ 
+-	device = __device_lookup(tid, lun, &amp;target);
++	device = __device_lookup(NID2TID(nid), lun, &amp;target);
+ 	if (!device)
+ 		return -EINVAL;
+ 
+@@ -234,12 +292,12 @@
+ 	return 0;
+ }
+ 
+-int device_release(int tid, uint64_t lun, uint64_t reserve_id, int force)
++int device_release(uint64_t nid, uint64_t lun, uint64_t reserve_id, int force)
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
+ 
+-	device = __device_lookup(tid, lun, &amp;target);
++	device = __device_lookup(NID2TID(nid), lun, &amp;target);
+ 	if (!device)
+ 		return 0;
+ 
+@@ -251,12 +309,12 @@
+ 	return -EBUSY;
+ }
+ 
+-int device_reserved(int tid, uint64_t lun, uint64_t reserve_id)
++int device_reserved(uint64_t nid, uint64_t lun, uint64_t reserve_id)
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
+ 
+-	device = __device_lookup(tid, lun, &amp;target);
++	device = __device_lookup(NID2TID(nid), lun, &amp;target);
+ 	if (!device || !device-&gt;reserve_id || device-&gt;reserve_id == reserve_id)
+ 		return 0;
+ 	return -EBUSY;
+@@ -335,31 +393,34 @@
+ 	}
+ }
+ 
+-int target_cmd_queue(int host_no, uint8_t *scb, uint8_t rw,
++int target_cmd_queue(uint64_t nid, uint8_t *scb, uint8_t rw,
+ 		     unsigned long uaddr,
+ 		     uint8_t *lun, uint32_t data_len,
+ 		     int attribute, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
++	struct it_nexus *nexus;
+ 	struct cmd *cmd;
+ 	int result, enabled = 0, async, len = 0;
+ 	uint64_t offset, dev_id;
+ 	uint8_t mmapped = 0;
+ 
+-	target = host_to_target(host_no);
+-	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
++	nexus = it_nexus_lookup(nid);
++	if (!nexus) {
++		eprintf(&quot;invalid nid %u %u\n&quot;, (int)NID2TID(nid),
++			(uint32_t)(nid &amp; NID_MASK));
+ 		return -ENOENT;
+ 	}
+ 
++	target = nexus-&gt;nexus_target;
+ 	/* TODO: preallocate cmd */
+ 	cmd = zalloc(sizeof(*cmd));
+ 	if (!cmd)
+ 		return -ENOMEM;
+ 
++	cmd-&gt;cmd_nexus_id = nid;
+ 	cmd-&gt;c_target = target;
+-	cmd-&gt;hostno = host_no;
+ 	cmd-&gt;attribute = attribute;
+ 	cmd-&gt;tag = tag;
+ 	cmd_hlist_insert(target, cmd);
+@@ -396,7 +457,7 @@
+ 
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(target-&gt;tid, target-&gt;lid,
+-					  host_no, scb,
++					  nexus-&gt;host_no, scb,
+ 					  &amp;len, data_len,
+ 					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+ 					  lun, cmd-&gt;dev,
+@@ -411,7 +472,7 @@
+ 		cmd-&gt;rw = rw;
+ 		set_cmd_processed(cmd);
+ 		if (!async)
+-			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(host_no, len, result,
++			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(nid, len, result,
+ 								 rw, uaddr, tag);
+ 	} else {
+ 		set_cmd_queued(cmd);
+@@ -434,7 +495,7 @@
+ 	struct cmd *cmd = (struct cmd *) key;
+ 
+ 	/* TODO: sense in case of error. */
+-	tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
++	tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id,
+ 							cmd-&gt;len, result,
+ 							cmd-&gt;rw, cmd-&gt;uaddr,
+ 							cmd-&gt;tag);
+@@ -447,15 +508,22 @@
+ 	int enabled, result, async, len = 0;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	uint64_t offset;
++	int (* notify_fn)(uint64_t, int, int, int, uint64_t, uint64_t);
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+ 		enabled = cmd_enabled(q, cmd);
+ 		if (enabled) {
++			struct it_nexus *nexus;
++
++			nexus = it_nexus_lookup(cmd-&gt;cmd_nexus_id);
++			if (!nexus)
++				eprintf(&quot;BUG: %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;cmd_nexus_id);
++
+ 			list_del(&amp;cmd-&gt;qlist);
+ 			dprintf(&quot;perform %&quot; PRIx64 &quot; %x\n&quot;, cmd-&gt;tag, cmd-&gt;attribute);
+ 			result = scsi_cmd_perform(cmd-&gt;c_target-&gt;tid,
+ 						  cmd-&gt;c_target-&gt;lid,
+-						  cmd-&gt;hostno, cmd-&gt;scb,
++						  nexus-&gt;host_no, cmd-&gt;scb,
+ 						  &amp;len, cmd-&gt;len,
+ 						  (unsigned long *) &amp;cmd-&gt;uaddr,
+ 						  &amp;rw, &amp;mmapped, &amp;offset,
+@@ -466,13 +534,11 @@
+ 			cmd-&gt;rw = rw;
+ 			cmd_post_perform(q, cmd, cmd-&gt;uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+-			if (!async)
+-				tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
+-										len,
+-										result,
+-										rw,
+-										cmd-&gt;uaddr,
+-										cmd-&gt;tag);
++			if (!async) {
++				notify_fn = tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify;
++				notify_fn(cmd-&gt;cmd_nexus_id, len, result, rw,
++					  cmd-&gt;uaddr, cmd-&gt;tag);
++			}
+ 		} else
+ 			break;
+ 	}
+@@ -519,28 +585,29 @@
+ 	post_cmd_done(q);
+ }
+ 
+-void target_cmd_done(int host_no, uint64_t tag)
++void target_cmd_done(uint64_t nid, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct cmd *cmd;
+ 	struct mgmt_req *mreq;
+ 
+-	target = host_to_target(host_no);
++	target = target_lookup(NID2TID(nid));
+ 	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
++		eprintf(&quot;invalid nid %u %u\n&quot;, (int)NID2TID(nid),
++			(uint32_t)(nid &amp; NID_MASK));
+ 		return;
+ 	}
+ 
+ 	cmd = cmd_lookup(target, tag);
+ 	if (!cmd) {
+-		eprintf(&quot;Cannot find cmd %d %&quot; PRIx64 &quot;\n&quot;, host_no, tag);
++		eprintf(&quot;Cannot find cmd %d %&quot; PRIx64 &quot;\n&quot;, (int)NID2TID(nid), tag);
+ 		return;
+ 	}
+ 
+ 	mreq = cmd-&gt;mreq;
+ 	if (mreq &amp;&amp; !--mreq-&gt;busy) {
+ 		int err = mreq-&gt;function == ABORT_TASK ? -EEXIST : 0;
+-		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;mgmt_end_notify(cmd-&gt;hostno,
++		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;mgmt_end_notify(cmd-&gt;cmd_nexus_id,
+ 								 mreq-&gt;mid, err);
+ 		free(mreq);
+ 	}
+@@ -565,14 +632,14 @@
+ 		err = -EBUSY;
+ 	} else {
+ 		__cmd_done(target, cmd);
+-		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno, 0,
++		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id, 0,
+ 								TASK_ABORTED, 0, 0, cmd-&gt;tag);
+ 	}
+ 	return err;
+ }
+ 
+-static int abort_task_set(struct mgmt_req *mreq, struct target* target, int host_no,
+-			  uint64_t tag, uint8_t *lun, int all)
++static int abort_task_set(struct mgmt_req *mreq, struct target* target,
++			  uint64_t nexus_id, uint64_t tag, uint8_t *lun, int all)
+ {
+ 	struct cmd *cmd, *tmp;
+ 	int i, err, count = 0;
+@@ -582,8 +649,8 @@
+ 	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hash_list); i++) {
+ 		struct list_head *list = &amp;target-&gt;cmd_hash_list[i];
+ 		list_for_each_entry_safe(cmd, tmp, list, c_hlist) {
+-			if ((all &amp;&amp; cmd-&gt;hostno == host_no) ||
+-			    (cmd-&gt;tag == tag &amp;&amp; cmd-&gt;hostno == host_no) ||
++			if ((all &amp;&amp; cmd-&gt;cmd_nexus_id == nexus_id) ||
++			    (cmd-&gt;tag == tag &amp;&amp; cmd-&gt;cmd_nexus_id == nexus_id) ||
+ 			    (lun &amp;&amp; !memcmp(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun)))) {
+ 				err = abort_cmd(target, mreq, cmd);
+ 				if (err)
+@@ -596,16 +663,17 @@
+ 	return count;
+ }
+ 
+-void target_mgmt_request(int host_no, uint64_t req_id, int function,
++void target_mgmt_request(uint64_t nid, uint64_t req_id, int function,
+ 			 uint8_t *lun, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct mgmt_req *mreq;
+ 	int err = 0, count, send = 1;
+ 
+-	target = host_to_target(host_no);
++	target = target_lookup(NID2TID(nid));
+ 	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
++		eprintf(&quot;invalid nid %u %u\n&quot;, (int)NID2TID(nid),
++			(uint32_t)(nid &amp; NID_MASK));
+ 		return;
+ 	}
+ 
+@@ -617,14 +685,14 @@
+ 
+ 	switch (function) {
+ 	case ABORT_TASK:
+-		count = abort_task_set(mreq, target, host_no, tag, NULL, 0);
++		count = abort_task_set(mreq, target, nid, tag, NULL, 0);
+ 		if (mreq-&gt;busy)
+ 			send = 0;
+ 		if (!count)
+ 			err = -EEXIST;
+ 		break;
+ 	case ABORT_TASK_SET:
+-		count = abort_task_set(mreq, target, host_no, 0, NULL, 1);
++		count = abort_task_set(mreq, target, nid, 0, NULL, 1);
+ 		if (mreq-&gt;busy)
+ 			send = 0;
+ 		break;
+@@ -635,8 +703,8 @@
+ 		break;
+ 	case LOGICAL_UNIT_RESET:
+ 		device_release(target-&gt;tid, scsi_get_devid(target-&gt;lid, lun),
+-			       host_no, 1);
+-		count = abort_task_set(mreq, target, host_no, 0, lun, 0);
++			       nid, 1);
++		count = abort_task_set(mreq, target, nid, 0, lun, 0);
+ 		if (mreq-&gt;busy)
+ 			send = 0;
+ 		break;
+@@ -646,78 +714,11 @@
+ 	}
+ 
+ 	if (send) {
+-		tgt_drivers[target-&gt;lid]-&gt;mgmt_end_notify(host_no, req_id, err);
++		tgt_drivers[target-&gt;lid]-&gt;mgmt_end_notify(nid, req_id, err);
+ 		free(mreq);
+ 	}
+ }
+ 
+-static struct it_nexus *it_nexus_lookup(uint64_t nid)
+-{
+-	int32_t tid;
+-	int32_t nid32;
+-	struct target *target;
+-	struct it_nexus *nexus;
+-
+-	tid = nid &gt;&gt; TID_SHIFT;
+-
+-	target = target_lookup(tid);
+-	if (!target)
+-		return NULL;
+-
+-	nid32 = nid &amp; NID_MASK;
+-	list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
+-		if (nexus-&gt;nexus_id == nid32)
+-			return nexus;
+-	}
+-	return NULL;
+-}
+-
+-int it_nexus_create(int tid, char *info, uint64_t *rsp_nid)
+-{
+-	struct target *target;
+-	struct it_nexus *nexus;
+-	uint64_t nexus_id;
+-
+-	target = target_lookup(tid);
+-	if (!target)
+-		return -ENOENT;
+-
+-	for (nexus_id = 0; nexus_id &lt;= UINT32_MAX; nexus_id++) {
+-		nexus = it_nexus_lookup(NID64(tid, nexus_id));
+-		if (!nexus)
+-			goto found;
+-	}
+-
+-	eprintf(&quot;can't find free nexus id\n&quot;);
+-	return -EINVAL;
+-found:
+-	nexus = zalloc(sizeof(*nexus));
+-	if (!nexus)
+-		return -ENOMEM;
+-
+-	nexus-&gt;nexus_id = nexus_id;
+-	nexus-&gt;nexus_target = target;
+-	nexus-&gt;info = info;
+-
+-	list_add_tail(&amp;nexus-&gt;nexus_siblings, &amp;target-&gt;it_nexus_list);
+-	*rsp_nid = NID64(tid, nexus_id);
+-
+-	return 0;
+-}
+-
+-int it_nexus_destroy(uint64_t nid)
+-{
+-	struct it_nexus *nexus;
+-
+-	nexus = it_nexus_lookup(nid);
+-	if (nexus) {
+-		list_del(&amp;nexus-&gt;nexus_siblings);
+-		free(nexus);
+-		return 0;
+-	} else
+-		return -ENOENT;
+-}
+-
+ struct account_entry {
+ 	int aid;
+ 	char *user;
+@@ -996,24 +997,46 @@
+ 	return NULL;
+ }
+ 
+-int tgt_target_bind(int tid, int host_no, int lid)
++/* totally broken. kill this after done it_nexus kernel code */
++int it_nexus_to_host_no(uint64_t nid)
+ {
++	struct it_nexus *nexus;
++	nexus = it_nexus_lookup(nid);
++	return nexus-&gt;host_no;
++}
++
++uint64_t host_no_to_it_nexus(int host_no)
++{
+ 	struct target *target;
++	struct it_nexus *nexus;
+ 
+-	target = target_lookup(tid);
+-	if (!target) {
+-		eprintf(&quot;target is not found %d\n&quot;, tid);
+-		return TGTADM_NO_TARGET;
++	list_for_each_entry(target, &amp;target_list, target_siblings) {
++		list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
++			if (nexus-&gt;host_no == host_no)
++				return nexus-&gt;nexus_id;
++		}
+ 	}
++	return UINT64_MAX;
++}
+ 
+-	if (hostt[host_no]) {
+-		eprintf(&quot;host is already binded %d %d\n&quot;, tid, host_no);
++int tgt_target_bind(int tid, int host_no, int lid)
++{
++	int err;
++	uint64_t nexus_id;
++	struct it_nexus *nexus;
++
++	err = it_nexus_create(tid, NULL, &amp;nexus_id);
++	if (err) {
++		eprintf(&quot;fail to bind %d %d\n&quot;, tid, host_no);
+ 		return TGTADM_INVALID_REQUEST;
+ 	}
+ 
++	nexus = it_nexus_lookup(nexus_id);
++	nexus-&gt;host_no = host_no;
++
+ 	dprintf(&quot;Succeed to bind the target %d to the scsi host %d\n&quot;,
+ 		tid, host_no);
+-	hostt[host_no] = target;
++
+ 	return 0;
+ }
+ 
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/target.h	2007-01-06 16:41:10 UTC (rev 764)
+@@ -66,6 +66,9 @@
+ 	/* the list of i_t_nexus belonging to a target */
+ 	struct list_head nexus_siblings;
+ 
++	/* dirty hack for IBMVIO */
++	int host_no;
++
+ 	/* only used for show operation */
+ 	char *info;
+ };
+@@ -82,7 +85,7 @@
+ 	struct tgt_device *dev;
+ 	unsigned long state;
+ 
+-	int hostno;
++	uint64_t cmd_nexus_id;
+ 	uint32_t data_len;
+ 	uint8_t scb[16];
+ 	uint8_t lun[8];
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/tgtd.h	2007-01-06 16:41:10 UTC (rev 764)
+@@ -9,6 +9,7 @@
+ #define TID_SHIFT 32
+ #define NID_MASK ((1ULL &lt;&lt; TID_SHIFT) - 1)
+ #define NID64(tid, nid) ((uint64_t) tid &lt;&lt; TID_SHIFT | nid)
++#define NID2TID(nid) (nid &gt;&gt; TID_SHIFT)
+ 
+ #define TAB1 &quot;    &quot;
+ #define TAB2 TAB1 TAB1
+@@ -73,16 +74,16 @@
+ struct backedio_template sg_bdt;
+ #endif
+ 
+-extern int kspace_send_tsk_mgmt_res(int host_no, uint64_t mid, int result);
+-extern int kspace_send_cmd_res(int host_no, int len, int result,
++extern int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result);
++extern int kspace_send_cmd_res(uint64_t nid, int len, int result,
+ 			       int rw, uint64_t addr, uint64_t tag);
+ extern int ipc_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, char *args);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ extern int tgt_device_update(int tid, uint64_t dev_id, char *name);
+-extern int device_reserve(int tid, uint64_t lun, uint64_t reserve_id);
+-extern int device_release(int tid, uint64_t lun, uint64_t reserve_id, int force);
+-extern int device_reserved(int tid, uint64_t lun, uint64_t reserve_id);
++extern int device_reserve(uint64_t nid, uint64_t lun, uint64_t reserve_id);
++extern int device_release(uint64_t nid, uint64_t lun, uint64_t reserve_id, int force);
++extern int device_reserved(uint64_t nid, uint64_t lun, uint64_t reserve_id);
+ 
+ extern int tgt_target_create(int lld, int tid, char *args, int t_type, int bs_type);
+ extern int tgt_target_destroy(int tid);
+@@ -95,18 +96,18 @@
+ extern void tgt_event_del(int fd);
+ extern int tgt_event_modify(int fd, int events);
+ 
+-extern int target_cmd_queue(int host_no, uint8_t *scb, uint8_t rw,
++extern int target_cmd_queue(uint64_t nid, uint8_t *scb, uint8_t rw,
+ 			    unsigned long uaddr,
+ 			    uint8_t *lun, uint32_t data_len,
+ 			    int attribute, uint64_t tag);
+-extern void target_cmd_done(int host_no, uint64_t tag);
+-extern void target_mgmt_request(int host_no, uint64_t req_id, int function,
++extern void target_cmd_done(uint64_t nid, uint64_t tag);
++extern void target_mgmt_request(uint64_t nid, uint64_t req_id, int function,
+ 				uint8_t *lun, uint64_t tag);
+ 
+ extern void target_cmd_io_done(void *key, int result);
+ 
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+-extern int scsi_cmd_perform(int tid, int lid, int host_no, uint8_t *pdu, int *len,
++extern int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+ 			    struct tgt_device *dev, struct list_head *dev_list,
+@@ -132,4 +133,8 @@
+ extern int it_nexus_create(int tid, char *info, uint64_t *nid);
+ extern int it_nexus_destroy(uint64_t nid);
+ 
++/* crap. kill this after done it_nexus kernel code */
++extern int it_nexus_to_host_no(uint64_t nid);
++extern uint64_t host_no_to_it_nexus(int host_no);
++
+ #endif
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-01-06 14:28:45 UTC (rev 763)
++++ trunk/usr/tgtif.c	2007-01-06 16:41:10 UTC (rev 764)
+@@ -84,21 +84,21 @@
+ 	return 0;
+ }
+ 
+-int kspace_send_tsk_mgmt_res(int host_no, uint64_t mid, int result)
++int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result)
+ {
+ 	struct tgt_event ev;
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 
+ 	ev.hdr.type = TGT_UEVENT_TSK_MGMT_RSP;
+-	ev.p.tsk_mgmt_rsp.host_no = host_no;
++	ev.p.tsk_mgmt_rsp.host_no = it_nexus_to_host_no(nid);
+ 	ev.p.tsk_mgmt_rsp.mid = mid;
+ 	ev.p.tsk_mgmt_rsp.result = result;
+ 
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-int kspace_send_cmd_res(int host_no, int len, int result,
++int kspace_send_cmd_res(uint64_t nid, int len, int result,
+ 			int rw, uint64_t addr, uint64_t tag)
+ {
+ 	struct tgt_event ev;
+@@ -106,7 +106,7 @@
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+-	ev.p.cmd_rsp.host_no = host_no;
++	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+ 	ev.p.cmd_rsp.len = len;
+ 	ev.p.cmd_rsp.result = result;
+ 	ev.p.cmd_rsp.uaddr = addr;
+@@ -129,17 +129,19 @@
+ 
+ 	switch (ev-&gt;hdr.type) {
+ 	case TGT_KEVENT_CMD_REQ:
+-		target_cmd_queue(ev-&gt;p.cmd_req.host_no, ev-&gt;p.cmd_req.scb,
++		target_cmd_queue(host_no_to_it_nexus(ev-&gt;p.cmd_req.host_no),
++				 ev-&gt;p.cmd_req.scb,
+ 				 0, 0,
+ /* 				 ev-&gt;k.cmd_req.uaddr, */
+ 				 ev-&gt;p.cmd_req.lun, ev-&gt;p.cmd_req.data_len,
+ 				 ev-&gt;p.cmd_req.attribute, ev-&gt;p.cmd_req.tag);
+ 		break;
+ 	case TGT_KEVENT_CMD_DONE:
+-		target_cmd_done(ev-&gt;p.cmd_done.host_no, ev-&gt;p.cmd_done.tag);
++		target_cmd_done(host_no_to_it_nexus(ev-&gt;p.cmd_done.host_no),
++				ev-&gt;p.cmd_done.tag);
+ 		break;
+ 	case TGT_KEVENT_TSK_MGMT_REQ:
+-		target_mgmt_request(ev-&gt;p.cmd_req.host_no,
++		target_mgmt_request(host_no_to_it_nexus(ev-&gt;p.cmd_req.host_no),
+ 				    ev-&gt;p.tsk_mgmt_req.mid,
+ 				    ev-&gt;p.tsk_mgmt_req.function,
+ 				    ev-&gt;p.tsk_mgmt_req.lun,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000750.html">[Stgt-svn] r763 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000752.html">[Stgt-svn] r765 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#751">[ date ]</a>
+              <a href="thread.html#751">[ thread ]</a>
+              <a href="subject.html#751">[ subject ]</a>
+              <a href="author.html#751">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

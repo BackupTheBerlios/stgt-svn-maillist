@@ -1,0 +1,639 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r192 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r192%20-%20trunk/kernel&In-Reply-To=%3C200512010831.jB18VxsI015308%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000180.html">
+   <LINK REL="Next"  HREF="000182.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r192 - trunk/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r192%20-%20trunk/kernel&In-Reply-To=%3C200512010831.jB18VxsI015308%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r192 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Thu Dec  1 09:31:59 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000180.html">[Stgt-svn] r191 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000182.html">[Stgt-svn] r193 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#181">[ date ]</a>
+              <a href="thread.html#181">[ thread ]</a>
+              <a href="subject.html#181">[ subject ]</a>
+              <a href="author.html#181">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-12-01 09:31:50 +0100 (Thu, 01 Dec 2005)
+New Revision: 192
+
+Added:
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_priv.h
+Modified:
+   trunk/kernel/Makefile
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+Log:
+seperate netlink code
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2005-12-01 08:29:32 UTC (rev 191)
++++ trunk/kernel/Makefile	2005-12-01 08:31:50 UTC (rev 192)
+@@ -6,7 +6,7 @@
+ 
+ ifneq ($(KERNELRELEASE),)
+ obj-m		+= tgt_core.o
+-tgt_core-objs	:= tgt.o tgt_sysfs.o tgt_protocol.o
++tgt_core-objs	:= tgt.o tgt_nl.o tgt_sysfs.o tgt_protocol.o
+ 
+ obj-m		+= tgt_vsd.o tgt_scsi.o
+ #obj-m		+= tgt_vsd.o tgt_scsi.o tgt_sd.o
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-01 08:29:32 UTC (rev 191)
++++ trunk/kernel/tgt.c	2005-12-01 08:31:50 UTC (rev 192)
+@@ -12,11 +12,9 @@
+ #include &lt;linux/pagemap.h&gt;
+ #include &lt;linux/slab.h&gt;
+ #include &lt;linux/mempool.h&gt;
+-#include &lt;linux/netlink.h&gt;
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/file.h&gt;
+ #include &lt;asm/scatterlist.h&gt;
+-#include &lt;net/tcp.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
+@@ -24,6 +22,8 @@
+ #include &lt;tgt_if.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
++#include &quot;tgt_priv.h&quot;
++
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
+ static spinlock_t all_targets_lock;
+@@ -35,9 +35,6 @@
+ static spinlock_t device_tmpl_lock;
+ static LIST_HEAD(device_tmpl_list);
+ 
+-static int tgtd_pid;
+-static struct sock *nls;
+-
+ static struct target_type_internal *target_template_get(const char *name)
+ {
+ 	unsigned long flags;
+@@ -230,7 +227,7 @@
+ 	return err;
+ }
+ 
+-static struct tgt_target *target_find(int tid)
++struct tgt_target *target_find(int tid)
+ {
+ 	struct tgt_target *target;
+ 
+@@ -606,8 +603,8 @@
+ 	return 0;
+ }
+ 
+-static int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+-			     int fd, unsigned long dflags)
++int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
++		      int fd, unsigned long dflags)
+ {
+ 	struct tgt_target *target;
+ 	struct tgt_device *device;
+@@ -699,7 +696,7 @@
+ 	kfree(device);
+ }
+ 
+-static int tgt_device_destroy(int tid, uint64_t dev_id)
++int tgt_device_destroy(int tid, uint64_t dev_id)
+ {
+ 	struct tgt_device *device;
+ 	struct tgt_target *target;
+@@ -967,38 +964,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_start);
+ 
+-int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
+-{
+-	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+-	struct sk_buff *skb;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-	char *pdu;
+-	int len, proto_pdu_size = proto-&gt;uspace_pdu_size;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + proto_pdu_size);
+-	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), proto_pdu_size);
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
+-			  len - sizeof(*nlh), 0);
+-	ev = NLMSG_DATA(nlh);
+-	memset(ev, 0, sizeof(*ev));
+-
+-	pdu = (char *) ev-&gt;data;
+-	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+-	ev-&gt;k.cmd_req.dev_id = cmd-&gt;device ? cmd-&gt;dev_id : TGT_INVALID_DEV_ID;
+-	ev-&gt;k.cmd_req.cid = cmd-&gt;rq-&gt;tag;
+-	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+-
+-	proto-&gt;uspace_pdu_build(cmd, pdu);
+-
+-	return netlink_unicast(nls, skb, tgtd_pid, 0);
+-}
+-EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+-
+ static struct tgt_cmd *find_cmd_by_id(struct request_queue *q, uint64_t cid)
+ {
+ 
+@@ -1010,8 +975,8 @@
+ 	return NULL;
+ }
+ 
+-static int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
+-			   int result, uint32_t len)
++int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
++		    int result, uint32_t len)
+ {
+ 	struct tgt_target *target;
+ 	struct tgt_device *device;
+@@ -1082,159 +1047,9 @@
+ 	return 0;
+ }
+ 
+-static int send_event_res(uint16_t type, struct tgt_event *p,
+-			  void *data, int dlen, gfp_t flags)
+-{
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-	skb = alloc_skb(len, flags);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, type, len - sizeof(*nlh), 0);
+-
+-	ev = NLMSG_DATA(nlh);
+-	memcpy(ev, p, sizeof(*ev));
+-	if (dlen)
+-		memcpy(ev-&gt;data, data, dlen);
+-
+-	return netlink_unicast(nls, skb, tgtd_pid, 0);
+-}
+-
+-int tgt_msg_send(struct tgt_target *target, void *data, int dlen, gfp_t flags)
+-{
+-	struct tgt_event ev;
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.tgt_passthru.tid = target-&gt;tid;
+-	ev.k.tgt_passthru.typeid = target-&gt;typeid;
+-	ev.k.tgt_passthru.len = dlen;
+-
+-	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
+-			      &amp;ev, data, dlen, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_msg_send);
+-
+-static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+-{
+-	int err = 0;
+-	struct tgt_event *ev = NLMSG_DATA(nlh);
+-	struct tgt_target *target;
+-
+-	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
+-		nlh-&gt;nlmsg_pid, current-&gt;pid);
+-
+-	switch (nlh-&gt;nlmsg_type) {
+-	case TGT_UEVENT_START:
+-		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
+-		eprintk(&quot;start target drivers\n&quot;);
+-		break;
+-	case TGT_UEVENT_TARGET_CREATE:
+-		target = tgt_target_create(ev-&gt;u.c_target.type,
+-					   ev-&gt;u.c_target.nr_cmds);
+-		if (target)
+-			err = target-&gt;tid;
+-		else
+-			err = -EINVAL;
+-		break;
+-	case TGT_UEVENT_TARGET_DESTROY:
+-		target = target_find(ev-&gt;u.d_target.tid);
+-		if (target)
+-			err = tgt_target_destroy(target);
+-		else
+-			err = -EINVAL;
+-		break;
+-	case TGT_UEVENT_TARGET_PASSTHRU:
+-		target = target_find(ev-&gt;u.tgt_passthru.tid);
+-		if (!target || !target-&gt;tt-&gt;msg_recv) {
+-			dprintk(&quot;Could not find target %d for passthru\n&quot;,
+-				ev-&gt;u.tgt_passthru.tid);
+-			err = -EINVAL;
+-			break;
+-		}
+-
+-		err = target-&gt;tt-&gt;msg_recv(target, ev-&gt;u.tgt_passthru.len,
+-					   ev-&gt;data);
+-		break;
+-	case TGT_UEVENT_DEVICE_CREATE:
+-		err = tgt_device_create(ev-&gt;u.c_device.tid,
+-					ev-&gt;u.c_device.dev_id,
+-					ev-&gt;u.c_device.type,
+-					ev-&gt;u.c_device.fd,
+-					ev-&gt;u.c_device.flags);
+-		break;
+-	case TGT_UEVENT_DEVICE_DESTROY:
+-		err = tgt_device_destroy(ev-&gt;u.d_device.tid,
+-					 ev-&gt;u.d_device.dev_id);
+-		break;
+-	case TGT_UEVENT_CMD_RES:
+-		err = uspace_cmd_done(ev-&gt;u.cmd_res.tid, ev-&gt;u.cmd_res.dev_id,
+-				      ev-&gt;u.cmd_res.cid, ev-&gt;data,
+-				      ev-&gt;u.cmd_res.result, ev-&gt;u.cmd_res.len);
+-		break;
+-	default:
+-		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+-		err = -EINVAL;
+-	}
+-
+-	return err;
+-}
+-
+-static int event_recv_skb(struct sk_buff *skb)
+-{
+-	int err;
+-	uint32_t rlen;
+-	struct nlmsghdr	*nlh;
+-
+-	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+-		nlh = (struct nlmsghdr *) skb-&gt;data;
+-		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+-			return 0;
+-		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+-		if (rlen &gt; skb-&gt;len)
+-			rlen = skb-&gt;len;
+-		err = event_recv_msg(skb, nlh);
+-
+-		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+-		/*
+-		 * TODO for passthru commands the lower level should
+-		 * probably handle the result or we should modify this
+-		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
+-		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
+-			struct tgt_event ev;
+-
+-			memset(&amp;ev, 0, sizeof(ev));
+-			ev.k.event_res.err = err;
+-			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-				       GFP_KERNEL | __GFP_NOFAIL);
+-		}
+-		skb_pull(skb, rlen);
+-	}
+-	return 0;
+-}
+-
+-static void event_recv(struct sock *sk, int length)
+-{
+-	struct sk_buff *skb;
+-
+-	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
+-		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
+-			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
+-		else
+-			kfree_skb(skb);
+-	}
+-}
+-
+ static void __exit tgt_exit(void)
+ {
+-	if (nls)
+-		sock_release(nls-&gt;sk_socket);
+-
++	tgt_nl_exit();
+ 	tgt_sysfs_exit();
+ }
+ 
+@@ -1252,13 +1067,13 @@
+ 	if (err)
+ 		return err;
+ 
+-	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
+-	if (!nls)
++	err = tgt_nl_init();
++	if (err)
+ 		goto out;
+ 
+ 	return 0;
+ out:
+-	tgt_exit();
++	tgt_sysfs_exit();
+ 	return err;
+ }
+ 
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-12-01 08:29:32 UTC (rev 191)
++++ trunk/kernel/tgt.h	2005-12-01 08:31:50 UTC (rev 192)
+@@ -95,8 +95,6 @@
+ 				      void *priv);
+ extern int tgt_cmd_start(struct tgt_cmd *cmd);
+ extern void tgt_transfer_response(void *cmd);
+-extern int tgt_sysfs_init(void);
+-extern void tgt_sysfs_exit(void);
+ 
+ #define DEBUG_TGT
+ 
+
+Added: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2005-12-01 08:29:32 UTC (rev 191)
++++ trunk/kernel/tgt_nl.c	2005-12-01 08:31:50 UTC (rev 192)
+@@ -0,0 +1,214 @@
++/*
++ * Target Netlink Framework code
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;linux/netlink.h&gt;
++#include &lt;net/tcp.h&gt;
++
++#include &lt;tgt.h&gt;
++#include &lt;tgt_target.h&gt;
++#include &lt;tgt_device.h&gt;
++#include &lt;tgt_if.h&gt;
++#include &lt;tgt_protocol.h&gt;
++#include &quot;tgt_priv.h&quot;
++
++static int tgtd_pid;
++static struct sock *nls;
++
++int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
++{
++	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
++	struct sk_buff *skb;
++	struct nlmsghdr *nlh;
++	struct tgt_event *ev;
++	char *pdu;
++	int len, proto_pdu_size = proto-&gt;uspace_pdu_size;
++
++	len = NLMSG_SPACE(sizeof(*ev) + proto_pdu_size);
++	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
++	if (!skb)
++		return -ENOMEM;
++
++	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), proto_pdu_size);
++	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
++			  len - sizeof(*nlh), 0);
++	ev = NLMSG_DATA(nlh);
++	memset(ev, 0, sizeof(*ev));
++
++	pdu = (char *) ev-&gt;data;
++	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
++	ev-&gt;k.cmd_req.dev_id = cmd-&gt;device ? cmd-&gt;dev_id : TGT_INVALID_DEV_ID;
++	ev-&gt;k.cmd_req.cid = cmd-&gt;rq-&gt;tag;
++	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
++
++	proto-&gt;uspace_pdu_build(cmd, pdu);
++
++	return netlink_unicast(nls, skb, tgtd_pid, 0);
++}
++EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
++
++static int send_event_res(uint16_t type, struct tgt_event *p,
++			  void *data, int dlen, gfp_t flags)
++{
++	struct tgt_event *ev;
++	struct nlmsghdr *nlh;
++	struct sk_buff *skb;
++	uint32_t len;
++
++	len = NLMSG_SPACE(sizeof(*ev) + dlen);
++	skb = alloc_skb(len, flags);
++	if (!skb)
++		return -ENOMEM;
++
++	nlh = __nlmsg_put(skb, tgtd_pid, 0, type, len - sizeof(*nlh), 0);
++
++	ev = NLMSG_DATA(nlh);
++	memcpy(ev, p, sizeof(*ev));
++	if (dlen)
++		memcpy(ev-&gt;data, data, dlen);
++
++	return netlink_unicast(nls, skb, tgtd_pid, 0);
++}
++
++int tgt_msg_send(struct tgt_target *target, void *data, int dlen, gfp_t flags)
++{
++	struct tgt_event ev;
++
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.tgt_passthru.tid = target-&gt;tid;
++	ev.k.tgt_passthru.typeid = target-&gt;typeid;
++	ev.k.tgt_passthru.len = dlen;
++
++	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
++			      &amp;ev, data, dlen, flags);
++}
++EXPORT_SYMBOL_GPL(tgt_msg_send);
++
++static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
++{
++	int err = 0;
++	struct tgt_event *ev = NLMSG_DATA(nlh);
++	struct tgt_target *target;
++
++	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
++		nlh-&gt;nlmsg_pid, current-&gt;pid);
++
++	switch (nlh-&gt;nlmsg_type) {
++	case TGT_UEVENT_START:
++		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
++		eprintk(&quot;start target drivers\n&quot;);
++		break;
++	case TGT_UEVENT_TARGET_CREATE:
++		target = tgt_target_create(ev-&gt;u.c_target.type,
++					   ev-&gt;u.c_target.nr_cmds);
++		if (target)
++			err = target-&gt;tid;
++		else
++			err = -EINVAL;
++		break;
++	case TGT_UEVENT_TARGET_DESTROY:
++		target = target_find(ev-&gt;u.d_target.tid);
++		if (target)
++			err = tgt_target_destroy(target);
++		else
++			err = -EINVAL;
++		break;
++	case TGT_UEVENT_TARGET_PASSTHRU:
++		target = target_find(ev-&gt;u.tgt_passthru.tid);
++		if (!target || !target-&gt;tt-&gt;msg_recv) {
++			dprintk(&quot;Could not find target %d for passthru\n&quot;,
++				ev-&gt;u.tgt_passthru.tid);
++			err = -EINVAL;
++			break;
++		}
++
++		err = target-&gt;tt-&gt;msg_recv(target, ev-&gt;u.tgt_passthru.len,
++					   ev-&gt;data);
++		break;
++	case TGT_UEVENT_DEVICE_CREATE:
++		err = tgt_device_create(ev-&gt;u.c_device.tid,
++					ev-&gt;u.c_device.dev_id,
++					ev-&gt;u.c_device.type,
++					ev-&gt;u.c_device.fd,
++					ev-&gt;u.c_device.flags);
++		break;
++	case TGT_UEVENT_DEVICE_DESTROY:
++		err = tgt_device_destroy(ev-&gt;u.d_device.tid,
++					 ev-&gt;u.d_device.dev_id);
++		break;
++	case TGT_UEVENT_CMD_RES:
++		err = uspace_cmd_done(ev-&gt;u.cmd_res.tid, ev-&gt;u.cmd_res.dev_id,
++				      ev-&gt;u.cmd_res.cid, ev-&gt;data,
++				      ev-&gt;u.cmd_res.result, ev-&gt;u.cmd_res.len);
++		break;
++	default:
++		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
++		err = -EINVAL;
++	}
++
++	return err;
++}
++
++static int event_recv_skb(struct sk_buff *skb)
++{
++	int err;
++	uint32_t rlen;
++	struct nlmsghdr	*nlh;
++
++	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
++		nlh = (struct nlmsghdr *) skb-&gt;data;
++		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
++			return 0;
++		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
++		if (rlen &gt; skb-&gt;len)
++			rlen = skb-&gt;len;
++		err = event_recv_msg(skb, nlh);
++
++		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
++		/*
++		 * TODO for passthru commands the lower level should
++		 * probably handle the result or we should modify this
++		 */
++		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
++		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
++			struct tgt_event ev;
++
++			memset(&amp;ev, 0, sizeof(ev));
++			ev.k.event_res.err = err;
++			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
++				       GFP_KERNEL | __GFP_NOFAIL);
++		}
++		skb_pull(skb, rlen);
++	}
++	return 0;
++}
++
++static void event_recv(struct sock *sk, int length)
++{
++	struct sk_buff *skb;
++
++	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
++		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
++			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
++		else
++			kfree_skb(skb);
++	}
++}
++
++void __exit tgt_nl_exit(void)
++{
++	sock_release(nls-&gt;sk_socket);
++}
++
++int __init tgt_nl_init(void)
++{
++	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
++	if (!nls)
++		return -ENOMEM;
++
++	return 0;
++}
+
+Added: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2005-12-01 08:29:32 UTC (rev 191)
++++ trunk/kernel/tgt_priv.h	2005-12-01 08:31:50 UTC (rev 192)
+@@ -0,0 +1,17 @@
++#ifndef _TGT_PRIV_H
++#define _TGT_PRIV_H
++
++struct tgt_target;
++
++extern struct tgt_target *target_find(int tid);
++extern int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
++			     int fd, unsigned long dflags);
++extern int tgt_device_destroy(int tid, uint64_t dev_id);
++extern int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
++			   int result, uint32_t len);
++extern void tgt_nl_exit(void);
++extern int tgt_nl_init(void);
++extern int tgt_sysfs_init(void);
++extern void tgt_sysfs_exit(void);
++
++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000180.html">[Stgt-svn] r191 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000182.html">[Stgt-svn] r193 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#181">[ date ]</a>
+              <a href="thread.html#181">[ thread ]</a>
+              <a href="subject.html#181">[ subject ]</a>
+              <a href="author.html#181">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,172 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r555 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r555%20-%20trunk/usr&In-Reply-To=%3C200608290032.k7T0WEIp007625%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000541.html">
+   <LINK REL="Next"  HREF="000543.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r555 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r555%20-%20trunk/usr&In-Reply-To=%3C200608290032.k7T0WEIp007625%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r555 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Aug 29 02:32:14 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000541.html">[Stgt-svn] r554 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000543.html">[Stgt-svn] r556 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#542">[ date ]</a>
+              <a href="thread.html#542">[ thread ]</a>
+              <a href="subject.html#542">[ subject ]</a>
+              <a href="author.html#542">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-29 02:32:10 +0200 (Tue, 29 Aug 2006)
+New Revision: 555
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/target.h
+Log:
+Add target structure to cmd structure.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-28 23:35:01 UTC (rev 554)
++++ trunk/usr/target.c	2006-08-29 00:32:10 UTC (rev 555)
+@@ -269,6 +269,7 @@
+ 		eprintf(&quot;out of memory&quot;);
+ 		return -ENOMEM;
+ 	}
++	cmd-&gt;c_target = target;
+ 	cmd-&gt;hostno = host_no;
+ 	cmd-&gt;attribute = attribute;
+ 	cmd-&gt;tag = tag;
+@@ -323,19 +324,13 @@
+ 	uint8_t rw = 0, mmapped = 0;
+ 	uint64_t offset;
+ 	unsigned long uaddr = 0;
+-	struct target *target;
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+ 		enabled = cmd_enabled(q, cmd);
+ 		if (enabled) {
+ 			list_del(&amp;cmd-&gt;qlist);
+-			target = host_to_target(cmd-&gt;hostno);
+-			if (!target) {
+-				eprintf(&quot;fail to find target!\n&quot;);
+-				exit(1);
+-			}
+ 			dprintf(&quot;perform %&quot; PRIx64 &quot; %x\n&quot;, cmd-&gt;tag, cmd-&gt;attribute);
+-			result = scsi_cmd_perform(target-&gt;lid,
++			result = scsi_cmd_perform(cmd-&gt;c_target-&gt;lid,
+ 						  cmd-&gt;hostno, cmd-&gt;scb,
+ 						  &amp;len,
+ 						  cmd-&gt;len,
+@@ -345,7 +340,7 @@
+ 						  &amp;offset,
+ 						  cmd-&gt;lun,
+ 						  cmd-&gt;dev,
+-						  &amp;target-&gt;device_list);
++						  &amp;cmd-&gt;c_target-&gt;device_list);
+ 			cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+ 			cmd-&gt;cmd_end_func(cmd-&gt;hostno, len, result, rw,
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-08-28 23:35:01 UTC (rev 554)
++++ trunk/usr/target.h	2006-08-29 00:32:10 UTC (rev 555)
+@@ -21,7 +21,22 @@
+ 	mgmt_end_t *mgmt_end_func;
+ };
+ 
++struct target {
++	int tid;
++	int lid;
++
++	struct list_head t_hlist;
++
++	struct list_head device_hash_list[1 &lt;&lt; HASH_ORDER];
++	struct list_head device_list; /* for REPORT_LUNS */
++
++	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
++
++	struct tgt_cmd_queue cmd_queue;
++};
++
+ struct cmd {
++	struct target *c_target;
+ 	/* linked target-&gt;cmd_hash_list */
+ 	struct list_head c_hlist;
+ 	struct list_head qlist;
+@@ -32,7 +47,6 @@
+ 	struct tgt_device *dev;
+ 	unsigned long state;
+ 
+-	/* Kill the followings when we use shared memory instead of netlink. */
+ 	int hostno;
+ 	uint32_t data_len;
+ 	uint8_t scb[16];
+@@ -43,20 +57,6 @@
+ 	cmd_end_t *cmd_end_func;
+ };
+ 
+-struct target {
+-	int tid;
+-	int lid;
+-
+-	struct list_head t_hlist;
+-
+-	struct list_head device_hash_list[1 &lt;&lt; HASH_ORDER];
+-	struct list_head device_list; /* for REPORT_LUNS */
+-
+-	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
+-
+-	struct tgt_cmd_queue cmd_queue;
+-};
+-
+ enum {
+ 	TGT_QUEUE_BLOCKED,
+ 	TGT_QUEUE_DELETED,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000541.html">[Stgt-svn] r554 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000543.html">[Stgt-svn] r556 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#542">[ date ]</a>
+              <a href="thread.html#542">[ thread ]</a>
+              <a href="subject.html#542">[ subject ]</a>
+              <a href="author.html#542">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

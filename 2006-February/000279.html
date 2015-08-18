@@ -1,0 +1,254 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r292 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r292%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602132242.k1DMgZTg015103%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000278.html">
+   <LINK REL="Next"  HREF="000280.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r292 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r292%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602132242.k1DMgZTg015103%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r292 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 13 23:42:35 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000278.html">[Stgt-svn] r291 - branches/use-scsi-ml/patchset
+</A></li>
+        <LI>Next message: <A HREF="000280.html">[Stgt-svn] r293 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#279">[ date ]</a>
+              <a href="thread.html#279">[ thread ]</a>
+              <a href="subject.html#279">[ subject ]</a>
+              <a href="author.html#279">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-13 23:42:34 +0100 (Mon, 13 Feb 2006)
+New Revision: 292
+
+Modified:
+   branches/use-scsi-ml/usr/dl.c
+   branches/use-scsi-ml/usr/mgmt.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtadm.c
+   branches/use-scsi-ml/usr/tgtd.c
+Log:
+Clean up license in user-space code.
+
+
+Modified: branches/use-scsi-ml/usr/dl.c
+===================================================================
+--- branches/use-scsi-ml/usr/dl.c	2006-02-13 09:42:19 UTC (rev 291)
++++ branches/use-scsi-ml/usr/dl.c	2006-02-13 22:42:34 UTC (rev 292)
+@@ -1,12 +1,24 @@
+ /*
+- * LLD dynamic library
++ * SCSI target dynamic library
+  *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  *
+- * This code is licenced under the GPL.
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+ #include &lt;string.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;dlfcn.h&gt;
+
+Modified: branches/use-scsi-ml/usr/mgmt.c
+===================================================================
+--- branches/use-scsi-ml/usr/mgmt.c	2006-02-13 09:42:19 UTC (rev 291)
++++ branches/use-scsi-ml/usr/mgmt.c	2006-02-13 22:42:34 UTC (rev 292)
+@@ -1,11 +1,24 @@
+ /*
+  * SCSI target management functions
+  *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+ #include &lt;ctype.h&gt;
+ #include &lt;dirent.h&gt;
+ #include &lt;errno.h&gt;
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-13 09:42:19 UTC (rev 291)
++++ branches/use-scsi-ml/usr/target.c	2006-02-13 22:42:34 UTC (rev 292)
+@@ -1,11 +1,24 @@
+ /*
+- * SCSI target daemon
++ * SCSI target daemon core functions
+  *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;inttypes.h&gt;
+
+Modified: branches/use-scsi-ml/usr/tgtadm.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtadm.c	2006-02-13 09:42:19 UTC (rev 291)
++++ branches/use-scsi-ml/usr/tgtadm.c	2006-02-13 22:42:34 UTC (rev 292)
+@@ -1,16 +1,24 @@
+ /*
+- * tgtadm - manage Target Framework software.
++ * SCSI target daemon management interface
+  *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+-/*
+- * This is just taken from ietadm. Possibly, we need to redesign the
+- * greater part of this to handle every target driver.
+- */
+-
+ #include &lt;ctype.h&gt;
+ #include &lt;dirent.h&gt;
+ #include &lt;dlfcn.h&gt;
+
+Modified: branches/use-scsi-ml/usr/tgtd.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.c	2006-02-13 09:42:19 UTC (rev 291)
++++ branches/use-scsi-ml/usr/tgtd.c	2006-02-13 22:42:34 UTC (rev 292)
+@@ -1,11 +1,24 @@
+ /*
+- * SCSI target user-space daemon
++ * SCSI target daemon
+  *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000278.html">[Stgt-svn] r291 - branches/use-scsi-ml/patchset
+</A></li>
+	<LI>Next message: <A HREF="000280.html">[Stgt-svn] r293 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#279">[ date ]</a>
+              <a href="thread.html#279">[ thread ]</a>
+              <a href="subject.html#279">[ subject ]</a>
+              <a href="author.html#279">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,160 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r150 - in trunk: istgt/usr usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r150%20-%20in%20trunk%3A%20istgt/usr%20usr&In-Reply-To=%3C200511041449.jA4Enjpp008643%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000143.html">
+   <LINK REL="Next"  HREF="000145.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r150 - in trunk: istgt/usr usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r150%20-%20in%20trunk%3A%20istgt/usr%20usr&In-Reply-To=%3C200511041449.jA4Enjpp008643%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r150 - in trunk: istgt/usr usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Nov  4 15:49:45 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000143.html">[Stgt-svn] r149 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000145.html">[Stgt-svn] r151 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#144">[ date ]</a>
+              <a href="thread.html#144">[ thread ]</a>
+              <a href="subject.html#144">[ subject ]</a>
+              <a href="author.html#144">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-04 15:49:44 +0100 (Fri, 04 Nov 2005)
+New Revision: 150
+
+Modified:
+   trunk/istgt/usr/ctldev.c
+   trunk/usr/mgmt.c
+   trunk/usr/netlink.c
+   trunk/usr/tgtd.h
+Log:
+Change nl_cmd_call() interface to prevent the access of invalid memory
+address.
+
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2005-11-04 14:45:03 UTC (rev 149)
++++ trunk/istgt/usr/ctldev.c	2005-11-04 14:49:44 UTC (rev 150)
+@@ -38,7 +38,7 @@
+ 	struct iet_msg *msg;
+ 
+ 	err = nl_cmd_call(nl_fd, nlm_send-&gt;nlmsg_type,
+-			  (char *) nlm_send, len, rbuf);
++			  (char *) nlm_send, len, rbuf, sizeof(rbuf));
+ 
+ 	nlm_recv = (struct nlmsghdr *) rbuf;
+ 	ev = NLMSG_DATA(nlm_recv);
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2005-11-04 14:45:03 UTC (rev 149)
++++ trunk/usr/mgmt.c	2005-11-04 14:49:44 UTC (rev 150)
+@@ -60,7 +60,7 @@
+ 	func(ev, req);
+ 
+ 	err = nl_cmd_call(nl_fd, nlh-&gt;nlmsg_type, (char *) nlh,
+-			  nlh-&gt;nlmsg_len, nlm_rev);
++			  nlh-&gt;nlmsg_len, nlm_rev, sizeof(nlm_rev));
+ 	if (err &lt; 0)
+ 		eprintf(&quot;%d\n&quot;, err);
+ 	else
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-11-04 14:45:03 UTC (rev 149)
++++ trunk/usr/netlink.c	2005-11-04 14:49:44 UTC (rev 150)
+@@ -178,12 +178,12 @@
+ 	}
+ }
+ 
+-int nl_cmd_call(int fd, int type, char *data, int size, char *rbuf)
++int nl_cmd_call(int fd, int type, char *sbuf, int slen, char *rbuf, int rlen)
+ {
+ 	int err;
+ 	struct nlmsghdr *nlh;
+ 
+-	err = __nl_write(fd, type, data, size);
++	err = __nl_write(fd, type, sbuf, slen);
+ 	if (err &lt; 0)
+ 		return err;
+ 
+@@ -191,7 +191,12 @@
+ 
+ 	if (rbuf) {
+ 		nlh = (struct nlmsghdr *) recvbuf;
+-		memcpy(rbuf, nlh, nlh-&gt;nlmsg_len);
++		if (rlen &lt; nlh-&gt;nlmsg_len)
++			eprintf(&quot;Too small rbuf %d %d\n&quot;, rlen, nlh-&gt;nlmsg_len);
++		else
++			rlen = nlh-&gt;nlmsg_len;
++
++		memcpy(rbuf, nlh, rlen);
+ 	}
+ 
+ 	return err;
+@@ -204,7 +209,7 @@
+ 	char nlmsg[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 
+ 	err = nl_cmd_call(fd, TGT_UEVENT_START, nlmsg,
+-			  NLMSG_SPACE(sizeof(struct tgt_event)), NULL);
++			  NLMSG_SPACE(sizeof(struct tgt_event)), NULL, 0);
+ 
+ 	ev = (struct tgt_event *) NLMSG_DATA(nlmsg);
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2005-11-04 14:45:03 UTC (rev 149)
++++ trunk/usr/tgtd.h	2005-11-04 14:49:44 UTC (rev 150)
+@@ -7,7 +7,7 @@
+ 
+ extern int nl_open(void);
+ extern void nl_event_handle(int fd);
+-extern int nl_cmd_call(int fd, int type, char *data, int size, char *rbuf);
++extern int nl_cmd_call(int fd, int type, char *sbuf, int slen, char *rbuf, int rlen);
+ 
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000143.html">[Stgt-svn] r149 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000145.html">[Stgt-svn] r151 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#144">[ date ]</a>
+              <a href="thread.html#144">[ thread ]</a>
+              <a href="subject.html#144">[ subject ]</a>
+              <a href="author.html#144">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,201 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r37 - in trunk: kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r37%20-%20in%20trunk%3A%20kernel%20usr&In-Reply-To=%3C200509031352.j83DqX6N032401%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000029.html">
+   <LINK REL="Next"  HREF="000031.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r37 - in trunk: kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r37%20-%20in%20trunk%3A%20kernel%20usr&In-Reply-To=%3C200509031352.j83DqX6N032401%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r37 - in trunk: kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Sep  3 15:52:33 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000029.html">[Stgt-svn] r35 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000031.html">[Stgt-svn] r38 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#30">[ date ]</a>
+              <a href="thread.html#30">[ thread ]</a>
+              <a href="subject.html#30">[ subject ]</a>
+              <a href="author.html#30">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-03 15:52:32 +0200 (Sat, 03 Sep 2005)
+New Revision: 37
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/usr/scsi.c
+Log:
+Fix sense data bugs.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-03 10:36:39 UTC (rev 36)
++++ trunk/kernel/stgt.c	2005-09-03 13:52:32 UTC (rev 37)
+@@ -796,24 +796,25 @@
+ static int sense_data_build(struct stgt_cmnd *cmnd, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq)
+ {
+-	int i, len = 6;
+-	char *data;
++	int i, len = 8, alen = 6;
++	uint8_t *data;
+ 
+ 	/* It works, however, dirty. */
+ 	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+ 		__free_page(cmnd-&gt;sg[i].page);
+ 	kfree(cmnd-&gt;sg);
+ 
+-	__alloc_buffer(cmnd, len, 0);
++	__alloc_buffer(cmnd, len + alen, 0);
+ 	data = page_address(cmnd-&gt;sg[0].page);
++	clear_page(data);
+ 
+-	data[0] = 0xf0 | 1U &lt;&lt; 7;
++	data[0] = 0x70 | 1U &lt;&lt; 7;
+ 	data[2] = key;
+-	data[7] = len;
++	data[7] = alen;
+ 	data[12] = ascode;
+ 	data[13] = ascodeq;
+ 
+-	return len;
++	return len + alen;
+ }
+ 
+ /* TODO: better error handling
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-09-03 10:36:39 UTC (rev 36)
++++ trunk/usr/scsi.c	2005-09-03 13:52:32 UTC (rev 37)
+@@ -86,7 +86,7 @@
+ 	data[12] = ascode;
+ 	data[13] = ascodeq;
+ 
+-	return len;
++	return len + 8;
+ }
+ 
+ static int insert_disconnect_pg(uint8_t *ptr)
+@@ -157,7 +157,7 @@
+ 	uint64_t size;
+ 
+ 	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 					0x25, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+@@ -206,7 +206,7 @@
+ 		break;
+ 	default:
+ 		result = SAM_STAT_CHECK_CONDITION;
+-		*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+ 	}
+ 
+@@ -296,7 +296,7 @@
+ 	return SAM_STAT_GOOD;
+ 
+ err:
+-	*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++	*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 				0x24, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+@@ -319,7 +319,7 @@
+ 
+ 	alen = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+ 	if (alen &lt; 16) {
+-		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+ 		result = SAM_STAT_CHECK_CONDITION;
+ 		goto out;
+@@ -366,13 +366,13 @@
+ 	uint64_t size;
+ 
+ 	if (!(scb[8] &amp; 0x1) &amp; (scb[2] | scb[3] | scb[4] | scb[5])) {
+-		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+ 
+ 	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x25, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+@@ -392,7 +392,7 @@
+  */
+ static int request_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int* len)
+ {
+-	*len = sense_data_build(data, 0xf0, NO_SENSE, 0, 0);
++	*len = sense_data_build(data, 0x70, NO_SENSE, 0, 0);
+ 
+ 	return SAM_STAT_GOOD;
+ }
+@@ -403,7 +403,7 @@
+ 	uint64_t *data64, size;
+ 
+ 	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x25, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+@@ -431,7 +431,7 @@
+ 		case REPORT_LUNS:
+ 			break;
+ 		default:
+-			*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+ 			result = SAM_STAT_CHECK_CONDITION;
+ 			goto out;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000029.html">[Stgt-svn] r35 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000031.html">[Stgt-svn] r38 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#30">[ date ]</a>
+              <a href="thread.html#30">[ thread ]</a>
+              <a href="subject.html#30">[ subject ]</a>
+              <a href="author.html#30">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

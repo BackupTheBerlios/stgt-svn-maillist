@@ -1,0 +1,85 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r519 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r519%20-%20trunk/usr&In-Reply-To=%3C200608120423.k7C4NXoL008783%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000505.html">
+   <LINK REL="Next"  HREF="000507.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r519 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r519%20-%20trunk/usr&In-Reply-To=%3C200608120423.k7C4NXoL008783%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r519 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 12 06:23:33 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000505.html">[Stgt-svn] r518 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000507.html">[Stgt-svn] r520 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#506">[ date ]</a>
+              <a href="thread.html#506">[ thread ]</a>
+              <a href="subject.html#506">[ subject ]</a>
+              <a href="author.html#506">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-12 06:23:31 +0200 (Sat, 12 Aug 2006)
+New Revision: 519
+
+Modified:
+   trunk/usr/target.c
+Log:
+Make tgt_cmd_queue_init static.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-10 09:22:09 UTC (rev 518)
++++ trunk/usr/target.c	2006-08-12 04:23:31 UTC (rev 519)
+@@ -215,7 +215,7 @@
+ 	list_add(&amp;dev-&gt;dlist, pos);
+ }
+ 
+-void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
++static void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
+ {
+ 	q-&gt;active_cmd = 0;
+ 	q-&gt;state = 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000505.html">[Stgt-svn] r518 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000507.html">[Stgt-svn] r520 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#506">[ date ]</a>
+              <a href="thread.html#506">[ thread ]</a>
+              <a href="subject.html#506">[ subject ]</a>
+              <a href="author.html#506">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

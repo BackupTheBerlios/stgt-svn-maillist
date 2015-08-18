@@ -1,0 +1,780 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r504 - in trunk: . ibmvstgt usr usr/ibmvio usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r504%20-%20in%20trunk%3A%20.%20ibmvstgt%20usr%20usr/ibmvio%20usr/iscsi&In-Reply-To=%3C200607131027.k6DARrkO004171%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000490.html">
+   <LINK REL="Next"  HREF="000492.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r504 - in trunk: . ibmvstgt usr usr/ibmvio usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r504%20-%20in%20trunk%3A%20.%20ibmvstgt%20usr%20usr/ibmvio%20usr/iscsi&In-Reply-To=%3C200607131027.k6DARrkO004171%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r504 - in trunk: . ibmvstgt usr usr/ibmvio usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Jul 13 12:27:53 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000490.html">[Stgt-svn] r503 - in trunk: ibmvstgt usr
+</A></li>
+        <LI>Next message: <A HREF="000492.html">[Stgt-svn] r505 - trunk/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#491">[ date ]</a>
+              <a href="thread.html#491">[ thread ]</a>
+              <a href="subject.html#491">[ subject ]</a>
+              <a href="author.html#491">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-13 12:27:53 +0200 (Thu, 13 Jul 2006)
+New Revision: 504
+
+Added:
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/ibmvio/ibmvio.h
+Removed:
+   trunk/usr/ibmvio/libibmvstgt.c
+Modified:
+   trunk/Makefile
+   trunk/ibmvstgt/Makefile
+   trunk/usr/Makefile
+   trunk/usr/driver.c
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+Log:
+ibmvstgt is back.
+
+Modified: trunk/Makefile
+===================================================================
+--- trunk/Makefile	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/Makefile	2006-07-13 10:27:53 UTC (rev 504)
+@@ -1,9 +1,16 @@
+-#KERNELSRC := /usr/src/linux
++#
++# Need to use some magic to select what target drivers will be complied
++#
+ 
++IBMVIO=1
++ISCSI=1
++
+ ifeq ($(KERNELSRC),)
+ 	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+ endif
+ 
++export IBMVIO
++export ISCSI
+ export KERNELSRC
+ 
+ all:
+
+Modified: trunk/ibmvstgt/Makefile
+===================================================================
+--- trunk/ibmvstgt/Makefile	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/ibmvstgt/Makefile	2006-07-13 10:27:53 UTC (rev 504)
+@@ -1,17 +1,7 @@
+ SUBDIRS := $(shell pwd)
+ 
+-ifeq ($(KERNELSRC),)
+-	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+-endif
+-
+-all: mods libs
+-
+ mods:
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel modules
+ 
+-libs:
+-	$(MAKE) -C usr
+-
+ clean:
+-	$(MAKE) -C usr clean
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel clean
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/Makefile	2006-07-13 10:27:53 UTC (rev 504)
+@@ -1,8 +1,17 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE -DISCSI
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE
+ PROGRAMS = tgtd tgtadm
+ TGTD_OBJS = tgtd.o netlink.o mgmt.o target.o scsi.o log.o driver.o
++
++ifneq ($(IBMVIO),)
++CFLAGS += -DIBMVIO
++TGTD_OBJS += $(addprefix ibmvio/, ibmvio.o)
++endif
++
++ifneq ($(ISCSI),)
++CFLAGS += -DISCSI
+ TGTD_OBJS += $(addprefix iscsi/, istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o)
+ LIBS = -lcrypto
++endif
+ 
+ all: $(PROGRAMS)
+ 
+
+Modified: trunk/usr/driver.c
+===================================================================
+--- trunk/usr/driver.c	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/driver.c	2006-07-13 10:27:53 UTC (rev 504)
+@@ -6,26 +6,12 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;driver.h&quot;
+ 
+-#ifdef ISCSI
+-#include &quot;iscsi/iscsi.h&quot;
+-#endif
+-
+ #ifdef IBMVIO
+-struct tgt_driver ibmvio = {
+-	.name	= &quot;ibmvio&quot;,
+-};
++#include &quot;ibmvio/ibmvio.h&quot;
+ #endif
+ 
+ #ifdef ISCSI
+-struct tgt_driver iscsi = {
+-	.name		= &quot;iscsi&quot;,
+-	.init		= iscsi_init,
+-	.poll_init	= iscsi_poll_init,
+-	.event_handle	= iscsi_event_handle,
+-	.target_create	= iscsi_target_create,
+-	.target_destroy	= iscsi_target_destroy,
+-	.target_bind	= iscsi_target_bind,
+-};
++#include &quot;iscsi/iscsi.h&quot;
+ #endif
+ 
+ struct tgt_driver *tgt_drivers[] = {
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/driver.h	2006-07-13 10:27:53 UTC (rev 504)
+@@ -16,7 +16,6 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
+-
+ 	int npfd;
+ 	int enable;
+ 	int pfd_index;
+
+Copied: trunk/usr/ibmvio/ibmvio.c (from rev 503, trunk/usr/ibmvio/libibmvstgt.c)
+===================================================================
+--- trunk/usr/ibmvio/libibmvstgt.c	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/ibmvio/ibmvio.c	2006-07-13 10:27:53 UTC (rev 504)
+@@ -0,0 +1,266 @@
++/*
++ * SCSI command processing specific to IBM Virtual SCSI target Driver
++ *
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ *
++ * Based on:
++ *
++ * IBM eServer i/pSeries Virtual SCSI Target Driver
++ * Copyright (C) 2003-2005 Dave Boutcher (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">boutcher at us.ibm.com</A>) IBM Corp.
++ *			   Santiago Leon (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">santil at us.ibm.com</A>) IBM Corp.
++ *			   Linda Xie (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">lxie at us.ibm.com</A>) IBM Corp.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;syscall.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;asm/byteorder.h&gt;
++#include &lt;linux/fs.h&gt;
++#include &lt;scsi/scsi.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
++#include &lt;sys/mman.h&gt;
++
++#include &quot;tgtd.h&quot;
++
++#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
++#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
++#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
++
++struct inquiry_data {
++	uint8_t qual_type;
++	uint8_t rmb_reserve;
++	uint8_t version;
++	uint8_t aerc_naca_hisup_format;
++	uint8_t addl_len;
++	uint8_t sccs_reserved;
++	uint8_t bque_encserv_vs_multip_mchngr_reserved;
++	uint8_t reladr_reserved_linked_cmdqueue_vs;
++	char vendor[8];
++	char product[16];
++	char revision[4];
++	char vendor_specific[20];
++	char reserved1[2];
++	char version_descriptor[16];
++	char reserved2[22];
++	char unique[158];
++};
++
++#define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
++
++static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
++{
++	struct inquiry_data *id = (struct inquiry_data *) data;
++	char system_id[256], path[256], buf[32];
++	int fd, err, partition_number;
++	unsigned int unit_address;
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
++	fd = open(path, O_RDONLY);
++	memset(system_id, 0, sizeof(system_id));
++	err = read(fd, system_id, sizeof(system_id));
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/partition_number&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	partition_number = strtoul(buf, NULL, 10);
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/unit_address&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	unit_address = strtoul(buf, NULL, 0);
++	close(fd);
++
++	dprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
++		host_no, system_id, partition_number, unit_address, lun);
++
++	id-&gt;qual_type = TYPE_DISK;
++	id-&gt;rmb_reserve = 0x00;
++	id-&gt;version = 0x84;	/* ISO/IE		  */
++	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
++	id-&gt;addl_len = sizeof(*id) - 4;
++	id-&gt;bque_encserv_vs_multip_mchngr_reserved = 0x00;
++	id-&gt;reladr_reserved_linked_cmdqueue_vs = 0x02;/*CMDQ*/
++	memcpy(id-&gt;vendor, &quot;IBM	    &quot;, 8);
++	/* Don't even ask about the next bit.  AIX uses
++	 * hardcoded device naming to recognize device types
++	 * and their client won't  work unless we use VOPTA and
++	 * VDASD.
++	 */
++	memcpy(id-&gt;product, &quot;VDASD blkdev    &quot;, 16);
++	memcpy(id-&gt;revision, &quot;0001&quot;, 4);
++	snprintf(id-&gt;unique,sizeof(id-&gt;unique),
++		 &quot;IBM-VSCSI-%s-P%d-%x-%d-%d-%d\n&quot;,
++		 system_id,
++		 partition_number,
++		 unit_address,
++		 GETBUS(lun),
++		 GETTARGET(lun),
++		 GETLUN(lun));
++
++	return sizeof(*id);
++}
++
++int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
++		 uint8_t *scb, uint8_t *data, int *len)
++{
++	int result = SAM_STAT_CHECK_CONDITION;
++
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto err;
++
++	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
++
++	if (!(scb[1] &amp; 0x3)) {
++		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
++		result = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x2) {
++		/* CmdDt bit is set */
++		/* We do not support it now. */
++		data[1] = 0x1;
++		data[5] = 0;
++		*len = 6;
++		result = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x1) {
++		/* EVPD bit set */
++		if (scb[2] == 0x0) {
++			data[1] = 0x0;
++			data[3] = 3;
++			data[4] = 0x0;
++			data[5] = 0x80;
++			data[6] = 0x83;
++			*len = 7;
++			result = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x80) {
++			data[1] = 0x80;
++			data[3] = 4;
++			memset(data + 4, 0x20, 4);
++			*len = 8;
++			result = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x83) {
++			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
++
++			data[1] = 0x83;
++			data[3] = tmp + 4;
++			data[4] = 0x1;
++			data[5] = 0x1;
++			data[7] = tmp;
++			if (dev)
++				strncpy(data + 8, dev-&gt;scsi_id, SCSI_ID_LEN);
++			*len = tmp + 8;
++			result = SAM_STAT_GOOD;
++		}
++	}
++
++	if (result != SAM_STAT_GOOD)
++		goto err;
++
++	*len = min_t(int, *len, scb[4]);
++
++	if (!dev)
++		data[0] = TYPE_NO_LUN;
++
++	return SAM_STAT_GOOD;
++
++err:
++	*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
++				0x24, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static uint64_t make_lun(unsigned int bus, unsigned int target, unsigned int lun)
++{
++	uint16_t result = (0x8000 |
++			   ((target &amp; 0x003f) &lt;&lt; 8) |
++			   ((bus &amp; 0x0007) &lt;&lt; 5) |
++			   (lun &amp; 0x001f));
++	return ((uint64_t) result) &lt;&lt; 48;
++}
++
++int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
++		     uint8_t *scb, uint8_t *p, int *len)
++{
++	struct tgt_device *dev;
++	uint64_t lun, *data = (uint64_t *) p;
++	int idx, alen, oalen, nr_luns, rbuflen = 4096;
++	int result = SAM_STAT_GOOD;
++
++	memset(data, 0, rbuflen);
++
++	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	if (alen &lt; 16) {
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
++					0x24, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++
++	alen &amp;= ~(8 - 1);
++	oalen = alen;
++
++	if ((*((uint64_t *) lun_buf))) {
++		nr_luns = 1;
++		goto done;
++	}
++
++	alen -= 8;
++	rbuflen -= 8; /* FIXME */
++	idx = 2;
++	nr_luns = 1;
++
++	list_for_each_entry(dev, dev_list, dlist) {
++		lun = dev-&gt;lun;
++		lun = make_lun(0, lun &amp; 0x003f, 0);
++		data[idx++] = __cpu_to_be64(lun);
++		if (!(alen -= 8))
++			break;
++		if (!(rbuflen -= 8)) {
++			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
++			exit(-1);
++		}
++		nr_luns++;
++	}
++
++done:
++	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
++	*len = min(oalen, nr_luns * 8 + 8);
++
++	return result;
++}
++
++#define        TGT_INVALID_DEV_ID      ~0ULL
++
++uint64_t scsi_lun_to_int(uint8_t *p)
++{
++	uint64_t lun = TGT_INVALID_DEV_ID;
++
++	lun = *((uint64_t *) p);
++	dprintf(&quot;%&quot; PRIx64 &quot; %u %u %u\n&quot;, lun, GETTARGET(lun), GETBUS(lun), GETLUN(lun));
++
++	if (GETBUS(lun) || GETLUN(lun))
++		return TGT_INVALID_DEV_ID;
++	else
++		return GETTARGET(lun);
++}
+
+Added: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/ibmvio/ibmvio.h	2006-07-13 10:27:53 UTC (rev 504)
+@@ -0,0 +1,13 @@
++extern int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
++			uint8_t *scb, uint8_t *data, int *len);
++extern int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
++			    uint8_t *scb, uint8_t *p, int *len);
++
++extern uint64_t scsi_lun_to_int(uint8_t *p);
++
++struct tgt_driver ibmvio = {
++	.name			= &quot;ibmvio&quot;,
++	.scsi_get_lun		= scsi_lun_to_int,
++	.scsi_report_luns	= scsi_report_luns,
++	.scsi_inquiry		= scsi_inquiry,
++};
+
+Deleted: trunk/usr/ibmvio/libibmvstgt.c
+===================================================================
+--- trunk/usr/ibmvio/libibmvstgt.c	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/ibmvio/libibmvstgt.c	2006-07-13 10:27:53 UTC (rev 504)
+@@ -1,267 +0,0 @@
+-/*
+- * SCSI command processing specific to IBM Virtual SCSI target Driver
+- *
+- * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- *
+- * Based on:
+- *
+- * IBM eServer i/pSeries Virtual SCSI Target Driver
+- * Copyright (C) 2003-2005 Dave Boutcher (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">boutcher at us.ibm.com</A>) IBM Corp.
+- *			   Santiago Leon (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">santil at us.ibm.com</A>) IBM Corp.
+- *			   Linda Xie (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">lxie at us.ibm.com</A>) IBM Corp.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+- * USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;stdint.h&gt;
+-#include &lt;syscall.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;asm/byteorder.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+-#include &lt;scsi/scsi_tgt_if.h&gt;
+-#include &lt;sys/mman.h&gt;
+-
+-#include &quot;tgtd.h&quot;
+-
+-#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+-#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+-#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
+-
+-struct inquiry_data {
+-	uint8_t qual_type;
+-	uint8_t rmb_reserve;
+-	uint8_t version;
+-	uint8_t aerc_naca_hisup_format;
+-	uint8_t addl_len;
+-	uint8_t sccs_reserved;
+-	uint8_t bque_encserv_vs_multip_mchngr_reserved;
+-	uint8_t reladr_reserved_linked_cmdqueue_vs;
+-	char vendor[8];
+-	char product[16];
+-	char revision[4];
+-	char vendor_specific[20];
+-	char reserved1[2];
+-	char version_descriptor[16];
+-	char reserved2[22];
+-	char unique[158];
+-};
+-
+-#define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
+-
+-static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
+-{
+-	struct inquiry_data *id = (struct inquiry_data *) data;
+-	char system_id[256], path[256], buf[32];
+-	int fd, err, partition_number;
+-	unsigned int unit_address;
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
+-	fd = open(path, O_RDONLY);
+-	memset(system_id, 0, sizeof(system_id));
+-	err = read(fd, system_id, sizeof(system_id));
+-	close(fd);
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/partition_number&quot;,
+-		 host_no);
+-	fd = open(path, O_RDONLY);
+-	err = read(fd, buf, sizeof(buf));
+-	partition_number = strtoul(buf, NULL, 10);
+-	close(fd);
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/unit_address&quot;,
+-		 host_no);
+-	fd = open(path, O_RDONLY);
+-	err = read(fd, buf, sizeof(buf));
+-	unit_address = strtoul(buf, NULL, 0);
+-	close(fd);
+-
+-	dprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
+-		host_no, system_id, partition_number, unit_address, lun);
+-
+-	id-&gt;qual_type = TYPE_DISK;
+-	id-&gt;rmb_reserve = 0x00;
+-	id-&gt;version = 0x84;	/* ISO/IE		  */
+-	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
+-	id-&gt;addl_len = sizeof(*id) - 4;
+-	id-&gt;bque_encserv_vs_multip_mchngr_reserved = 0x00;
+-	id-&gt;reladr_reserved_linked_cmdqueue_vs = 0x02;/*CMDQ*/
+-	memcpy(id-&gt;vendor, &quot;IBM	    &quot;, 8);
+-	/* Don't even ask about the next bit.  AIX uses
+-	 * hardcoded device naming to recognize device types
+-	 * and their client won't  work unless we use VOPTA and
+-	 * VDASD.
+-	 */
+-	memcpy(id-&gt;product, &quot;VDASD blkdev    &quot;, 16);
+-	memcpy(id-&gt;revision, &quot;0001&quot;, 4);
+-	snprintf(id-&gt;unique,sizeof(id-&gt;unique),
+-		 &quot;IBM-VSCSI-%s-P%d-%x-%d-%d-%d\n&quot;,
+-		 system_id,
+-		 partition_number,
+-		 unit_address,
+-		 GETBUS(lun),
+-		 GETTARGET(lun),
+-		 GETLUN(lun));
+-
+-	return sizeof(*id);
+-}
+-
+-int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+-		 uint8_t *scb, uint8_t *data, int *len)
+-{
+-	int result = SAM_STAT_CHECK_CONDITION;
+-
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto err;
+-
+-	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+-
+-	if (!(scb[1] &amp; 0x3)) {
+-		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
+-		result = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x2) {
+-		/* CmdDt bit is set */
+-		/* We do not support it now. */
+-		data[1] = 0x1;
+-		data[5] = 0;
+-		*len = 6;
+-		result = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x1) {
+-		/* EVPD bit set */
+-		if (scb[2] == 0x0) {
+-			data[1] = 0x0;
+-			data[3] = 3;
+-			data[4] = 0x0;
+-			data[5] = 0x80;
+-			data[6] = 0x83;
+-			*len = 7;
+-			result = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x80) {
+-			data[1] = 0x80;
+-			data[3] = 4;
+-			memset(data + 4, 0x20, 4);
+-			*len = 8;
+-			result = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x83) {
+-			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
+-
+-			data[1] = 0x83;
+-			data[3] = tmp + 4;
+-			data[4] = 0x1;
+-			data[5] = 0x1;
+-			data[7] = tmp;
+-			if (dev)
+-				strncpy(data + 8, dev-&gt;scsi_id, SCSI_ID_LEN);
+-			*len = tmp + 8;
+-			result = SAM_STAT_GOOD;
+-		}
+-	}
+-
+-	if (result != SAM_STAT_GOOD)
+-		goto err;
+-
+-	*len = min_t(int, *len, scb[4]);
+-
+-	if (!dev)
+-		data[0] = TYPE_NO_LUN;
+-
+-	return SAM_STAT_GOOD;
+-
+-err:
+-	*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+-				0x24, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static uint64_t make_lun(unsigned int bus, unsigned int target, unsigned int lun)
+-{
+-	uint16_t result = (0x8000 |
+-			   ((target &amp; 0x003f) &lt;&lt; 8) |
+-			   ((bus &amp; 0x0007) &lt;&lt; 5) |
+-			   (lun &amp; 0x001f));
+-	return ((uint64_t) result) &lt;&lt; 48;
+-}
+-
+-int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
+-		     uint8_t *scb, uint8_t *p, int *len)
+-{
+-	struct tgt_device *dev;
+-	uint64_t lun, *data = (uint64_t *) p;
+-	int idx, alen, oalen, nr_luns, rbuflen = 4096;
+-	int result = SAM_STAT_GOOD;
+-
+-	memset(data, 0, rbuflen);
+-
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+-	if (alen &lt; 16) {
+-		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+-					0x24, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-
+-	alen &amp;= ~(8 - 1);
+-	oalen = alen;
+-
+-	if ((*((uint64_t *) lun_buf))) {
+-		nr_luns = 1;
+-		goto done;
+-	}
+-
+-	alen -= 8;
+-	rbuflen -= 8; /* FIXME */
+-	idx = 2;
+-	nr_luns = 1;
+-
+-	list_for_each_entry(dev, dev_list, dlist) {
+-		lun = dev-&gt;lun;
+-		lun = make_lun(0, lun &amp; 0x003f, 0);
+-		data[idx++] = __cpu_to_be64(lun);
+-		if (!(alen -= 8))
+-			break;
+-		if (!(rbuflen -= 8)) {
+-			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
+-			exit(-1);
+-		}
+-		nr_luns++;
+-	}
+-
+-done:
+-	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+-	*len = min(oalen, nr_luns * 8 + 8);
+-
+-	return result;
+-}
+-
+-#define        TGT_INVALID_DEV_ID      ~0ULL
+-
+-uint64_t scsi_lun_to_int(uint8_t *p)
+-{
+-	uint64_t lun = TGT_INVALID_DEV_ID;
+-
+-	lun = *((uint64_t *) p);
+-	dprintf(&quot;%&quot; PRIx64 &quot; %u %u %u\n&quot;, lun, GETTARGET(lun), GETBUS(lun), GETLUN(lun));
+-
+-	if (GETBUS(lun) || GETLUN(lun))
+-		return TGT_INVALID_DEV_ID;
+-	else
+-		return GETTARGET(lun);
+-}
+-
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-07-12 17:25:03 UTC (rev 503)
++++ trunk/usr/iscsi/iscsi.h	2006-07-13 10:27:53 UTC (rev 504)
+@@ -4,3 +4,13 @@
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
+ extern int iscsi_target_bind(int);
++
++struct tgt_driver iscsi = {
++	.name		= &quot;iscsi&quot;,
++	.init		= iscsi_init,
++	.poll_init	= iscsi_poll_init,
++	.event_handle	= iscsi_event_handle,
++	.target_create	= iscsi_target_create,
++	.target_destroy	= iscsi_target_destroy,
++	.target_bind	= iscsi_target_bind,
++};
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000490.html">[Stgt-svn] r503 - in trunk: ibmvstgt usr
+</A></li>
+	<LI>Next message: <A HREF="000492.html">[Stgt-svn] r505 - trunk/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#491">[ date ]</a>
+              <a href="thread.html#491">[ thread ]</a>
+              <a href="subject.html#491">[ subject ]</a>
+              <a href="author.html#491">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

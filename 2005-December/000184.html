@@ -1,0 +1,127 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r195 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r195%20-%20trunk/istgt/kernel&In-Reply-To=%3C200512011256.jB1Cu5Wn023113%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000183.html">
+   <LINK REL="Next"  HREF="000185.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r195 - trunk/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r195%20-%20trunk/istgt/kernel&In-Reply-To=%3C200512011256.jB1Cu5Wn023113%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r195 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Dec  1 13:56:05 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000183.html">[Stgt-svn] r194 - trunk/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000185.html">[Stgt-svn] r196 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#184">[ date ]</a>
+              <a href="thread.html#184">[ thread ]</a>
+              <a href="subject.html#184">[ subject ]</a>
+              <a href="author.html#184">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-01 13:56:00 +0100 (Thu, 01 Dec 2005)
+New Revision: 195
+
+Modified:
+   trunk/istgt/kernel/session.c
+Log:
+istgt uses the new session interface.
+
+Modified: trunk/istgt/kernel/session.c
+===================================================================
+--- trunk/istgt/kernel/session.c	2005-12-01 12:55:32 UTC (rev 194)
++++ trunk/istgt/kernel/session.c	2005-12-01 12:56:00 UTC (rev 195)
+@@ -19,9 +19,23 @@
+ 	return NULL;
+ }
+ 
++struct session_wait {
++	struct completion event;
++	struct tgt_session *ts;
++};
++
++static void session_done(void *arg, struct tgt_session *session)
++{
++	struct session_wait *w = (struct session_wait *) arg;
++
++	w-&gt;ts = session;
++	complete(&amp;w-&gt;event);
++}
++
+ int session_add(struct iscsi_target *target, struct session_info *info)
+ {
+ 	struct iscsi_session *session;
++	struct session_wait w;
+ 	int i;
+ 
+ 	dprintk(&quot;%p %u %&quot; PRIx64 &quot;\n&quot;, target, target-&gt;tid, info-&gt;sid);
+@@ -34,6 +48,14 @@
+ 	if (!session)
+ 		return -ENOMEM;
+ 
++	init_completion(&amp;w.event);
++	if (tgt_session_create(target-&gt;tt, session_done, &amp;w))
++		goto kfree_session;
++	wait_for_completion(&amp;w.event);
++	if (!w.ts)
++		goto kfree_session;
++
++	session-&gt;ts = w.ts;
+ 	session-&gt;target = target;
+ 	session-&gt;sid = info-&gt;sid;
+ 	memcpy(&amp;session-&gt;param, &amp;target-&gt;sess_param, sizeof(session-&gt;param));
+@@ -53,9 +75,10 @@
+ 
+ 	list_add(&amp;session-&gt;list, &amp;target-&gt;session_list);
+ 
+-	session-&gt;ts = tgt_session_create(target-&gt;tt, NULL, NULL);
+-
+ 	return 0;
++kfree_session:
++	kfree(session);
++	return -ENOMEM;
+ }
+ 
+ int session_del(struct iscsi_target *target, uint64_t sid)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000183.html">[Stgt-svn] r194 - trunk/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000185.html">[Stgt-svn] r196 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#184">[ date ]</a>
+              <a href="thread.html#184">[ thread ]</a>
+              <a href="subject.html#184">[ subject ]</a>
+              <a href="author.html#184">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,466 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r353 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r353%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030434.k234YrAh006380%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000339.html">
+   <LINK REL="Next"  HREF="000341.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r353 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r353%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030434.k234YrAh006380%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r353 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 05:34:53 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000339.html">[Stgt-svn] r352 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000341.html">[Stgt-svn] r354 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#340">[ date ]</a>
+              <a href="thread.html#340">[ thread ]</a>
+              <a href="subject.html#340">[ subject ]</a>
+              <a href="author.html#340">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 05:34:51 +0100 (Fri, 03 Mar 2006)
+New Revision: 353
+
+Added:
+   branches/use-scsi-ml/usr/tgt_sysfs.c
+Modified:
+   branches/use-scsi-ml/usr/Makefile
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgt_sysfs.h
+Log:
+Move file and directory stuff in target.c to tgt_sysfs.c
+
+
+Modified: branches/use-scsi-ml/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/usr/Makefile	2006-03-02 07:46:54 UTC (rev 352)
++++ branches/use-scsi-ml/usr/Makefile	2006-03-03 04:34:51 UTC (rev 353)
+@@ -3,7 +3,7 @@
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o netlink.o dl.o mgmt.o target.o scsi.o log.o
++tgtd: tgtd.o netlink.o dl.o mgmt.o target.o scsi.o log.o tgt_sysfs.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+ tgtadm: tgtadm.o
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-02 07:46:54 UTC (rev 352)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 04:34:51 UTC (rev 353)
+@@ -126,53 +126,6 @@
+ 	return 0;
+ }
+ 
+-static int device_dir_create(int tid, uint64_t dev_id, int dev_fd, uint64_t size)
+-{
+-	char path[PATH_MAX], buf[64];
+-	int fd, err;
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64, tid, dev_id);
+-
+-	err = mkdir(path, dmode);
+-	if (err &lt; 0) {
+-		eprintf(&quot;Cannot create %s\n&quot;, path);
+-		return err;
+-	}
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, dev_id);
+-	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Cannot create %s\n&quot;, path);
+-		return err;
+-	}
+-	snprintf(buf, sizeof(buf), &quot;%d&quot;, dev_fd);
+-	err = write(fd, buf, strlen(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		eprintf(&quot;Cannot write %s\n&quot;, path);
+-		return err;
+-	}
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;, tid, dev_id);
+-	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Cannot create %s\n&quot;, path);
+-		return err;
+-	}
+-	snprintf(buf, sizeof(buf), &quot;%&quot; PRIu64, size);
+-	err = write(fd, buf, strlen(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		eprintf(&quot;Cannot write %s\n&quot;, path);
+-		return err;
+-	}
+-
+-	return 0;
+-}
+-
+ static void tgt_device_link(struct target *target, struct tgt_device *dev)
+ {
+ 	struct tgt_device *ent;
+@@ -217,7 +170,7 @@
+ 		return err;
+ 	}
+ 
+-	err = device_dir_create(tid, dev_id, dev_fd, size);
++	err = tgt_device_dir_create(tid, dev_id, dev_fd, size);
+ 	if (err &lt; 0)
+ 		goto close_dev_fd;
+ 
+@@ -252,36 +205,10 @@
+ 	return err;
+ }
+ 
+-static void device_dir_remove(int tid, uint64_t dev_id)
+-{
+-	int err;
+-	char path[PATH_MAX];
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, dev_id);
+-	err = unlink(path);
+-	if (err &lt; 0)
+-		eprintf(&quot;Cannot unlink %s\n&quot;, path);
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;, tid, dev_id);
+-	err = unlink(path);
+-	if (err &lt; 0)
+-		eprintf(&quot;Cannot unlink %s\n&quot;, path);
+-
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64, tid, dev_id);
+-	err = rmdir(path);
+-	if (err &lt; 0)
+-		eprintf(&quot;Cannot unlink %s\n&quot;, path);
+-}
+-
+ int tgt_device_destroy(int tid, uint64_t dev_id)
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
+-	char path[PATH_MAX], buf[64];
+-	int dev_fd, fd, err;
+ 
+ 	/* TODO: check whether the device has flying commands. */
+ 
+@@ -301,26 +228,14 @@
+ 	if (device-&gt;addr)
+ 		munmap((void *) (unsigned long) device-&gt;addr, device-&gt;size);
+ 
+-	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR
+-		 &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, dev_id);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0)
+-		eprintf(&quot;%s %d\n&quot;, path, errno);
++	close(device-&gt;fd);
+ 
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0)
+-		eprintf(&quot;%d\n&quot;, err);
++	tgt_device_dir_delete(tid, dev_id);
+ 
+-	sscanf(buf, &quot;%d\n&quot;, &amp;dev_fd);
+-	close(dev_fd);
+-
+-	device_dir_remove(tid, dev_id);
+-
+ 	remque(&amp;device-&gt;dlist);
+ 
+ 	free(device);
+-	return err;
++	return 0;
+ }
+ 
+ int tgt_device_init(void)
+@@ -531,20 +446,6 @@
+ 	return 0;
+ }
+ 
+-static int target_dir_create(int tid)
+-{
+-	char path[PATH_MAX];
+-	int err;
+-
+-	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
+-	err = mkdir(path, dmode);
+-	if (err &lt; 0) {
+-		eprintf(&quot;Cannot create %s %d\n&quot;, path, errno);
+-		return err;
+-	}
+-	return 0;
+-}
+-
+ int tgt_target_create(int tid)
+ {
+ 	int err;
+@@ -577,7 +478,7 @@
+ 	}
+ 	target-&gt;max_device = DEFAULT_NR_DEVICE;
+ 
+-	err = target_dir_create(tid);
++	err = tgt_target_dir_create(tid);
+ 	if (err &lt; 0)
+ 		goto free_device_table;
+ 
+@@ -596,6 +497,5 @@
+ 
+ int tgt_target_destroy(int tid)
+ {
+-	/* TODO */
+ 	return 0;
+ }
+
+Added: branches/use-scsi-ml/usr/tgt_sysfs.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgt_sysfs.c	2006-03-02 07:46:54 UTC (rev 352)
++++ branches/use-scsi-ml/usr/tgt_sysfs.c	2006-03-03 04:34:51 UTC (rev 353)
+@@ -0,0 +1,176 @@
++/*
++ * SCSI file and directory handling functions
++ *
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdarg.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;linux/limits.h&gt;
++
++#include &quot;tgt_sysfs.h&quot;
++#include &quot;tgtd.h&quot;
++
++enum tgt_fs_op {
++	CREATE = 0,
++	DELETE,
++};
++
++static int tgt_set_string(char *buf, int size, const char *fmt, va_list ap)
++{
++	int err;
++
++	err = vsnprintf(buf, size, fmt, ap);
++	if (err &gt; size)
++		return -EINVAL;
++
++	return 0;
++}
++
++static int tgt_dir(int op, const char *fmt, ...)
++{
++	int err;
++	char path[PATH_MAX];
++	mode_t dmode = S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
++
++	va_list ap;
++	va_start(ap, fmt);
++
++	err = tgt_set_string(path, sizeof(path), fmt, ap);
++	if (err)
++		goto out;
++
++	if (op)
++		err = unlink(path);
++	else
++		err = mkdir(path, dmode);
++
++	if (err &lt; 0)
++		eprintf(&quot;fail to create %s %s\n&quot;,
++			op ? &quot;delete&quot; : &quot;create&quot;, path);
++out:
++	va_end(ap);
++	return err;
++}
++
++static int tgt_file(int op, const char *fmt, ...)
++{
++	int err;
++	char path[PATH_MAX];
++	mode_t fmode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
++
++	va_list ap;
++	va_start(ap, fmt);
++
++	err = tgt_set_string(path, sizeof(path), fmt, ap);
++	if (err)
++		goto out;
++
++	if (op)
++		err = unlink(path);
++	else
++		err = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++
++	if (err &lt; 0)
++		eprintf(&quot;fail to %s %s\n&quot;, op ? &quot;delete&quot; : &quot;create&quot;, path);
++out:
++	va_end(ap);
++	return err;
++}
++
++static int tgt_write(int fd, const char *fmt, ...)
++{
++	int err;
++	char buf[PATH_MAX];
++	va_list ap;
++
++	va_start(ap, fmt);
++	err = tgt_set_string(buf, sizeof(buf), fmt, ap);
++	if (err)
++		goto out;
++
++	err = write(fd, buf, strlen(buf));
++	if (err &lt; 0)
++		eprintf(&quot;fail to write %s\n&quot;, buf);
++out:
++	close(fd);
++	va_end(ap);
++	return err;
++}
++
++int tgt_target_dir_create(int tid)
++{
++	return tgt_dir(CREATE, TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
++}
++
++int tgt_target_dir_delete(int tid)
++{
++	return tgt_dir(DELETE, TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
++}
++
++int tgt_device_dir_create(int tid, uint64_t dev_id, int dev_fd, uint64_t size)
++{
++	int err;
++
++	err = tgt_dir(CREATE, TGT_DEVICE_SYSFSDIR
++		      &quot;/device%d:%&quot; PRIu64, tid, dev_id);
++	if (err &lt; 0)
++		return err;
++
++	err = tgt_file(CREATE, TGT_DEVICE_SYSFSDIR
++			    &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, dev_id);
++	if (err &lt; 0)
++		return err;
++	err = tgt_write(err, &quot;%d&quot;, dev_fd);
++	if (err &lt; 0)
++		return err;
++
++	err = tgt_file(CREATE, TGT_DEVICE_SYSFSDIR
++		       &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;, tid, dev_id);
++	if (err &lt; 0)
++		return err;
++	err = write(err, &quot;%&quot; PRIu64, size);
++	if (err &lt; 0)
++		return err;
++
++	return 0;
++}
++
++int tgt_device_dir_delete(int tid, uint64_t dev_id)
++{
++	int err;
++
++	err = tgt_file(DELETE, TGT_DEVICE_SYSFSDIR
++		       &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, dev_id);
++
++	err = tgt_file(DELETE, TGT_DEVICE_SYSFSDIR
++		       &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;, tid, dev_id);
++
++	err = tgt_dir(DELETE, TGT_DEVICE_SYSFSDIR
++		      &quot;/device%d:%&quot; PRIu64, tid, dev_id);
++
++	return 0;
++}
+
+Modified: branches/use-scsi-ml/usr/tgt_sysfs.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgt_sysfs.h	2006-03-02 07:46:54 UTC (rev 352)
++++ branches/use-scsi-ml/usr/tgt_sysfs.h	2006-03-03 04:34:51 UTC (rev 353)
+@@ -1,3 +1,5 @@
++#include &lt;stdint.h&gt;
++
+ #ifndef	__TGT_SYSFS_H
+ #define	__TGT_SYSFS_H
+ 
+@@ -5,4 +7,11 @@
+ #define	TGT_TARGET_SYSFSDIR	&quot;/var/run/tgt_target&quot;
+ #define	TGT_DEVICE_SYSFSDIR	&quot;/var/run/tgt_device&quot;
+ 
++
++extern int tgt_target_dir_create(int tid);
++extern int tgt_target_dir_delete(int tid);
++
++extern int tgt_device_dir_create(int tid, uint64_t dev_id, int dev_fd, uint64_t size);
++extern int tgt_device_dir_delete(int tid, uint64_t dev_id);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000339.html">[Stgt-svn] r352 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000341.html">[Stgt-svn] r354 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#340">[ date ]</a>
+              <a href="thread.html#340">[ thread ]</a>
+              <a href="subject.html#340">[ subject ]</a>
+              <a href="author.html#340">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,678 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r573 - trunk/patch
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r573%20-%20trunk/patch&In-Reply-To=%3C200608311251.k7VCpphp023163%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000559.html">
+   <LINK REL="Next"  HREF="000561.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r573 - trunk/patch</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r573%20-%20trunk/patch&In-Reply-To=%3C200608311251.k7VCpphp023163%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r573 - trunk/patch">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 14:51:51 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000559.html">[Stgt-svn] r572 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000561.html">[Stgt-svn] r574 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#560">[ date ]</a>
+              <a href="thread.html#560">[ thread ]</a>
+              <a href="subject.html#560">[ subject ]</a>
+              <a href="author.html#560">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 14:51:50 +0200 (Thu, 31 Aug 2006)
+New Revision: 573
+
+Added:
+   trunk/patch/aiopoll-2.6.16.13.diff
+   trunk/patch/aiopoll-2.6.18-rc4.diff
+Log:
+Add aio patches for iSCSI driver.
+
+Added: trunk/patch/aiopoll-2.6.16.13.diff
+===================================================================
+--- trunk/patch/aiopoll-2.6.16.13.diff	2006-08-31 12:51:17 UTC (rev 572)
++++ trunk/patch/aiopoll-2.6.16.13.diff	2006-08-31 12:51:50 UTC (rev 573)
+@@ -0,0 +1,297 @@
++diff -pruN ../pristine-linux-2.6.16-rc5/fs/aio.c ./fs/aio.c
++--- ../pristine-linux-2.6.16-rc5/fs/aio.c	2006-03-14 14:10:10.827401387 +0000
+++++ ./fs/aio.c	2006-03-16 09:57:53.898316582 +0000
++@@ -34,6 +34,11 @@
++ #include &lt;asm/uaccess.h&gt;
++ #include &lt;asm/mmu_context.h&gt;
++ 
+++#ifdef CONFIG_EPOLL
+++#include &lt;linux/poll.h&gt;
+++#include &lt;linux/eventpoll.h&gt;
+++#endif
+++
++ #if DEBUG &gt; 1
++ #define dprintk		printk
++ #else
++@@ -1016,6 +1021,10 @@ put_rq:
++ 	if (waitqueue_active(&amp;ctx-&gt;wait))
++ 		wake_up(&amp;ctx-&gt;wait);
++ 
+++#ifdef CONFIG_EPOLL
+++	if (ctx-&gt;file &amp;&amp; waitqueue_active(&amp;ctx-&gt;poll_wait))
+++		wake_up(&amp;ctx-&gt;poll_wait);
+++#endif
++ 	if (ret)
++ 		put_ioctx(ctx);
++ 
++@@ -1025,6 +1034,8 @@ put_rq:
++ /* aio_read_evt
++  *	Pull an event off of the ioctx's event ring.  Returns the number of 
++  *	events fetched (0 or 1 ;-)
+++ *	If ent parameter is 0, just returns the number of events that would
+++ *	be fetched.
++  *	FIXME: make this use cmpxchg.
++  *	TODO: make the ringbuffer user mmap()able (requires FIXME).
++  */
++@@ -1047,13 +1058,18 @@ static int aio_read_evt(struct kioctx *i
++ 
++ 	head = ring-&gt;head % info-&gt;nr;
++ 	if (head != ring-&gt;tail) {
++-		struct io_event *evp = aio_ring_event(info, head, KM_USER1);
++-		*ent = *evp;
++-		head = (head + 1) % info-&gt;nr;
++-		smp_mb(); /* finish reading the event before updatng the head */
++-		ring-&gt;head = head;
++-		ret = 1;
++-		put_aio_ring_event(evp, KM_USER1);
+++		if (ent) { /* event requested */
+++			struct io_event *evp =
+++				aio_ring_event(info, head, KM_USER1);
+++			*ent = *evp;
+++			head = (head + 1) % info-&gt;nr;
+++			/* finish reading the event before updatng the head */
+++			smp_mb();
+++			ring-&gt;head = head;
+++			ret = 1;
+++			put_aio_ring_event(evp, KM_USER1);
+++		} else /* only need to know availability */
+++			ret = 1;
++ 	}
++ 	spin_unlock(&amp;info-&gt;ring_lock);
++ 
++@@ -1236,9 +1252,78 @@ static void io_destroy(struct kioctx *io
++ 
++ 	aio_cancel_all(ioctx);
++ 	wait_for_all_aios(ioctx);
+++#ifdef CONFIG_EPOLL
+++	/* forget the poll file, but it's up to the user to close it */
+++	if (ioctx-&gt;file) {
+++		ioctx-&gt;file-&gt;private_data = 0;
+++		ioctx-&gt;file = 0;
+++	}
+++#endif
++ 	put_ioctx(ioctx);	/* once for the lookup */
++ }
++ 
+++#ifdef CONFIG_EPOLL
+++
+++static int aio_queue_fd_close(struct inode *inode, struct file *file)
+++{
+++	struct kioctx *ioctx = file-&gt;private_data;
+++	if (ioctx) {
+++		file-&gt;private_data = 0;
+++		spin_lock_irq(&amp;ioctx-&gt;ctx_lock);
+++		ioctx-&gt;file = 0;
+++		spin_unlock_irq(&amp;ioctx-&gt;ctx_lock);
+++	}
+++	return 0;
+++}
+++
+++static unsigned int aio_queue_fd_poll(struct file *file, poll_table *wait)
+++{	unsigned int pollflags = 0;
+++	struct kioctx *ioctx = file-&gt;private_data;
+++
+++	if (ioctx) {
+++
+++		spin_lock_irq(&amp;ioctx-&gt;ctx_lock);
+++		/* Insert inside our poll wait queue */
+++		poll_wait(file, &amp;ioctx-&gt;poll_wait, wait);
+++
+++		/* Check our condition */
+++		if (aio_read_evt(ioctx, 0))
+++			pollflags = POLLIN | POLLRDNORM;
+++		spin_unlock_irq(&amp;ioctx-&gt;ctx_lock);
+++	}
+++
+++	return pollflags;
+++}
+++
+++static struct file_operations aioq_fops = {
+++	.release	= aio_queue_fd_close,
+++	.poll		= aio_queue_fd_poll
+++};
+++
+++/* make_aio_fd:
+++ *  Create a file descriptor that can be used to poll the event queue.
+++ *  Based and piggybacked on the excellent epoll code.
+++ */
+++
+++static int make_aio_fd(struct kioctx *ioctx)
+++{
+++	int error, fd;
+++	struct inode *inode;
+++	struct file *file;
+++
+++	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, NULL, &amp;aioq_fops);
+++	if (error)
+++		return error;
+++
+++	/* associate the file with the IO context */
+++	file-&gt;private_data = ioctx;
+++	ioctx-&gt;file = file;
+++	init_waitqueue_head(&amp;ioctx-&gt;poll_wait);
+++	return fd;
+++}
+++#endif
+++
+++
++ /* sys_io_setup:
++  *	Create an aio_context capable of receiving at least nr_events.
++  *	ctxp must not point to an aio_context that already exists, and
++@@ -1251,18 +1336,30 @@ static void io_destroy(struct kioctx *io
++  *	resources are available.  May fail with -EFAULT if an invalid
++  *	pointer is passed for ctxp.  Will fail with -ENOSYS if not
++  *	implemented.
+++ *
+++ *	To request a selectable fd, the user context has to be initialized
+++ *	to 1, instead of 0, and the return value is the fd.
+++ *	This keeps the system call compatible, since a non-zero value
+++ *	was not allowed so far.
++  */
++ asmlinkage long sys_io_setup(unsigned nr_events, aio_context_t __user *ctxp)
++ {
++ 	struct kioctx *ioctx = NULL;
++ 	unsigned long ctx;
++ 	long ret;
+++	int make_fd = 0;
++ 
++ 	ret = get_user(ctx, ctxp);
++ 	if (unlikely(ret))
++ 		goto out;
++ 
++ 	ret = -EINVAL;
+++#ifdef CONFIG_EPOLL
+++	if (ctx == 1) {
+++		make_fd = 1;
+++		ctx = 0;
+++	}
+++#endif
++ 	if (unlikely(ctx || nr_events == 0)) {
++ 		pr_debug(&quot;EINVAL: io_setup: ctx %lu nr_events %u\n&quot;,
++ 		         ctx, nr_events);
++@@ -1273,8 +1370,12 @@ asmlinkage long sys_io_setup(unsigned nr
++ 	ret = PTR_ERR(ioctx);
++ 	if (!IS_ERR(ioctx)) {
++ 		ret = put_user(ioctx-&gt;user_id, ctxp);
++-		if (!ret)
++-			return 0;
+++#ifdef CONFIG_EPOLL
+++		if (make_fd &amp;&amp; ret &gt;= 0)
+++			ret = make_aio_fd(ioctx);
+++#endif
+++		if (ret &gt;= 0)
+++			return ret;
++ 
++ 		get_ioctx(ioctx); /* io_destroy() expects us to hold a ref */
++ 		io_destroy(ioctx);
++
++diff -pruN ../pristine-linux-2.6.16-rc5/fs/eventpoll.c ./fs/eventpoll.c
++--- ../pristine-linux-2.6.16-rc5/fs/eventpoll.c	2006-01-03 03:21:10.000000000 +0000
+++++ ./fs/eventpoll.c	2006-03-16 10:04:35.469956167 +0000
++@@ -235,8 +235,6 @@ struct ep_pqueue {
++ 
++ static void ep_poll_safewake_init(struct poll_safewake *psw);
++ static void ep_poll_safewake(struct poll_safewake *psw, wait_queue_head_t *wq);
++-static int ep_getfd(int *efd, struct inode **einode, struct file **efile,
++-		    struct eventpoll *ep);
++ static int ep_alloc(struct eventpoll **pep);
++ static void ep_free(struct eventpoll *ep);
++ static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
++@@ -266,7 +264,7 @@ static int ep_events_transfer(struct eve
++ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
++ 		   int maxevents, long timeout);
++ static int eventpollfs_delete_dentry(struct dentry *dentry);
++-static struct inode *ep_eventpoll_inode(void);
+++static struct inode *ep_eventpoll_inode(struct file_operations *fops);
++ static struct super_block *eventpollfs_get_sb(struct file_system_type *fs_type,
++ 					      int flags, const char *dev_name,
++ 					      void *data);
++@@ -525,7 +523,7 @@ asmlinkage long sys_epoll_create(int siz
++ 	 * Creates all the items needed to setup an eventpoll file. That is,
++ 	 * a file structure, and inode and a free file descriptor.
++ 	 */
++-	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, ep);
+++	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, ep, &amp;eventpoll_fops);
++ 	if (error)
++ 		goto eexit_2;
++ 
++@@ -710,8 +708,8 @@ eexit_1:
++ /*
++  * Creates the file descriptor to be used by the epoll interface.
++  */
++-static int ep_getfd(int *efd, struct inode **einode, struct file **efile,
++-		    struct eventpoll *ep)
+++int ep_getfd(int *efd, struct inode **einode, struct file **efile,
+++		    struct eventpoll *ep, struct file_operations *fops)
++ {
++ 	struct qstr this;
++ 	char name[32];
++@@ -727,7 +725,7 @@ static int ep_getfd(int *efd, struct ino
++ 		goto eexit_1;
++ 
++ 	/* Allocates an inode from the eventpoll file system */
++-	inode = ep_eventpoll_inode();
+++	inode = ep_eventpoll_inode(fops);
++ 	error = PTR_ERR(inode);
++ 	if (IS_ERR(inode))
++ 		goto eexit_2;
++@@ -758,7 +756,7 @@ static int ep_getfd(int *efd, struct ino
++ 
++ 	file-&gt;f_pos = 0;
++ 	file-&gt;f_flags = O_RDONLY;
++-	file-&gt;f_op = &amp;eventpoll_fops;
+++	file-&gt;f_op = fops;
++ 	file-&gt;f_mode = FMODE_READ;
++ 	file-&gt;f_version = 0;
++ 	file-&gt;private_data = ep;
++@@ -1574,7 +1572,7 @@ static int eventpollfs_delete_dentry(str
++ }
++ 
++ 
++-static struct inode *ep_eventpoll_inode(void)
+++static struct inode *ep_eventpoll_inode(struct file_operations *fops)
++ {
++ 	int error = -ENOMEM;
++ 	struct inode *inode = new_inode(eventpoll_mnt-&gt;mnt_sb);
++@@ -1582,7 +1580,7 @@ static struct inode *ep_eventpoll_inode(
++ 	if (!inode)
++ 		goto eexit_1;
++ 
++-	inode-&gt;i_fop = &amp;eventpoll_fops;
+++	inode-&gt;i_fop = fops;
++ 
++ 	/*
++ 	 * Mark the inode dirty from the very beginning,
++
++diff -pruN ../pristine-linux-2.6.16-rc5/include/linux/aio.h ./include/linux/aio.h
++--- ../pristine-linux-2.6.16-rc5/include/linux/aio.h	2006-03-14 14:10:21.597916731 +0000
+++++ ./include/linux/aio.h	2006-03-16 10:05:39.848833028 +0000
++@@ -191,6 +191,11 @@ struct kioctx {
++ 	struct aio_ring_info	ring_info;
++ 
++ 	struct work_struct	wq;
+++#ifdef CONFIG_EPOLL
+++	// poll integration
+++	wait_queue_head_t       poll_wait;
+++	struct file		*file;
+++#endif
++ };
++ 
++ /* prototypes */
++
++diff -pruN ../pristine-linux-2.6.16-rc5/include/linux/eventpoll.h ./include/linux/eventpoll.h
++--- ../pristine-linux-2.6.16-rc5/include/linux/eventpoll.h	2006-01-03 03:21:10.000000000 +0000
+++++ ./include/linux/eventpoll.h	2006-03-16 10:08:51.577809317 +0000
++@@ -86,6 +86,12 @@ static inline void eventpoll_release(str
++ }
++ 
++ 
+++/*
+++ * called by aio code to create fd that can poll the  aio event queueQ
+++ */
+++struct eventpoll;
+++int ep_getfd(int *efd, struct inode **einode, struct file **efile,
+++             struct eventpoll *ep, struct file_operations *fops);
++ #else
++ 
++ static inline void eventpoll_init_file(struct file *file) {}
+
+Added: trunk/patch/aiopoll-2.6.18-rc4.diff
+===================================================================
+--- trunk/patch/aiopoll-2.6.18-rc4.diff	2006-08-31 12:51:17 UTC (rev 572)
++++ trunk/patch/aiopoll-2.6.18-rc4.diff	2006-08-31 12:51:50 UTC (rev 573)
+@@ -0,0 +1,298 @@
++diff --git a/fs/aio.c b/fs/aio.c
++index 9506301..99c5eba 100644
++--- a/fs/aio.c
+++++ b/fs/aio.c
++@@ -34,6 +34,11 @@ #include &lt;asm/kmap_types.h&gt;
++ #include &lt;asm/uaccess.h&gt;
++ #include &lt;asm/mmu_context.h&gt;
++ 
+++#ifdef CONFIG_EPOLL
+++#include &lt;linux/poll.h&gt;
+++#include &lt;linux/eventpoll.h&gt;
+++#endif
+++
++ #if DEBUG &gt; 1
++ #define dprintk		printk
++ #else
++@@ -1015,6 +1020,10 @@ put_rq:
++ 	if (waitqueue_active(&amp;ctx-&gt;wait))
++ 		wake_up(&amp;ctx-&gt;wait);
++ 
+++#ifdef CONFIG_EPOLL
+++	if (ctx-&gt;file &amp;&amp; waitqueue_active(&amp;ctx-&gt;poll_wait))
+++		wake_up(&amp;ctx-&gt;poll_wait);
+++#endif
++ 	if (ret)
++ 		put_ioctx(ctx);
++ 
++@@ -1024,6 +1033,8 @@ put_rq:
++ /* aio_read_evt
++  *	Pull an event off of the ioctx's event ring.  Returns the number of 
++  *	events fetched (0 or 1 ;-)
+++ *	If ent parameter is 0, just returns the number of events that would
+++ *	be fetched.
++  *	FIXME: make this use cmpxchg.
++  *	TODO: make the ringbuffer user mmap()able (requires FIXME).
++  */
++@@ -1046,13 +1057,18 @@ static int aio_read_evt(struct kioctx *i
++ 
++ 	head = ring-&gt;head % info-&gt;nr;
++ 	if (head != ring-&gt;tail) {
++-		struct io_event *evp = aio_ring_event(info, head, KM_USER1);
++-		*ent = *evp;
++-		head = (head + 1) % info-&gt;nr;
++-		smp_mb(); /* finish reading the event before updatng the head */
++-		ring-&gt;head = head;
++-		ret = 1;
++-		put_aio_ring_event(evp, KM_USER1);
+++		if (ent) { /* event requested */
+++			struct io_event *evp =
+++				aio_ring_event(info, head, KM_USER1);
+++			*ent = *evp;
+++			head = (head + 1) % info-&gt;nr;
+++			/* finish reading the event before updatng the head */
+++			smp_mb();
+++			ring-&gt;head = head;
+++			ret = 1;
+++			put_aio_ring_event(evp, KM_USER1);
+++		} else /* only need to know availability */
+++			ret = 1;
++ 	}
++ 	spin_unlock(&amp;info-&gt;ring_lock);
++ 
++@@ -1235,9 +1251,78 @@ static void io_destroy(struct kioctx *io
++ 
++ 	aio_cancel_all(ioctx);
++ 	wait_for_all_aios(ioctx);
+++#ifdef CONFIG_EPOLL
+++	/* forget the poll file, but it's up to the user to close it */
+++	if (ioctx-&gt;file) {
+++		ioctx-&gt;file-&gt;private_data = 0;
+++		ioctx-&gt;file = 0;
+++	}
+++#endif
++ 	put_ioctx(ioctx);	/* once for the lookup */
++ }
++ 
+++#ifdef CONFIG_EPOLL
+++
+++static int aio_queue_fd_close(struct inode *inode, struct file *file)
+++{
+++	struct kioctx *ioctx = file-&gt;private_data;
+++	if (ioctx) {
+++		file-&gt;private_data = 0;
+++		spin_lock_irq(&amp;ioctx-&gt;ctx_lock);
+++		ioctx-&gt;file = 0;
+++		spin_unlock_irq(&amp;ioctx-&gt;ctx_lock);
+++	}
+++	return 0;
+++}
+++
+++static unsigned int aio_queue_fd_poll(struct file *file, poll_table *wait)
+++{	unsigned int pollflags = 0;
+++	struct kioctx *ioctx = file-&gt;private_data;
+++
+++	if (ioctx) {
+++
+++		spin_lock_irq(&amp;ioctx-&gt;ctx_lock);
+++		/* Insert inside our poll wait queue */
+++		poll_wait(file, &amp;ioctx-&gt;poll_wait, wait);
+++
+++		/* Check our condition */
+++		if (aio_read_evt(ioctx, 0))
+++			pollflags = POLLIN | POLLRDNORM;
+++		spin_unlock_irq(&amp;ioctx-&gt;ctx_lock);
+++	}
+++
+++	return pollflags;
+++}
+++
+++static struct file_operations aioq_fops = {
+++	.release	= aio_queue_fd_close,
+++	.poll		= aio_queue_fd_poll
+++};
+++
+++/* make_aio_fd:
+++ *  Create a file descriptor that can be used to poll the event queue.
+++ *  Based and piggybacked on the excellent epoll code.
+++ */
+++
+++static int make_aio_fd(struct kioctx *ioctx)
+++{
+++	int error, fd;
+++	struct inode *inode;
+++	struct file *file;
+++
+++	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, NULL, &amp;aioq_fops);
+++	if (error)
+++		return error;
+++
+++	/* associate the file with the IO context */
+++	file-&gt;private_data = ioctx;
+++	ioctx-&gt;file = file;
+++	init_waitqueue_head(&amp;ioctx-&gt;poll_wait);
+++	return fd;
+++}
+++#endif
+++
+++
++ /* sys_io_setup:
++  *	Create an aio_context capable of receiving at least nr_events.
++  *	ctxp must not point to an aio_context that already exists, and
++@@ -1250,18 +1335,30 @@ static void io_destroy(struct kioctx *io
++  *	resources are available.  May fail with -EFAULT if an invalid
++  *	pointer is passed for ctxp.  Will fail with -ENOSYS if not
++  *	implemented.
+++ *
+++ *	To request a selectable fd, the user context has to be initialized
+++ *	to 1, instead of 0, and the return value is the fd.
+++ *	This keeps the system call compatible, since a non-zero value
+++ *	was not allowed so far.
++  */
++ asmlinkage long sys_io_setup(unsigned nr_events, aio_context_t __user *ctxp)
++ {
++ 	struct kioctx *ioctx = NULL;
++ 	unsigned long ctx;
++ 	long ret;
+++	int make_fd = 0;
++ 
++ 	ret = get_user(ctx, ctxp);
++ 	if (unlikely(ret))
++ 		goto out;
++ 
++ 	ret = -EINVAL;
+++#ifdef CONFIG_EPOLL
+++	if (ctx == 1) {
+++		make_fd = 1;
+++		ctx = 0;
+++	}
+++#endif
++ 	if (unlikely(ctx || nr_events == 0)) {
++ 		pr_debug(&quot;EINVAL: io_setup: ctx %lu nr_events %u\n&quot;,
++ 		         ctx, nr_events);
++@@ -1272,8 +1369,12 @@ asmlinkage long sys_io_setup(unsigned nr
++ 	ret = PTR_ERR(ioctx);
++ 	if (!IS_ERR(ioctx)) {
++ 		ret = put_user(ioctx-&gt;user_id, ctxp);
++-		if (!ret)
++-			return 0;
+++#ifdef CONFIG_EPOLL
+++		if (make_fd &amp;&amp; ret &gt;= 0)
+++			ret = make_aio_fd(ioctx);
+++#endif
+++		if (ret &gt;= 0)
+++			return ret;
++ 
++ 		get_ioctx(ioctx); /* io_destroy() expects us to hold a ref */
++ 		io_destroy(ioctx);
++diff --git a/fs/eventpoll.c b/fs/eventpoll.c
++index 19ffb04..3a6b872 100644
++--- a/fs/eventpoll.c
+++++ b/fs/eventpoll.c
++@@ -236,8 +236,6 @@ struct ep_pqueue {
++ 
++ static void ep_poll_safewake_init(struct poll_safewake *psw);
++ static void ep_poll_safewake(struct poll_safewake *psw, wait_queue_head_t *wq);
++-static int ep_getfd(int *efd, struct inode **einode, struct file **efile,
++-		    struct eventpoll *ep);
++ static int ep_alloc(struct eventpoll **pep);
++ static void ep_free(struct eventpoll *ep);
++ static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
++@@ -267,7 +265,7 @@ static int ep_events_transfer(struct eve
++ static int ep_poll(struct eventpoll *ep, struct epoll_event __user *events,
++ 		   int maxevents, long timeout);
++ static int eventpollfs_delete_dentry(struct dentry *dentry);
++-static struct inode *ep_eventpoll_inode(void);
+++static struct inode *ep_eventpoll_inode(struct file_operations *fops);
++ static int eventpollfs_get_sb(struct file_system_type *fs_type,
++ 			      int flags, const char *dev_name,
++ 			      void *data, struct vfsmount *mnt);
++@@ -517,7 +515,7 @@ asmlinkage long sys_epoll_create(int siz
++ 	 * Creates all the items needed to setup an eventpoll file. That is,
++ 	 * a file structure, and inode and a free file descriptor.
++ 	 */
++-	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, ep);
+++	error = ep_getfd(&amp;fd, &amp;inode, &amp;file, ep, &amp;eventpoll_fops);
++ 	if (error)
++ 		goto eexit_2;
++ 
++@@ -702,8 +700,8 @@ eexit_1:
++ /*
++  * Creates the file descriptor to be used by the epoll interface.
++  */
++-static int ep_getfd(int *efd, struct inode **einode, struct file **efile,
++-		    struct eventpoll *ep)
+++int ep_getfd(int *efd, struct inode **einode, struct file **efile,
+++		    struct eventpoll *ep, struct file_operations *fops)
++ {
++ 	struct qstr this;
++ 	char name[32];
++@@ -719,7 +717,7 @@ static int ep_getfd(int *efd, struct ino
++ 		goto eexit_1;
++ 
++ 	/* Allocates an inode from the eventpoll file system */
++-	inode = ep_eventpoll_inode();
+++	inode = ep_eventpoll_inode(fops);
++ 	error = PTR_ERR(inode);
++ 	if (IS_ERR(inode))
++ 		goto eexit_2;
++@@ -750,7 +748,7 @@ static int ep_getfd(int *efd, struct ino
++ 
++ 	file-&gt;f_pos = 0;
++ 	file-&gt;f_flags = O_RDONLY;
++-	file-&gt;f_op = &amp;eventpoll_fops;
+++	file-&gt;f_op = fops;
++ 	file-&gt;f_mode = FMODE_READ;
++ 	file-&gt;f_version = 0;
++ 	file-&gt;private_data = ep;
++@@ -1569,7 +1567,7 @@ static int eventpollfs_delete_dentry(str
++ }
++ 
++ 
++-static struct inode *ep_eventpoll_inode(void)
+++static struct inode *ep_eventpoll_inode(struct file_operations *fops)
++ {
++ 	int error = -ENOMEM;
++ 	struct inode *inode = new_inode(eventpoll_mnt-&gt;mnt_sb);
++@@ -1577,7 +1575,7 @@ static struct inode *ep_eventpoll_inode(
++ 	if (!inode)
++ 		goto eexit_1;
++ 
++-	inode-&gt;i_fop = &amp;eventpoll_fops;
+++	inode-&gt;i_fop = fops;
++ 
++ 	/*
++ 	 * Mark the inode dirty from the very beginning,
++diff --git a/include/linux/aio.h b/include/linux/aio.h
++index 00c8efa..cf8bb52 100644
++--- a/include/linux/aio.h
+++++ b/include/linux/aio.h
++@@ -191,6 +191,11 @@ struct kioctx {
++ 	struct aio_ring_info	ring_info;
++ 
++ 	struct work_struct	wq;
+++#ifdef CONFIG_EPOLL
+++	// poll integration
+++	wait_queue_head_t       poll_wait;
+++	struct file		*file;
+++#endif
++ };
++ 
++ /* prototypes */
++diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
++index 84cfa8b..f2a22bc 100644
++--- a/include/linux/eventpoll.h
+++++ b/include/linux/eventpoll.h
++@@ -90,6 +90,12 @@ static inline void eventpoll_release(str
++ 	eventpoll_release_file(file);
++ }
++ 
+++/*
+++ * called by aio code to create fd that can poll the  aio event queueQ
+++ */
+++struct eventpoll;
+++int ep_getfd(int *efd, struct inode **einode, struct file **efile,
+++             struct eventpoll *ep, struct file_operations *fops);
++ #else
++ 
++ static inline void eventpoll_init_file(struct file *file) {}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000559.html">[Stgt-svn] r572 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000561.html">[Stgt-svn] r574 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#560">[ date ]</a>
+              <a href="thread.html#560">[ thread ]</a>
+              <a href="subject.html#560">[ subject ]</a>
+              <a href="author.html#560">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

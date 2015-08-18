@@ -1,0 +1,201 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r131 - in trunk: istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r131%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510281441.j9SEf7tN022057%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000124.html">
+   <LINK REL="Next"  HREF="000126.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r131 - in trunk: istgt/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r131%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510281441.j9SEf7tN022057%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r131 - in trunk: istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 16:41:07 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000124.html">[Stgt-svn] r130 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000126.html">[Stgt-svn] r132 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#125">[ date ]</a>
+              <a href="thread.html#125">[ thread ]</a>
+              <a href="subject.html#125">[ subject ]</a>
+              <a href="author.html#125">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 16:41:07 +0200 (Fri, 28 Oct 2005)
+New Revision: 131
+
+Modified:
+   trunk/istgt/kernel/config.c
+   trunk/istgt/kernel/digest.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/session.c
+   trunk/istgt/kernel/target.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_types.h
+Log:
+Disable to debug istgt code.
+
+
+Modified: trunk/istgt/kernel/config.c
+===================================================================
+--- trunk/istgt/kernel/config.c	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/istgt/kernel/config.c	2005-10-28 14:41:07 UTC (rev 131)
+@@ -5,8 +5,6 @@
+  */
+ 
+ #include &lt;iscsi.h&gt;
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+ 
+ static int add_conn(struct iscsi_target *target, struct conn_info *info)
+ {
+
+Modified: trunk/istgt/kernel/digest.c
+===================================================================
+--- trunk/istgt/kernel/digest.c	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/istgt/kernel/digest.c	2005-10-28 14:41:07 UTC (rev 131)
+@@ -11,7 +11,6 @@
+ 
+ #include &lt;iscsi.h&gt;
+ #include &lt;digest.h&gt;
+-#include &lt;tgt.h&gt;
+ 
+ void digest_alg_available(unsigned int *val)
+ {
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/istgt/kernel/iscsi.h	2005-10-28 14:41:07 UTC (rev 131)
+@@ -310,4 +310,14 @@
+ 		(param)-&gt;data_digest);\
+ }
+ 
++#undef dprintk
++
++#undef DEBUG_ISTGT
++
++#ifdef DEBUG_ISTGT
++#define dprintk eprintk
++#else
++#define dprintk(fmt, args...)
++#endif
++
+ #endif	/* __ISCSI_H__ */
+
+Modified: trunk/istgt/kernel/session.c
+===================================================================
+--- trunk/istgt/kernel/session.c	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/istgt/kernel/session.c	2005-10-28 14:41:07 UTC (rev 131)
+@@ -7,7 +7,6 @@
+ #include &lt;linux/mempool.h&gt;
+ 
+ #include &lt;iscsi.h&gt;
+-#include &lt;tgt.h&gt;
+ 
+ struct iscsi_session *session_lookup(struct iscsi_target *target, uint64_t sid)
+ {
+
+Modified: trunk/istgt/kernel/target.c
+===================================================================
+--- trunk/istgt/kernel/target.c	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/istgt/kernel/target.c	2005-10-28 14:41:07 UTC (rev 131)
+@@ -8,9 +8,6 @@
+ 
+ #include &lt;iscsi.h&gt;
+ #include &lt;digest.h&gt;
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_device.h&gt;
+-#include &lt;tgt_target.h&gt;
+ 
+ static DECLARE_MUTEX(target_list_sem);
+ 
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/kernel/tgt.h	2005-10-28 14:41:07 UTC (rev 131)
+@@ -80,4 +80,19 @@
+ extern void tgt_transfer_response(void *cmd);
+ extern int tgt_sysfs_init(void);
+ extern void tgt_sysfs_exit(void);
++
++
++#define DEBUG_TGT
++
++#define eprintk(fmt, args...)					\
++do {								\
++	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
++} while (0)
++
++#ifdef DEBUG_TGT
++#define dprintk eprintk
++#else
++#define dprintk(fmt, args...)
+ #endif
++
++#endif
+
+Modified: trunk/kernel/tgt_types.h
+===================================================================
+--- trunk/kernel/tgt_types.h	2005-10-28 14:16:33 UTC (rev 130)
++++ trunk/kernel/tgt_types.h	2005-10-28 14:41:07 UTC (rev 131)
+@@ -15,18 +15,4 @@
+ # define PRIu64		__PRI64_PREFIX &quot;u&quot;
+ # define PRIx64		__PRI64_PREFIX &quot;x&quot;
+ 
+-
+-#define DEBUG_TGT
+-
+-#define eprintk(fmt, args...)					\
+-do {								\
+-	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+-} while (0)
+-
+-#ifdef DEBUG_TGT
+-#define dprintk eprintk
+-#else
+-#define dprintk(fmt, args...)
+ #endif
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000124.html">[Stgt-svn] r130 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000126.html">[Stgt-svn] r132 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#125">[ date ]</a>
+              <a href="thread.html#125">[ thread ]</a>
+              <a href="subject.html#125">[ subject ]</a>
+              <a href="author.html#125">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

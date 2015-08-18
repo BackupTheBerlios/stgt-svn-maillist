@@ -1,0 +1,246 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r605 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r605%20-%20trunk/usr&In-Reply-To=%3C200610311121.k9VBLnb1024641%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000591.html">
+   <LINK REL="Next"  HREF="000593.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r605 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r605%20-%20trunk/usr&In-Reply-To=%3C200610311121.k9VBLnb1024641%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r605 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Oct 31 12:21:49 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000591.html">[Stgt-svn] r604 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000593.html">[Stgt-svn] r606 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#592">[ date ]</a>
+              <a href="thread.html#592">[ thread ]</a>
+              <a href="subject.html#592">[ subject ]</a>
+              <a href="author.html#592">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-10-31 12:21:46 +0100 (Tue, 31 Oct 2006)
+New Revision: 605
+
+Added:
+   trunk/usr/sched.c
+   trunk/usr/sched.h
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/tgtd.c
+Log:
+Add bogus schedular
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/Makefile	2006-10-31 11:21:46 UTC (rev 605)
+@@ -1,6 +1,6 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE -I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o
++TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o sched.o
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO
+
+Added: trunk/usr/sched.c
+===================================================================
+--- trunk/usr/sched.c	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/sched.c	2006-10-31 11:21:46 UTC (rev 605)
+@@ -0,0 +1,80 @@
++/*
++ * bogus scheduler
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++#include &lt;stdlib.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;log.h&quot;
++#include &quot;sched.h&quot;
++
++static unsigned int jiffies;
++static LIST_HEAD(active_work_list);
++static LIST_HEAD(inactive_work_list);
++
++void enqueue_work(struct tgt_work *work, unsigned int second)
++{
++	unsigned int when;
++	struct tgt_work *ent;
++
++	when = second * SCHED_HZ;
++
++	if (when) {
++
++		list_for_each_entry(ent, &amp;inactive_work_list, entry) {
++			if (before(when, ent-&gt;when))
++				break;
++		}
++
++		list_add_tail(&amp;work-&gt;entry, &amp;ent-&gt;entry);
++	} else
++		list_add_tail(&amp;work-&gt;entry, &amp;active_work_list);
++}
++
++void dequeue_work(struct tgt_work *work)
++{
++	list_del(&amp;work-&gt;entry);
++}
++
++/*
++ * this function is called only when the system is idle. So this
++ * scheduler is pretty bogus. Your job would be delayed unexpectedly.
++ */
++void schedule(void)
++{
++	struct tgt_work *work;
++
++	jiffies++;
++
++	list_for_each_entry(work, &amp;inactive_work_list, entry) {
++		if (after(work-&gt;when, jiffies)) {
++			list_del(&amp;work-&gt;entry);
++			enqueue_work(work, 0);
++		} else
++			break;
++	}
++
++	while (!list_empty(&amp;active_work_list)) {
++		work = list_entry(active_work_list.next, struct tgt_work, entry);
++		work-&gt;func(work-&gt;data);
++	}
++}
+
+Added: trunk/usr/sched.h
+===================================================================
+--- trunk/usr/sched.h	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/sched.h	2006-10-31 11:21:46 UTC (rev 605)
+@@ -0,0 +1,17 @@
++#ifndef __SCHED_H
++#define __SCHED_H
++
++#define SCHED_HZ 1
++
++struct tgt_work {
++	struct list_head entry;
++	void (*func)(void *);
++	void *data;
++	unsigned int when;
++};
++
++extern void schedule(void);
++extern void enqueue_work(struct tgt_work *work, unsigned int second);
++extern void dequeue_work(struct tgt_work *work);
++
++#endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/tgtd.c	2006-10-31 11:21:46 UTC (rev 605)
+@@ -34,6 +34,7 @@
+ #include &quot;list.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;driver.h&quot;
++#include &quot;sched.h&quot;
+ #include &quot;util.h&quot;
+ 
+ #define MAX_FDS	4096
+@@ -169,7 +170,8 @@
+ 
+ static void event_loop(void)
+ {
+-	int nevent, i, timeout = -1;
++	int nevent, i;
++	static int timeout = 1000 / SCHED_HZ;
+ 	struct epoll_event events[1024];
+ 	struct tgt_event *tev;
+ 
+@@ -181,18 +183,14 @@
+ 			exit(1);
+ 		}
+ 		goto retry;
+-	} else if (nevent == 0) {
+-		/*
+-		 * TODO: need kinda scheduling stuff like open-iscsi here.
+-		 */
+-		goto retry;
+-	}
++	} else if (nevent) {
++		for (i = 0; i &lt; nevent; i++) {
++			tev = (struct tgt_event *) events[i].data.ptr;
++			tev-&gt;handler(tev-&gt;fd, events[i].events, tev-&gt;data);
++		}
++	} else
++		schedule();
+ 
+-	for (i = 0; i &lt; nevent; i++) {
+-		tev = (struct tgt_event *) events[i].data.ptr;
+-		tev-&gt;handler(tev-&gt;fd, events[i].events, tev-&gt;data);
+-	}
+-
+ 	goto retry;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000591.html">[Stgt-svn] r604 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000593.html">[Stgt-svn] r606 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#592">[ date ]</a>
+              <a href="thread.html#592">[ thread ]</a>
+              <a href="subject.html#592">[ subject ]</a>
+              <a href="author.html#592">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

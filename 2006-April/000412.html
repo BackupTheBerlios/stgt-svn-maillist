@@ -1,0 +1,579 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r425 - branches/use-scsi-ml/patchset/broken-out
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r425%20-%20branches/use-scsi-ml/patchset/broken-out&In-Reply-To=%3C200604190840.k3J8eg9g006522%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000411.html">
+   <LINK REL="Next"  HREF="000413.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r425 - branches/use-scsi-ml/patchset/broken-out</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r425%20-%20branches/use-scsi-ml/patchset/broken-out&In-Reply-To=%3C200604190840.k3J8eg9g006522%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r425 - branches/use-scsi-ml/patchset/broken-out">tomo at berlios.de
+       </A><BR>
+    <I>Wed Apr 19 10:40:42 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000411.html">[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000413.html">[Stgt-svn] r426 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#412">[ date ]</a>
+              <a href="thread.html#412">[ thread ]</a>
+              <a href="subject.html#412">[ subject ]</a>
+              <a href="author.html#412">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-19 10:40:02 +0200 (Wed, 19 Apr 2006)
+New Revision: 425
+
+Removed:
+   branches/use-scsi-ml/patchset/broken-out/0009-scsi-tgt-add-task-management-function-support.txt
+   branches/use-scsi-ml/patchset/broken-out/0010-scsi-tgt-add-NET-dependence-to-Kconfig.txt
+Log:
+Somehow, I forgot to remove some old patches.
+
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0009-scsi-tgt-add-task-management-function-support.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0009-scsi-tgt-add-task-management-function-support.txt	2006-04-16 09:38:03 UTC (rev 424)
++++ branches/use-scsi-ml/patchset/broken-out/0009-scsi-tgt-add-task-management-function-support.txt	2006-04-19 08:40:02 UTC (rev 425)
+@@ -1,463 +0,0 @@
+-Subject: [PATCH 09/10] scsi tgt: add task management function support
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1144370959 +0900
+-
+-This patch addes task management function support to tgt. This
+-assumes that all the previous patchsets are applied.
+-
+-- add callback to task management function to scsi_host_template
+-structure. It is used notify LLDs of the completion of a TMF request.
+-
+-- this patch doesn't use a single queue for TMF requests and SCSI
+-commands yet. We'll work on it later on.
+-
+-- when LLDs queue scsi commands to tgt (scsi_tgt_queue_command), they
+-need to specify unique 'tag' for each command for ABORT_TASK.
+-
+-- when tgt aborts a command, it calls eh_abort_handler in
+-scsi_host_template structure. Would be better to add
+-tgt_eh_abort_handler for LLDs support target and initiator modes at
+-the same time?
+-
+-tgt TMF works in the followings:
+-
+-- When LLDs queue scsi commands to tgt (scsi_tgt_queue_command), they
+-need to specify unique 'tag' for each command.
+-
+-- LLDs call 'int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *host, int,
+-u64 tag, struct scsi_lun *lun, void *data)'.
+-
+-- int (* tsk_mgmt_response)(u64 data, int result) is added to
+-scsi_host_template.
+-
+-When an initiator sends a task management request, the LLD calls
+-scsi_tgt_tsk_mgmt_request. the LLD can use whatever it wants for the
+-data arg. The data arg is used later as the arg in the
+-tsk_mgmt_response callback.
+-
+-tgt core just sends the task management request to user space
+-(by using TGT_KEVENT_TSK_MGMT_REQ).
+-
+-In the case of ABORT_TASK, tgtd finds a single command to abort and
+-sends TGT_UEVENT_CMD_RSP and TGT_UEVENT_TSK_MGMT_RSP events.
+-
+-tgt core calls eh_abort_handler for TGT_UEVENT_CMD_RSP and then
+-tsk_mgmt_response for TGT_UEVENT_TSK_MGMT_RSP.
+-
+-If tgtd fails to find a command to abort, it sends only
+-TGT_UEVENT_TSK_MGMT_RSP event (no TGT_UEVENT_CMD_RSP event).
+-
+-In the case of the rests task management function (like
+-ABORT_TASK_SET), tgt needs to abort multiple commands. Thus, tgtd
+-finds multiple commands to abort and sends multiple TGT_UEVENT_CMD_RSP
+-events and a single TGT_UEVENT_TSK_MGMT_RSP event. tgt core calls
+-eh_abort_handler multiple times and tsk_mgmt_response once.
+-
+-eh_abort_handler enables LLDs to safely free resource related with a
+-command to abort.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi_tgt_if.c   |   43 +++++++++++++++---
+- drivers/scsi/scsi_tgt_lib.c  |  103 +++++++++++++++++++++++++++++-------------
+- drivers/scsi/scsi_tgt_priv.h |   11 +++-
+- include/scsi/scsi_host.h     |    3 +
+- include/scsi/scsi_tgt.h      |    6 ++
+- include/scsi/scsi_tgt_if.h   |    7 ++-
+- 6 files changed, 125 insertions(+), 48 deletions(-)
+-
+-b9579b62f8d6309815a60da2e6f9a7638df074aa
+-diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
+-index a31c8d5..ba1b75b 100644
+---- a/drivers/scsi/scsi_tgt_if.c
+-+++ b/drivers/scsi/scsi_tgt_if.c
+-@@ -56,7 +56,8 @@ static int send_event_rsp(uint16_t type,
+- 	return netlink_unicast(nl_sk, skb, pid, 0);
+- }
+- 
+--int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t gfp_mask)
+-+int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, u64 tag,
+-+			 gfp_t flags)
+- {
+- 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+- 	struct sk_buff *skb;
+-@@ -71,7 +72,7 @@ int scsi_tgt_uspace_send(struct scsi_cmn
+- 	/*
+- 	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+- 	 */
+--	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-+	skb = alloc_skb(NLMSG_SPACE(len), flags);
+- 	if (!skb)
+- 		return -ENOMEM;
+- 
+-@@ -85,9 +86,11 @@ int scsi_tgt_uspace_send(struct scsi_cmn
+- 	memcpy(ev-&gt;k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev-&gt;k.cmd_req.scb));
+- 	memcpy(ev-&gt;k.cmd_req.lun, lun, sizeof(ev-&gt;k.cmd_req.lun));
+- 	ev-&gt;k.cmd_req.attribute = cmd-&gt;tag;
+-+	ev-&gt;k.cmd_req.tag = tag;
+- 
+--	dprintk(&quot;%d %u %u\n&quot;, ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.cid,
+--		ev-&gt;k.cmd_req.data_len);
+-+	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev-&gt;k.cmd_req.cid,
+-+		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag,
+-+		(unsigned long long) ev-&gt;k.cmd_req.tag);
+- 
+- 	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+- 	if (err &lt; 0)
+-@@ -109,6 +112,24 @@ int scsi_tgt_uspace_send_status(struct s
+- 	return send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev, gfp_mask, tgtd_pid);
+- }
+- 
+-+int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+				  struct scsi_lun *scsilun, void *data)
+-+{
+-+	struct tgt_event ev;
+-+
+-+	memset(&amp;ev, 0, sizeof(ev));
+-+	ev.k.tsk_mgmt_req.host_no = host_no;
+-+	ev.k.tsk_mgmt_req.function = function;
+-+	ev.k.tsk_mgmt_req.tag = tag;
+-+	memcpy(ev.k.tsk_mgmt_req.lun, scsilun, sizeof(ev.k.tsk_mgmt_req.lun));
+-+	ev.k.tsk_mgmt_req.mid = (u64) data;
+-+
+-+	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
+-+		(unsigned long long) ev.k.tsk_mgmt_req.mid);
+-+
+-+	return send_event_rsp(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev, GFP_KERNEL, tgtd_pid);
+-+}
+-+
+- static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+- {
+- 	struct tgt_event *ev = NLMSG_DATA(nlh);
+-@@ -130,6 +151,11 @@ static int event_recv_msg(struct sk_buff
+- 					   ev-&gt;u.cmd_rsp.uaddr,
+- 					   ev-&gt;u.cmd_rsp.rw);
+- 		break;
+-+	case TGT_UEVENT_TSK_MGMT_RSP:
+-+		err = scsi_tgt_kspace_tsk_mgmt(ev-&gt;u.tsk_mgmt_rsp.host_no,
+-+					       ev-&gt;u.tsk_mgmt_rsp.mid,
+-+					       ev-&gt;u.tsk_mgmt_rsp.result);
+-+		break;
+- 	default:
+- 		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+- 		err = -EINVAL;
+-@@ -143,6 +169,7 @@ static int event_recv_skb(struct sk_buff
+- 	int err;
+- 	uint32_t rlen;
+- 	struct nlmsghdr	*nlh;
+-+	struct tgt_event ev;
+- 
+- 	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+- 		nlh = (struct nlmsghdr *) skb-&gt;data;
+-@@ -158,9 +185,11 @@ static int event_recv_skb(struct sk_buff
+- 		 * TODO for passthru commands the lower level should
+- 		 * probably handle the result or we should modify this
+- 		 */
+--		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RSP) {
+--			struct tgt_event ev;
+--
+-+		switch (nlh-&gt;nlmsg_type) {
+-+		case TGT_UEVENT_CMD_RSP:
+-+		case TGT_UEVENT_TSK_MGMT_RSP:
+-+			break;
+-+		default:
+- 			memset(&amp;ev, 0, sizeof(ev));
+- 			ev.k.event_rsp.err = err;
+- 			send_event_rsp(TGT_KEVENT_RSP, &amp;ev,
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 2cbc749..5a98fc4 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -49,6 +49,7 @@ struct scsi_tgt_cmd {
+- 
+- 	struct list_head hash_list;
+- 	struct request *rq;
+-+	u64 tag;
+- };
+- 
+- #define TGT_HASH_ORDER	4
+-@@ -106,7 +107,6 @@ static void scsi_tgt_cmd_destroy(void *d
+- 		cmd-&gt;request-&gt;flags &amp;= ~1UL;
+- 
+- 	scsi_unmap_user_pages(tcmd);
+--	scsi_tgt_uspace_send_status(cmd, GFP_KERNEL);
+- 	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+- 	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+- }
+-@@ -118,19 +118,11 @@ static void init_scsi_tgt_cmd(struct req
+- 	struct list_head *head;
+- 	static u32 tag = 0;
+- 
+--	tcmd-&gt;lun = rq-&gt;end_io_data;
+--	bio_list_init(&amp;tcmd-&gt;xfer_list);
+--	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+--
+- 	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+- 	rq-&gt;tag = tag++;
+- 	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(rq-&gt;tag)];
+- 	list_add(&amp;tcmd-&gt;hash_list, head);
+- 	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+--
+--	tcmd-&gt;rq = rq;
+--	rq-&gt;end_io_data = tcmd;
+--	rq-&gt;flags |= REQ_DONTPREP;
+- }
+- 
+- static void scsi_tgt_uspace_send_fn(void *data)
+-@@ -148,33 +140,22 @@ retry:
+- 	if (list_empty(&amp;qdata-&gt;cmd_req))
+- 		return;
+- 
+--	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+--	if (!tcmd) {
+--		err = -ENOMEM;
+--		goto out;
+--	}
+--
+- 	mutex_lock(&amp;qdata-&gt;cmd_req_mutex);
+- 
+- 	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+- 	if (list_empty(&amp;qdata-&gt;cmd_req)) {
+- 		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+- 		mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+--		kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+- 		goto out;
+- 	}
+- 	rq = list_entry_rq(qdata-&gt;cmd_req.next);
+- 	list_del_init(&amp;rq-&gt;queuelist);
+- 	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+- 
+--	if ((rq-&gt;flags &amp; REQ_DONTPREP)) {
+--		kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+--		tcmd = rq-&gt;end_io_data;
+--	} else
+--		init_scsi_tgt_cmd(rq, tcmd);
+--
+-+	tcmd = rq-&gt;end_io_data;
+-+	init_scsi_tgt_cmd(rq, tcmd);
+- 	cmd = rq-&gt;special;
+--	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC);
+-+	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, tcmd-&gt;tag, GFP_ATOMIC);
+- 	if (err &lt; 0) {
+- 		eprintk(&quot;failed to send: %p %d\n&quot;, cmd, err);
+- 
+-@@ -266,20 +247,35 @@ EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
+-  * @scsilun:	scsi lun
+-  * @noblock:	set to nonzero if the command should be queued
+-  **/
+--void scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+--			    int noblock)
+-+int scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+-+			   u64 tag)
+- {
+- 	struct request_queue *q = cmd-&gt;request-&gt;q;
+- 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+- 	unsigned long flags;
+-+	struct scsi_tgt_cmd *tcmd;
+-+
+-+	/*
+-+	 * It would be better to allocate scsi_tgt_cmd structure in
+-+	 * scsi_host_get_command and not to fail due to OOM.
+-+	 */
+-+	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+-+	if (!tcmd)
+-+		return -ENOMEM;
+-+	cmd-&gt;request-&gt;end_io_data = tcmd;
+- 
+--	cmd-&gt;request-&gt;end_io_data = scsilun;
+-+	bio_list_init(&amp;tcmd-&gt;xfer_list);
+-+	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+-+	tcmd-&gt;lun = scsilun;
+-+	tcmd-&gt;tag = tag;
+-+	tcmd-&gt;rq = cmd-&gt;request;
+- 
+- 	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+- 	list_add_tail(&amp;cmd-&gt;request-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+- 	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+- 
+- 	queue_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work);
+-+	return 0;
+- }
+- EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+- 
+-@@ -293,12 +289,7 @@ static void scsi_tgt_cmd_done(struct scs
+- 
+- 	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+- 
+--	/* don't we have to call this if result is set or not */
+--	if (cmd-&gt;result) {
+--		scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+--		return;
+--	}
+--
+-+	scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+- 	INIT_WORK(&amp;tcmd-&gt;work, scsi_tgt_cmd_destroy, cmd);
+- 	queue_work(scsi_tgtd, &amp;tcmd-&gt;work);
+- }
+-@@ -495,6 +486,18 @@ static int scsi_tgt_copy_sense(struct sc
+- 	return 0;
+- }
+- 
+-+static int scsi_tgt_abort_cmd(struct Scsi_Host *host, struct scsi_cmnd *cmd)
+-+{
+-+	int err;
+-+
+-+	err = host-&gt;hostt-&gt;eh_abort_handler(cmd);
+-+	if (err)
+-+		eprintk(&quot;fail to abort %p\n&quot;, cmd);
+-+
+-+	scsi_tgt_cmd_destroy(cmd);
+-+	return err;
+-+}
+-+
+- static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u32 cid)
+- {
+- 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-@@ -545,6 +548,10 @@ int scsi_tgt_kspace_exec(int host_no, u3
+- 	dprintk(&quot;cmd %p result %d len %d bufflen %u %lu %x\n&quot;, cmd,
+- 		result, len, cmd-&gt;request_bufflen, rq_data_dir(rq), cmd-&gt;cmnd[0]);
+- 
+-+	if (result == TASK_ABORTED) {
+-+		scsi_tgt_abort_cmd(shost, cmd);
+-+		goto done;
+-+	}
+- 	/*
+- 	 * store the userspace values here, the working values are
+- 	 * in the request_* values
+-@@ -585,6 +592,38 @@ done:
+- 	return err;
+- }
+- 
+-+int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *shost, int function, u64 tag,
+-+			      struct scsi_lun *scsilun, void *data)
+-+{
+-+	int err;
+-+
+-+	/* TODO: need to retry if this fails. */
+-+	err = scsi_tgt_uspace_send_tsk_mgmt(shost-&gt;host_no, function,
+-+					    tag, scsilun, data);
+-+	if (err &lt; 0)
+-+		eprintk(&quot;The task management request lost!\n&quot;);
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_tsk_mgmt_request);
+-+
+-+int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result)
+-+{
+-+	struct Scsi_Host *shost;
+-+	int err;
+-+
+-+	dprintk(&quot;%d %d %llx\n&quot;, host_no, result, (unsigned long long) mid);
+-+
+-+	shost = scsi_host_lookup(host_no);
+-+	if (IS_ERR(shost)) {
+-+		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
+-+		return -EINVAL;
+-+	}
+-+	err = shost-&gt;hostt-&gt;tsk_mgmt_response(mid, result);
+-+	scsi_host_put(shost);
+-+
+-+	return err;
+-+}
+-+
+- static int __init scsi_tgt_init(void)
+- {
+- 	int err;
+-diff --git a/drivers/scsi/scsi_tgt_priv.h b/drivers/scsi/scsi_tgt_priv.h
+-index 6fedcec..77a1d06 100644
+---- a/drivers/scsi/scsi_tgt_priv.h
+-+++ b/drivers/scsi/scsi_tgt_priv.h
+-@@ -4,18 +4,21 @@ struct Scsi_Host;
+- struct task_struct;
+- 
+- /* tmp - will replace with SCSI logging stuff */
+--#define dprintk(fmt, args...)					\
+-+#define eprintk(fmt, args...)					\
+- do {								\
+- 	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+- } while (0)
+- 
+--#define eprintk dprintk
+-+#define dprintk eprintk
+- 
+- extern void scsi_tgt_if_exit(void);
+- extern int scsi_tgt_if_init(void);
+- 
+--extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t flags);
+-+extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun,
+-+				u64 tag, gfp_t flags);
+- extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+- extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+- 				unsigned long uaddr, u8 rw);
+--
+-+extern int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+					 struct scsi_lun *scsilun, void *data);
+-+extern int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result);
+-diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
+-index 8b799db..eca5721 100644
+---- a/include/scsi/scsi_host.h
+-+++ b/include/scsi/scsi_host.h
+-@@ -153,6 +153,9 @@ struct scsi_host_template {
+- 	int (* transfer_data)(struct scsi_cmnd *,
+- 			      void (*done)(struct scsi_cmnd *));
+- 
+-+	/* Used as callback for the completion of task management request. */
+-+	int (* tsk_mgmt_response)(u64 mid, int result);
+-+
+- 	/*
+- 	 * This is an error handling strategy routine.  You don't need to
+- 	 * define one of these if you don't want to - there is a default
+-diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
+-index 91ad6bc..2d65be7 100644
+---- a/include/scsi/scsi_tgt.h
+-+++ b/include/scsi/scsi_tgt.h
+-@@ -6,6 +6,8 @@ struct Scsi_Host;
+- struct scsi_cmnd;
+- struct scsi_lun;
+- 
+--extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd);
+-+extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *);
+- extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+--extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, int);
+-+extern int scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, u64);
+-+extern int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *, int, u64, struct scsi_lun *,
+-+				     void *);
+-diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
+-index ebca452..63b2e3a 100644
+---- a/include/scsi/scsi_tgt_if.h
+-+++ b/include/scsi/scsi_tgt_if.h
+-@@ -52,7 +52,7 @@ struct tgt_event {
+- 		} cmd_rsp;
+- 		struct {
+- 			int host_no;
+--			int mid;
+-+			uint64_t mid;
+- 			int result;
+- 		} tsk_mgmt_rsp;
+- 	} u;
+-@@ -69,6 +69,7 @@ struct tgt_event {
+- 			uint8_t scb[16];
+- 			uint8_t lun[8];
+- 			int attribute;
+-+			uint64_t tag;
+- 		} cmd_req;
+- 		struct {
+- 			int host_no;
+-@@ -77,10 +78,10 @@ struct tgt_event {
+- 		} cmd_done;
+- 		struct {
+- 			int host_no;
+--			int mid;
+-+			int function;
+- 			uint64_t tag;
+- 			uint8_t lun[8];
+--			int function;
+-+			uint64_t mid;
+- 		} tsk_mgmt_req;
+- 	} k;
+- 
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0010-scsi-tgt-add-NET-dependence-to-Kconfig.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0010-scsi-tgt-add-NET-dependence-to-Kconfig.txt	2006-04-16 09:38:03 UTC (rev 424)
++++ branches/use-scsi-ml/patchset/broken-out/0010-scsi-tgt-add-NET-dependence-to-Kconfig.txt	2006-04-19 08:40:02 UTC (rev 425)
+@@ -1,32 +0,0 @@
+-Subject: [PATCH 10/10] scsi tgt: add NET dependence to Kconfig
+-From: FUJITA &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-
+-&gt; From: &quot;Jun'ichi Nomura&quot; &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">j-nomura at ce.jp.nec.com</A>&gt;:
+-
+-scsi_tgt_if.c depends on CONFIG_NET for using netlink.
+-So it would be nice if the Kconfig entry checks it.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/Kconfig |    2 +-
+- 1 files changed, 1 insertions(+), 1 deletions(-)
+-
+-731f4924dd33579ffa5ff45ad03b7b7e933f728b
+-diff --git a/drivers/scsi/Kconfig b/drivers/scsi/Kconfig
+-index d09c792..5b5eeb4 100644
+---- a/drivers/scsi/Kconfig
+-+++ b/drivers/scsi/Kconfig
+-@@ -29,7 +29,7 @@ config SCSI
+- 
+- config SCSI_TGT
+- 	tristate &quot;SCSI target support&quot;
+--	depends on SCSI &amp;&amp; EXPERIMENTAL
+-+	depends on SCSI &amp;&amp; NET &amp;&amp; EXPERIMENTAL
+- 	---help---
+- 	  If you want to use SCSI target mode drivers enable this option.
+- 	  If you choose M, the module will be called scsi_tgt.
+--- 
+-1.1.5
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000411.html">[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000413.html">[Stgt-svn] r426 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#412">[ date ]</a>
+              <a href="thread.html#412">[ thread ]</a>
+              <a href="subject.html#412">[ subject ]</a>
+              <a href="author.html#412">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

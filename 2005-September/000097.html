@@ -1,0 +1,245 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r103 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r103%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251102.j8PB2CW7005619%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000096.html">
+   <LINK REL="Next"  HREF="000098.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r103 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r103%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251102.j8PB2CW7005619%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r103 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 13:02:13 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000096.html">[Stgt-svn] r102 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000098.html">[Stgt-svn] r104 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#97">[ date ]</a>
+              <a href="thread.html#97">[ thread ]</a>
+              <a href="subject.html#97">[ subject ]</a>
+              <a href="author.html#97">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 13:02:11 +0200 (Sun, 25 Sep 2005)
+New Revision: 103
+
+Modified:
+   trunk/iscsi/kernel/conn.c
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/session.c
+Log:
+Cleanup of iSCSI connection code.
+
+Modified: trunk/iscsi/kernel/conn.c
+===================================================================
+--- trunk/iscsi/kernel/conn.c	2005-09-25 10:42:08 UTC (rev 102)
++++ trunk/iscsi/kernel/conn.c	2005-09-25 11:02:11 UTC (rev 103)
+@@ -12,7 +12,7 @@
+ #include &quot;iscsi_dbg.h&quot;
+ #include &quot;digest.h&quot;
+ 
+-struct iscsi_conn *conn_lookup(struct iscsi_session *session, u16 cid)
++static struct iscsi_conn *conn_lookup(struct iscsi_session *session, u16 cid)
+ {
+ 	struct iscsi_conn *conn;
+ 
+@@ -23,7 +23,7 @@
+ 	return NULL;
+ }
+ 
+-static void iet_state_change(struct sock *sk)
++static void state_change(struct sock *sk)
+ {
+ 	struct iscsi_conn *conn = sk-&gt;sk_user_data;
+ 	struct iscsi_target *target = conn-&gt;session-&gt;target;
+@@ -36,7 +36,7 @@
+ 	target-&gt;nthread_info.old_state_change(sk);
+ }
+ 
+-static void iet_data_ready(struct sock *sk, int len)
++static void data_ready(struct sock *sk, int len)
+ {
+ 	struct iscsi_conn *conn = sk-&gt;sk_user_data;
+ 	struct iscsi_target *target = conn-&gt;session-&gt;target;
+@@ -45,7 +45,7 @@
+ 	target-&gt;nthread_info.old_data_ready(sk, len);
+ }
+ 
+-static void iet_socket_bind(struct iscsi_conn *conn)
++static void socket_bind(struct iscsi_conn *conn)
+ {
+ 	int opt = 1;
+ 	mm_segment_t oldfs;
+@@ -59,15 +59,16 @@
+ 
+ 	write_lock(&amp;conn-&gt;sock-&gt;sk-&gt;sk_callback_lock);
+ 	target-&gt;nthread_info.old_state_change = conn-&gt;sock-&gt;sk-&gt;sk_state_change;
+-	conn-&gt;sock-&gt;sk-&gt;sk_state_change = iet_state_change;
++	conn-&gt;sock-&gt;sk-&gt;sk_state_change = state_change;
+ 
+ 	target-&gt;nthread_info.old_data_ready = conn-&gt;sock-&gt;sk-&gt;sk_data_ready;
+-	conn-&gt;sock-&gt;sk-&gt;sk_data_ready = iet_data_ready;
++	conn-&gt;sock-&gt;sk-&gt;sk_data_ready = data_ready;
+ 	write_unlock(&amp;conn-&gt;sock-&gt;sk-&gt;sk_callback_lock);
+ 
+ 	oldfs = get_fs();
+ 	set_fs(get_ds());
+-	conn-&gt;sock-&gt;ops-&gt;setsockopt(conn-&gt;sock, SOL_TCP, TCP_NODELAY, (void *)&amp;opt, sizeof(opt));
++	conn-&gt;sock-&gt;ops-&gt;setsockopt(conn-&gt;sock, SOL_TCP, TCP_NODELAY,
++				    (void *)&amp;opt, sizeof(opt));
+ 	set_fs(oldfs);
+ }
+ 
+@@ -76,9 +77,9 @@
+ 	dprintk(D_GENERIC, &quot;%p %#Lx %u\n&quot;, conn-&gt;session,
+ 		(unsigned long long) conn-&gt;session-&gt;sid, conn-&gt;cid);
+ 
+-	assert(atomic_read(&amp;conn-&gt;nr_cmnds) == 0);
+-	assert(list_empty(&amp;conn-&gt;pdu_list));
+-	assert(list_empty(&amp;conn-&gt;write_list));
++	BUG_ON(atomic_read(&amp;conn-&gt;nr_cmnds));
++	BUG_ON(!list_empty(&amp;conn-&gt;pdu_list));
++	BUG_ON(!list_empty(&amp;conn-&gt;write_list));
+ 
+ 	list_del(&amp;conn-&gt;list);
+ 	list_del(&amp;conn-&gt;poll_list);
+@@ -89,16 +90,28 @@
+ 	return 0;
+ }
+ 
+-static int iet_conn_alloc(struct iscsi_session *session, struct conn_info *info)
++void conn_close(struct iscsi_conn *conn)
+ {
++	if (test_and_clear_bit(CONN_ACTIVE, &amp;conn-&gt;state))
++		set_bit(CONN_CLOSING, &amp;conn-&gt;state);
++
++	nthread_wakeup(conn-&gt;session-&gt;target);
++}
++
++int conn_add(struct iscsi_session *session, struct conn_info *info)
++{
+ 	struct iscsi_conn *conn;
+ 
+-	dprintk(D_SETUP, &quot;%#Lx:%u\n&quot;, (unsigned long long) session-&gt;sid, info-&gt;cid);
++	dprintk(D_SETUP, &quot;%#Lx:%u\n&quot;,
++		(unsigned long long) session-&gt;sid, info-&gt;cid);
+ 
+-	conn = kmalloc(sizeof(*conn), GFP_KERNEL);
++	conn = conn_lookup(session, info-&gt;cid);
++	if (conn)
++		return -EEXIST;
++
++	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
+ 	if (!conn)
+ 		return -ENOMEM;
+-	memset(conn, 0, sizeof(*conn));
+ 
+ 	conn-&gt;session = session;
+ 	conn-&gt;cid = info-&gt;cid;
+@@ -124,7 +137,7 @@
+ 	set_bit(CONN_ACTIVE, &amp;conn-&gt;state);
+ 
+ 	conn-&gt;file = fget(info-&gt;fd);
+-	iet_socket_bind(conn);
++	socket_bind(conn);
+ 
+ 	list_add(&amp;conn-&gt;poll_list, &amp;session-&gt;target-&gt;nthread_info.active_conns);
+ 
+@@ -133,25 +146,6 @@
+ 	return 0;
+ }
+ 
+-void conn_close(struct iscsi_conn *conn)
+-{
+-	if (test_and_clear_bit(CONN_ACTIVE, &amp;conn-&gt;state))
+-		set_bit(CONN_CLOSING, &amp;conn-&gt;state);
+-
+-	nthread_wakeup(conn-&gt;session-&gt;target);
+-}
+-
+-int conn_add(struct iscsi_session *session, struct conn_info *info)
+-{
+-	struct iscsi_conn *conn;
+-	int err = -EEXIST;
+-
+-	if ((conn = conn_lookup(session, info-&gt;cid)))
+-		return err;
+-
+-	return iet_conn_alloc(session, info);
+-}
+-
+ int conn_del(struct iscsi_session *session, struct conn_info *info)
+ {
+ 	struct iscsi_conn *conn;
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-25 10:42:08 UTC (rev 102)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-25 11:02:11 UTC (rev 103)
+@@ -200,7 +200,6 @@
+ extern void send_scsi_rsp(struct iscsi_cmnd *);
+ 
+ /* conn.c */
+-extern struct iscsi_conn *conn_lookup(struct iscsi_session *, u16);
+ extern int conn_add(struct iscsi_session *, struct conn_info *);
+ extern int conn_del(struct iscsi_session *, struct conn_info *);
+ extern int conn_free(struct iscsi_conn *);
+
+Modified: trunk/iscsi/kernel/session.c
+===================================================================
+--- trunk/iscsi/kernel/session.c	2005-09-25 10:42:08 UTC (rev 102)
++++ trunk/iscsi/kernel/session.c	2005-09-25 11:02:11 UTC (rev 103)
+@@ -80,10 +80,8 @@
+ 
+ 	BUG_ON(!list_empty(&amp;session-&gt;conn_list));
+ 
+-	for (i = 0; i &lt; ARRAY_SIZE(session-&gt;cmnd_hash); i++) {
+-		if (!list_empty(&amp;session-&gt;cmnd_hash[i]))
+-			BUG();
+-	}
++	for (i = 0; i &lt; ARRAY_SIZE(session-&gt;cmnd_hash); i++)
++		BUG_ON(!list_empty(&amp;session-&gt;cmnd_hash[i]));
+ 
+ 	list_del(&amp;session-&gt;list);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000096.html">[Stgt-svn] r102 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000098.html">[Stgt-svn] r104 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#97">[ date ]</a>
+              <a href="thread.html#97">[ thread ]</a>
+              <a href="subject.html#97">[ subject ]</a>
+              <a href="author.html#97">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

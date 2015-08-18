@@ -1,0 +1,109 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r750 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r750%20-%20trunk/usr&In-Reply-To=%3C200701021601.l02G1FCZ005244%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000736.html">
+   <LINK REL="Next"  HREF="000738.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r750 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r750%20-%20trunk/usr&In-Reply-To=%3C200701021601.l02G1FCZ005244%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r750 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Jan  2 17:01:15 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000736.html">[Stgt-svn] r749 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000738.html">[Stgt-svn] r751 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#737">[ date ]</a>
+              <a href="thread.html#737">[ thread ]</a>
+              <a href="subject.html#737">[ subject ]</a>
+              <a href="author.html#737">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-02 17:01:15 +0100 (Tue, 02 Jan 2007)
+New Revision: 750
+
+Modified:
+   trunk/usr/driver.c
+   trunk/usr/driver.h
+Log:
+More XEN stuff.
+
+
+Modified: trunk/usr/driver.c
+===================================================================
+--- trunk/usr/driver.c	2007-01-02 11:42:42 UTC (rev 749)
++++ trunk/usr/driver.c	2007-01-02 16:01:15 UTC (rev 750)
+@@ -14,6 +14,10 @@
+ #include &quot;iscsi/iscsi.h&quot;
+ #endif
+ 
++#ifdef XEN
++#include &quot;xen/xen.h&quot;
++#endif
++
+ struct tgt_driver *tgt_drivers[] = {
+ #ifdef IBMVIO
+ 	&amp;ibmvio,
+@@ -21,6 +25,9 @@
+ #ifdef ISCSI
+ 	&amp;iscsi,
+ #endif
++#ifdef XEN
++	&amp;xen,
++#endif
+ 	NULL,
+ };
+ 
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-01-02 11:42:42 UTC (rev 749)
++++ trunk/usr/driver.h	2007-01-02 16:01:15 UTC (rev 750)
+@@ -1,4 +1,4 @@
+-extern struct backedio_template mmap_bdt, aio_bdt, sg_bdt;
++extern struct backedio_template mmap_bdt, aio_bdt, sg_bdt, xen_bdt;
+ 
+ struct tgt_driver {
+ 	const char *name;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000736.html">[Stgt-svn] r749 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000738.html">[Stgt-svn] r751 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#737">[ date ]</a>
+              <a href="thread.html#737">[ thread ]</a>
+              <a href="subject.html#737">[ subject ]</a>
+              <a href="author.html#737">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

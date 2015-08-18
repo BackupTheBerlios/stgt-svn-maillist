@@ -1,0 +1,121 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r789 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r789%20-%20trunk/usr&In-Reply-To=%3C200702280120.l1S1KvH8007786%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000775.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r789 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r789%20-%20trunk/usr&In-Reply-To=%3C200702280120.l1S1KvH8007786%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r789 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Feb 28 02:20:57 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000775.html">[Stgt-svn] r788 - trunk/usr/iscsi
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#776">[ date ]</a>
+              <a href="thread.html#776">[ thread ]</a>
+              <a href="subject.html#776">[ subject ]</a>
+              <a href="author.html#776">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-28 02:20:49 +0100 (Wed, 28 Feb 2007)
+New Revision: 789
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/tgtif.c
+Log:
+Fix 32/64 bit bugs that I introduced at r786.
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-27 07:59:37 UTC (rev 788)
++++ trunk/usr/scsi.c	2007-02-28 01:20:49 UTC (rev 789)
+@@ -494,7 +494,7 @@
+ 	int *len = &amp;cmd-&gt;len;
+ 	int *async = &amp;cmd-&gt;async;
+ 	uint64_t nid = cmd-&gt;cmd_nexus_id;
+-	unsigned long *uaddr = (unsigned long *)&amp;cmd-&gt;uaddr;
++	unsigned long uaddr = cmd-&gt;uaddr;
+ 	struct tgt_device *dev = cmd-&gt;dev;
+ 	struct list_head *dev_list = &amp;target-&gt;device_list;
+ 	bkio_submit_t *submit = target-&gt;bdt-&gt;bd_cmd_submit;
+@@ -587,10 +587,11 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = submit(dev, scb, *rw, datalen, uaddr, *offset, async, key);
++		result = submit(dev, scb, *rw, datalen, &amp;uaddr, *offset, async, key);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
++			cmd-&gt;uaddr = uaddr;
+ 		} else {
+ 			*rw = READ;
+ 			*offset = 0;
+@@ -622,7 +623,7 @@
+ 
+ out:
+ 	if (data)
+-		*uaddr = (unsigned long) data;
++		cmd-&gt;uaddr = (unsigned long) data;
+ 
+ 	return result;
+ }
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-27 07:59:37 UTC (rev 788)
++++ trunk/usr/tgtif.c	2007-02-28 01:20:49 UTC (rev 789)
+@@ -106,6 +106,9 @@
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 
++	dprintf(&quot;%p %u %d %&quot; PRIx64 &quot; %u %&quot; PRIu64 &quot;\n&quot;, cmd,
++		cmd-&gt;len, result, cmd-&gt;uaddr, cmd-&gt;rw, cmd-&gt;tag);
++
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+ 	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+ 	ev.p.cmd_rsp.len = cmd-&gt;len;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000775.html">[Stgt-svn] r788 - trunk/usr/iscsi
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#776">[ date ]</a>
+              <a href="thread.html#776">[ thread ]</a>
+              <a href="subject.html#776">[ subject ]</a>
+              <a href="author.html#776">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

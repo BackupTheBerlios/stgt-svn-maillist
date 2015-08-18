@@ -1,0 +1,411 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r413 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r413%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604150324.k3F3OiYs000424%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000399.html">
+   <LINK REL="Next"  HREF="000401.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r413 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r413%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604150324.k3F3OiYs000424%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r413 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 15 05:24:44 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000399.html">[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000401.html">[Stgt-svn] r414 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#400">[ date ]</a>
+              <a href="thread.html#400">[ thread ]</a>
+              <a href="subject.html#400">[ subject ]</a>
+              <a href="author.html#400">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-15 05:24:39 +0200 (Sat, 15 Apr 2006)
+New Revision: 413
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Changes for libsrp
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 23:20:00 UTC (rev 412)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-15 03:24:39 UTC (rev 413)
+@@ -24,7 +24,7 @@
+ 
+ #include &lt;linux/interrupt.h&gt;
+ #include &lt;linux/module.h&gt;
+-#include &lt;linux/mempool.h&gt;
++#include &lt;linux/kfifo.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
+ #include &lt;scsi/scsi_tcq.h&gt;
+@@ -42,9 +42,6 @@
+ 
+ #define	TGT_NAME	&quot;ibmvstgt&quot;
+ 
+-#define	vio_iu(iue)\
+-	((union viosrp_iu *) ((char *) (iue) + sizeof(struct iu_entry)))
+-
+ /*
+  * Hypervisor calls.
+  */
+@@ -70,55 +67,63 @@
+ #define dprintk eprintk
+ /* #define dprintk(fmt, args...) */
+ 
+-/* all driver data associated with a host adapter */
++enum iue_flags {
++	V_DIOVER,
++	V_WRITE,
++	V_LINKED,
++	V_FLYING,
++};
++
++enum srp_task_attributes {
++	SRP_SIMPLE_TASK = 0,
++	SRP_HEAD_TASK = 1,
++	SRP_ORDERED_TASK = 2,
++	SRP_ACA_TASK = 4
++};
++
++struct srp_buf {
++	dma_addr_t dma;
++	void *buf;
++};
++
++struct srp_queue {
++	void *pool;
++	void *items;
++	struct kfifo *queue;
++	spinlock_t lock;
++};
++
+ struct server_adapter {
+ 	struct device *dev;
+ 	struct vio_dev *dma_dev;
+ 
+ 	struct crq_queue crq_queue;
+ 	struct work_struct crq_work;
+-	mempool_t *iu_pool;
+ 
+ 	spinlock_t lock; /* cmd_queue */
+ 	struct list_head cmd_queue;
+ 
++	struct srp_queue iu_queue;
++	struct srp_buf *rx_ring[INITIAL_SRP_LIMIT];
++
+ 	unsigned long liobn;
+ 	unsigned long riobn;
+ 
+ 	struct Scsi_Host *shost;
+ };
+ 
+-enum iue_flags {
+-	V_DIOVER,
+-	V_WRITE,
+-	V_LINKED,
+-	V_FLYING,
+-};
+-
+-enum srp_task_attributes {
+-	SRP_SIMPLE_TASK = 0,
+-	SRP_HEAD_TASK = 1,
+-	SRP_ORDERED_TASK = 2,
+-	SRP_ACA_TASK = 4
+-};
+-
+-/*
+- * This structure tracks our fundamental unit of work.  Whenever
+- * an SRP Information Unit (IU) arrives, we track all the good stuff
+- * here
+- */
+ struct iu_entry {
+ 	struct server_adapter *adapter;
+ 	struct scsi_cmnd *scmd;
+ 
+ 	struct list_head ilist;
+-	dma_addr_t iu_token;
+ 	dma_addr_t remote_token;
+ 	unsigned long flags;
++
++	struct srp_buf *sbuf;
+ };
+ 
+ static struct workqueue_struct *vtgtd;
+-static kmem_cache_t *iu_cache;
+ 
+ /*
+  * These are fixed for the system and come from the Open Firmware device tree.
+@@ -128,6 +133,85 @@
+ static char partition_name[97] = &quot;UNKNOWN&quot;;
+ static unsigned int partition_number = -1;
+ 
++static union viosrp_iu *vio_iu(struct iu_entry *iue)
++{
++	return (union viosrp_iu *) (iue-&gt;sbuf-&gt;buf);
++}
++
++static int iu_pool_alloc(struct srp_queue *q, size_t max, struct srp_buf **ring)
++{
++	int i;
++	struct iu_entry *iue;
++
++	q-&gt;pool = kcalloc(max, sizeof(struct iu_entry *), GFP_KERNEL);
++	if (!q-&gt;pool)
++		return -ENOMEM;
++	q-&gt;items = kcalloc(max, sizeof(struct iu_entry), GFP_KERNEL);
++	if (!q-&gt;items)
++		goto free_pool;
++
++	spin_lock_init(&amp;q-&gt;lock);
++	q-&gt;queue = kfifo_init((void *) q-&gt;pool, max * sizeof(void *),
++			      GFP_KERNEL, &amp;q-&gt;lock);
++	if (IS_ERR(q-&gt;queue))
++		goto free_item;
++
++	for (i = 0, iue = q-&gt;items; i &lt; max; i++) {
++		__kfifo_put(q-&gt;queue, (void *) &amp;iue, sizeof(void *));
++		iue-&gt;sbuf = ring[i];
++		iue++;
++	}
++	return 0;
++
++free_item:
++	kfree(q-&gt;items);
++free_pool:
++	kfree(q-&gt;pool);
++	return -ENOMEM;
++}
++
++static void iu_pool_free(struct srp_queue *q)
++{
++	kfree(q-&gt;items);
++	kfree(q-&gt;pool);
++}
++
++static int srp_ring_alloc(struct device *dev, struct srp_buf **ring,
++			  size_t max, size_t size)
++{
++	int i;
++
++	for (i = 0; i &lt; max; i++) {
++		ring[i] = kzalloc(sizeof(struct srp_buf), GFP_KERNEL);
++		if (!ring[i])
++			goto out;
++		ring[i]-&gt;buf = dma_alloc_coherent(dev, size, &amp;ring[i]-&gt;dma,
++						  GFP_KERNEL);
++		if (!ring[i]-&gt;buf)
++			goto out;
++	}
++	return 0;
++
++out:
++	for (i = 0; i &lt; max &amp;&amp; ring[i]; i++) {
++		if (ring[i]-&gt;buf)
++			dma_free_coherent(dev, size, ring[i]-&gt;buf, ring[i]-&gt;dma);
++		kfree(ring[i]);
++	}
++	return -ENOMEM;
++}
++
++static void srp_ring_free(struct device *dev, struct srp_buf **ring, size_t max,
++			  size_t size)
++{
++	int i;
++
++	for (i = 0; i &lt; max; i++) {
++		dma_free_coherent(dev, size, ring[i]-&gt;buf, ring[i]-&gt;dma);
++		kfree(ring[i]);
++	}
++}
++
+ static int send_iu(struct iu_entry *iue, uint64_t length, uint8_t format)
+ {
+ 	long rc, rc1;
+@@ -137,7 +221,7 @@
+ 	} crq;
+ 
+ 	/* First copy the SRP */
+-	rc = h_copy_rdma(length, iue-&gt;adapter-&gt;liobn, iue-&gt;iu_token,
++	rc = h_copy_rdma(length, iue-&gt;adapter-&gt;liobn, iue-&gt;sbuf-&gt;dma,
+ 			 iue-&gt;adapter-&gt;riobn, iue-&gt;remote_token);
+ 
+ 	if (rc)
+@@ -590,36 +674,22 @@
+ 
+ static struct iu_entry *get_iu(struct server_adapter *adapter)
+ {
+-	struct iu_entry *iue;
++	struct iu_entry *iue = NULL;
+ 
+-	iue = mempool_alloc(adapter-&gt;iu_pool, GFP_ATOMIC);
+-	if (!iue)
+-		return NULL;
++	kfifo_get(adapter-&gt;iu_queue.queue, (void *) &amp;iue, sizeof(void *));
++	BUG_ON(!iue);
+ 
+-	memset(iue, 0, sizeof(struct iu_entry));
+ 	iue-&gt;adapter = adapter;
++	iue-&gt;scmd = NULL;
+ 	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
++	iue-&gt;flags = 0;
+ 
+-	iue-&gt;iu_token = dma_map_single(adapter-&gt;dev, vio_iu(iue),
+-				       sizeof(union viosrp_iu),
+-				       DMA_BIDIRECTIONAL);
+-	if (dma_mapping_error(iue-&gt;iu_token)) {
+-		mempool_free(iue, adapter-&gt;iu_pool);
+-		iue = NULL;
+-	}
+-
+ 	return iue;
+ }
+ 
+ static void put_iu(struct iu_entry *iue)
+ {
+-	struct server_adapter *adapter = iue-&gt;adapter;
+-
+-	dprintk(&quot;%p %p\n&quot;, adapter, iue);
+-
+-	dma_unmap_single(adapter-&gt;dev, iue-&gt;iu_token,
+-			 sizeof(union viosrp_iu), DMA_BIDIRECTIONAL);
+-	mempool_free(iue, adapter-&gt;iu_pool);
++	kfifo_put(iue-&gt;adapter-&gt;iu_queue.queue, (void *) &amp;iue, sizeof(void *));
+ }
+ 
+ static int ibmvstgt_cmd_done(struct scsi_cmnd *scmd,
+@@ -856,7 +926,7 @@
+ 	iue-&gt;remote_token = crq-&gt;IU_data_ptr;
+ 
+ 	err = h_copy_rdma(crq-&gt;IU_length, iue-&gt;adapter-&gt;riobn,
+-			  iue-&gt;remote_token, adapter-&gt;liobn, iue-&gt;iu_token);
++			  iue-&gt;remote_token, adapter-&gt;liobn, iue-&gt;sbuf-&gt;dma);
+ 
+ 	if (err != H_Success)
+ 		eprintk(&quot;%ld transferring data error %p\n&quot;, err, iue);
+@@ -1178,11 +1248,14 @@
+ 	INIT_WORK(&amp;adapter-&gt;crq_work, handle_crq, adapter);
+ 	INIT_LIST_HEAD(&amp;adapter-&gt;cmd_queue);
+ 
+-	adapter-&gt;iu_pool = mempool_create(INITIAL_SRP_LIMIT,
+-					  mempool_alloc_slab,
+-					  mempool_free_slab, iu_cache);
+-	if (!adapter-&gt;iu_pool)
++	err = srp_ring_alloc(adapter-&gt;dev, adapter-&gt;rx_ring, INITIAL_SRP_LIMIT,
++			     SRP_MAX_IU_LEN);
++	if (err)
+ 		goto put_host;
++	err = iu_pool_alloc(&amp;adapter-&gt;iu_queue, INITIAL_SRP_LIMIT,
++			    adapter-&gt;rx_ring);
++	if (err)
++		goto free_ring;
+ 
+ 	err = crq_queue_create(&amp;adapter-&gt;crq_queue, adapter);
+ 	if (err)
+@@ -1195,7 +1268,10 @@
+ destroy_queue:
+ 	crq_queue_destroy(adapter);
+ free_pool:
+-	mempool_destroy(adapter-&gt;iu_pool);
++	iu_pool_free(&amp;adapter-&gt;iu_queue);
++free_ring:
++	srp_ring_free(adapter-&gt;dev, adapter-&gt;rx_ring, INITIAL_SRP_LIMIT,
++		      SRP_MAX_IU_LEN);
+ put_host:
+ 	scsi_host_put(shost);
+ 
+@@ -1209,7 +1285,9 @@
+ 	struct Scsi_Host *shost = adapter-&gt;shost;
+ 
+ 	crq_queue_destroy(adapter);
+-	mempool_destroy(adapter-&gt;iu_pool);
++	srp_ring_free(adapter-&gt;dev, adapter-&gt;rx_ring, INITIAL_SRP_LIMIT,
++		      SRP_MAX_IU_LEN);
++	iu_pool_free(&amp;adapter-&gt;iu_queue);
+ 	scsi_remove_host(shost);
+ 	scsi_host_put(shost);
+ 	return 0;
+@@ -1261,20 +1339,12 @@
+ static int ibmvstgt_init(void)
+ {
+ 	int err = -ENOMEM;
+-	size_t size = sizeof(struct iu_entry) + sizeof(union viosrp_iu);
+ 
+ 	printk(&quot;IBM eServer i/pSeries Virtual SCSI Target Driver\n&quot;);
+ 
+-	iu_cache = kmem_cache_create(&quot;ibmvstgt_iu&quot;,
+-				     size, 0,
+-				     SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
+-				     NULL, NULL);
+-	if (!iu_cache)
+-		return err;
+-
+ 	vtgtd = create_workqueue(&quot;ibmvtgtd&quot;);
+ 	if (!vtgtd)
+-		goto free_iu_cache;
++		return err;
+ 
+ 	err = get_system_info();
+ 	if (err &lt; 0)
+@@ -1288,9 +1358,6 @@
+ 
+ destroy_wq:
+ 	destroy_workqueue(vtgtd);
+-free_iu_cache:
+-	kmem_cache_destroy(iu_cache);
+-
+ 	return err;
+ }
+ 
+@@ -1300,7 +1367,6 @@
+ 
+ 	destroy_workqueue(vtgtd);
+ 	vio_unregister_driver(&amp;ibmvstgt_driver);
+-	kmem_cache_destroy(iu_cache);
+ }
+ 
+ module_init(ibmvstgt_init);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000399.html">[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000401.html">[Stgt-svn] r414 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#400">[ date ]</a>
+              <a href="thread.html#400">[ thread ]</a>
+              <a href="subject.html#400">[ subject ]</a>
+              <a href="author.html#400">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

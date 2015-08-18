@@ -1,0 +1,201 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r547 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r547%20-%20trunk/usr&In-Reply-To=%3C200608280702.k7S72pIC001598%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000533.html">
+   <LINK REL="Next"  HREF="000535.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r547 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r547%20-%20trunk/usr&In-Reply-To=%3C200608280702.k7S72pIC001598%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r547 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Aug 28 09:02:51 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000533.html">[Stgt-svn] r546 - in trunk/usr: . ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000535.html">[Stgt-svn] r548 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#534">[ date ]</a>
+              <a href="thread.html#534">[ thread ]</a>
+              <a href="subject.html#534">[ subject ]</a>
+              <a href="author.html#534">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-28 09:02:48 +0200 (Mon, 28 Aug 2006)
+New Revision: 547
+
+Modified:
+   trunk/usr/mmapio.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Add open and close operations to backedio_operations structure.
+
+
+Modified: trunk/usr/mmapio.c
+===================================================================
+--- trunk/usr/mmapio.c	2006-08-27 14:55:06 UTC (rev 546)
++++ trunk/usr/mmapio.c	2006-08-28 07:02:48 UTC (rev 547)
+@@ -23,8 +23,8 @@
+ 	return data;
+ }
+ 
+-static int mmapio_cmd_prepare(struct tgt_device *dev, uint32_t datalen,
+-			      unsigned long *uaddr, uint64_t offset)
++static int mmapio_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
++			     unsigned long *uaddr, uint64_t offset)
+ {
+ 	int fd = dev-&gt;fd;
+ 	void *p;
+@@ -68,7 +68,7 @@
+ }
+ 
+ struct backedio_operations mmapio = {
+-	.cmd_prepare = mmapio_cmd_prepare,
+-	.cmd_buffer_alloc = mmapio_cmd_buffer_alloc,
+-	.cmd_done = mmapio_cmd_done,
++	.bd_cmd_buffer_alloc	= mmapio_cmd_buffer_alloc,
++	.bd_cmd_submit		= mmapio_cmd_submit,
++	.bd_cmd_done		= mmapio_cmd_done,
+ };
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-27 14:55:06 UTC (rev 546)
++++ trunk/usr/scsi.c	2006-08-28 07:02:48 UTC (rev 547)
+@@ -472,8 +472,8 @@
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+ 	*offset = 0;
+-	data = tgt_drivers[lid]-&gt;io_ops-&gt;cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
+-							  datalen);
++	data = tgt_drivers[lid]-&gt;io_ops-&gt;bd_cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
++							     datalen);
+ 
+ 	if (!dev)
+ 		switch (scb[0]) {
+@@ -528,8 +528,8 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = tgt_drivers[lid]-&gt;io_ops-&gt;cmd_prepare(dev, datalen,
+-							       uaddr, *offset);
++		result = tgt_drivers[lid]-&gt;io_ops-&gt;bd_cmd_submit(dev, datalen,
++								 uaddr, *offset);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-27 14:55:06 UTC (rev 546)
++++ trunk/usr/target.c	2006-08-28 07:02:48 UTC (rev 547)
+@@ -311,8 +311,10 @@
+ 
+ 	/* TODO: preallocate cmd */
+ 	cmd = calloc(1, sizeof(*cmd));
+-	if (!cmd)
++	if (!cmd) {
++		eprintf(&quot;out of memory&quot;);
+ 		return -ENOMEM;
++	}
+ 	cmd-&gt;hostno = host_no;
+ 	cmd-&gt;attribute = attribute;
+ 	cmd-&gt;tag = tag;
+@@ -417,9 +419,9 @@
+ 		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = tgt_drivers[target-&gt;lid]-&gt;io_ops-&gt;cmd_done(do_munmap,
+-							 !cmd-&gt;mmapped,
+-							 cmd-&gt;uaddr, cmd-&gt;len);
++	err = tgt_drivers[target-&gt;lid]-&gt;io_ops-&gt;bd_cmd_done(do_munmap,
++							    !cmd-&gt;mmapped,
++							    cmd-&gt;uaddr, cmd-&gt;len);
+ 
+ 	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len, err);
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-27 14:55:06 UTC (rev 546)
++++ trunk/usr/tgtd.h	2006-08-28 07:02:48 UTC (rev 547)
+@@ -25,10 +25,12 @@
+ };
+ 
+ struct backedio_operations {
+-	void * (*cmd_buffer_alloc)(int devio, uint32_t datalen);
+-	int (*cmd_prepare)(struct tgt_device *dev, uint32_t datalen,
+-			   unsigned long *uaddr, uint64_t offset);
+-	int (*cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
++	void *(*bd_cmd_buffer_alloc)(int devio, uint32_t datalen);
++	int (*bd_cmd_submit)(struct tgt_device *dev, uint32_t datalen,
++			     unsigned long *uaddr, uint64_t offset);
++	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
++	int (*bd_open)(struct tgt_device *dev);
++	void (*bd_close)(struct tgt_device *dev);
+ };
+ 
+ extern int kreq_init(int *fd);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-27 14:55:06 UTC (rev 546)
++++ trunk/usr/tgtif.c	2006-08-28 07:02:48 UTC (rev 547)
+@@ -109,13 +109,12 @@
+ {
+ 	struct tgt_event *ev;
+ 
+-	dprintf(&quot;nl event %u\n&quot;, kuring.idx);
+ retry:
+ 	ev = head_ring_hdr(&amp;kuring);
+ 	if (ev-&gt;status == TGT_EVENT_STATUS_EMPTY)
+ 		return;
+ 
+-	dprintf(&quot;event %u\n&quot;, ev-&gt;type);
++	dprintf(&quot;event %u %u\n&quot;, kuring.idx, ev-&gt;type);
+ 
+ 	switch (ev-&gt;type) {
+ 	case TGT_KEVENT_CMD_REQ:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000533.html">[Stgt-svn] r546 - in trunk/usr: . ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000535.html">[Stgt-svn] r548 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#534">[ date ]</a>
+              <a href="thread.html#534">[ thread ]</a>
+              <a href="subject.html#534">[ subject ]</a>
+              <a href="author.html#534">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,202 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r628 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r628%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611101400.kAAE0Tjs020471%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000614.html">
+   <LINK REL="Next"  HREF="000616.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r628 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r628%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611101400.kAAE0Tjs020471%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r628 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 10 15:00:29 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000614.html">[Stgt-svn] r627 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000616.html">[Stgt-svn] r629 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#615">[ date ]</a>
+              <a href="thread.html#615">[ thread ]</a>
+              <a href="subject.html#615">[ subject ]</a>
+              <a href="author.html#615">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-10 15:00:28 +0100 (Fri, 10 Nov 2006)
+New Revision: 628
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/target.c
+Log:
+Add iscsi_param to target.
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-10 11:02:12 UTC (rev 627)
++++ trunk/usr/iscsi/iscsid.c	2006-11-10 14:00:28 UTC (rev 628)
+@@ -321,6 +321,7 @@
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	char *name, *alias, *session_type, *target_name;
++	struct target *target;
+ 
+ 	conn-&gt;cid = be16_to_cpu(req-&gt;cid);
+ 	memcpy(conn-&gt;isid, req-&gt;isid, sizeof(req-&gt;isid));
+@@ -369,12 +370,15 @@
+ 
+ /* 		if (target_find_by_name(target_name, &amp;conn-&gt;tid) &lt; 0 || */
+ /* 		    cops-&gt;initiator_access(conn-&gt;tid, conn-&gt;fd) &lt; 0) { */
+-		if (target_find_by_name(target_name, &amp;conn-&gt;tid) &lt; 0) {
++
++		target = target_find_by_name(target_name);
++		if (!target) {
+ 			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
+ 			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
++		conn-&gt;tid = target-&gt;tid;
+ 
+ /* 		if (conn-&gt;target-&gt;max_sessions &amp;&amp; */
+ /* 		    (++conn-&gt;target-&gt;session_cnt &gt; conn-&gt;target-&gt;max_sessions)) { */
+@@ -385,7 +389,8 @@
+ /* 			return; */
+ /* 		} */
+ 
+-/* 		ki-&gt;param_get(conn-&gt;tid, 0, conn-&gt;session_param); */
++		memcpy(conn-&gt;session_param, target-&gt;session_param,
++		       sizeof(conn-&gt;session_param));
+ 		conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+ 		dprintf(&quot;exp_cmd_sn: %d,%d\n&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmdsn);
+ 		conn-&gt;max_cmd_sn = conn-&gt;exp_cmd_sn;
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-10 11:02:12 UTC (rev 627)
++++ trunk/usr/iscsi/iscsid.h	2006-11-10 14:00:28 UTC (rev 628)
+@@ -206,6 +206,8 @@
+ 
+ 	struct list_head sessions_list;
+ 
++	struct param session_param[ISCSI_PARAM_MAX];
++
+ 	int tid;
+ 	char name[ISCSI_NAME_LEN];
+ 	char *alias;
+@@ -253,7 +255,7 @@
+ extern void session_put(struct session *session);
+ 
+ /* target.c */
+-extern int target_find_by_name(const char *name, int *tid);
++struct target * target_find_by_name(const char *name);
+ struct target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-10 11:02:12 UTC (rev 627)
++++ trunk/usr/iscsi/target.c	2006-11-10 14:00:28 UTC (rev 628)
+@@ -18,6 +18,28 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
++static struct param default_tgt_session_param[] = {
++	{0, 8192},
++	{0, 8192},
++	{0, DIGEST_NONE},
++	{0, DIGEST_NONE},
++	{0, 1},
++	{0, 1},
++	{0, 1},
++	{0, 65536},
++	{0, 262144},
++	{0, 1},
++	{0, 1},
++	{0, 0},
++	{0, 0},
++	{0, 0},
++	{0, 2},
++	{0, 20},
++	{0, 2048},
++	{0, 2048},
++	{0, 1},
++};
++
+ static LIST_HEAD(targets_list);
+ 
+ void target_list_build(struct connection *conn, char *addr, char *name)
+@@ -35,18 +57,16 @@
+ 	}
+ }
+ 
+-int target_find_by_name(const char *name, int *tid)
++struct target *target_find_by_name(const char *name)
+ {
+ 	struct target *target;
+ 
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+-		if (!strcmp(target-&gt;name, name)) {
+-			*tid = target-&gt;tid;
+-			return 0;
+-		}
++		if (!strcmp(target-&gt;name, name))
++			return target;
+ 	}
+ 
+-	return -ENOENT;
++	return NULL;
+ }
+ 
+ struct target* target_find_by_id(int tid)
+@@ -98,6 +118,9 @@
+ 	memset(target, 0, sizeof(*target));
+ 	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+ 
++	memcpy(target-&gt;session_param, default_tgt_session_param,
++	       sizeof(target-&gt;session_param));
++
+ 	INIT_LIST_HEAD(&amp;target-&gt;tlist);
+ 	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
+ 	target-&gt;tid = tid;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000614.html">[Stgt-svn] r627 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000616.html">[Stgt-svn] r629 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#615">[ date ]</a>
+              <a href="thread.html#615">[ thread ]</a>
+              <a href="subject.html#615">[ subject ]</a>
+              <a href="author.html#615">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

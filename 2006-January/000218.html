@@ -1,0 +1,1913 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r231 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r231%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272201.k0RM1BIC032116%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000217.html">
+   <LINK REL="Next"  HREF="000219.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r231 - branches/use-scsi-ml/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r231%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272201.k0RM1BIC032116%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r231 - branches/use-scsi-ml/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Fri Jan 27 23:01:11 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000217.html">[Stgt-svn] r230 - in trunk: . istgt/usr kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000219.html">[Stgt-svn] r232 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#218">[ date ]</a>
+              <a href="thread.html#218">[ thread ]</a>
+              <a href="subject.html#218">[ subject ]</a>
+              <a href="author.html#218">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-27 23:01:10 +0100 (Fri, 27 Jan 2006)
+New Revision: 231
+
+Removed:
+   branches/use-scsi-ml/kernel/Makefile
+   branches/use-scsi-ml/kernel/tgt.c
+   branches/use-scsi-ml/kernel/tgt.h
+   branches/use-scsi-ml/kernel/tgt_nl.c
+   branches/use-scsi-ml/kernel/tgt_priv.h
+   branches/use-scsi-ml/kernel/tgt_protocol.c
+   branches/use-scsi-ml/kernel/tgt_protocol.h
+   branches/use-scsi-ml/kernel/tgt_scsi.c
+   branches/use-scsi-ml/kernel/tgt_scsi.h
+   branches/use-scsi-ml/kernel/tgt_sysfs.c
+   branches/use-scsi-ml/kernel/tgt_target.h
+   branches/use-scsi-ml/kernel/tgt_types.h
+Log:
+remove old files
+
+Deleted: branches/use-scsi-ml/kernel/Makefile
+===================================================================
+--- branches/use-scsi-ml/kernel/Makefile	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/Makefile	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,25 +0,0 @@
+-#
+-# Makefile for the Linux kernel device drivers.
+-#
+-
+-EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_TGT=20
+-
+-ifneq ($(KERNELRELEASE),)
+-obj-m		+= tgt_core.o
+-tgt_core-objs	:= tgt.o tgt_nl.o tgt_sysfs.o tgt_protocol.o
+-
+-obj-m		+= tgt_scsi.o
+-else
+-
+-ifeq ($(KERNELSRC),)
+-	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+-endif
+-
+-PWD := $(shell pwd)
+-
+-default:
+-	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(PWD) modules
+-
+-clean:
+-	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(PWD) clean
+-endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt.c
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt.c	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt.c	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,738 +0,0 @@
+-/*
+- * Core Target Framework code
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/module.h&gt;
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/list.h&gt;
+-#include &lt;linux/pagemap.h&gt;
+-#include &lt;linux/slab.h&gt;
+-#include &lt;linux/mempool.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/file.h&gt;
+-#include &lt;linux/hash.h&gt;
+-#include &lt;asm/scatterlist.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_if.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+-
+-#include &quot;tgt_priv.h&quot;
+-
+-MODULE_LICENSE(&quot;GPL&quot;);
+-
+-struct task_struct *tgtd_tsk;
+-
+-static spinlock_t all_targets_lock;
+-static LIST_HEAD(all_targets);
+-
+-static spinlock_t target_tmpl_lock;
+-static LIST_HEAD(target_tmpl_list);
+-
+-static struct target_type_internal *target_template_get(const char *name)
+-{
+-	unsigned long flags;
+-	struct target_type_internal *ti;
+-
+-	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+-
+-	list_for_each_entry(ti, &amp;target_tmpl_list, list)
+-		if (!strcmp(name, ti-&gt;tt-&gt;name)) {
+-			if (!try_module_get(ti-&gt;tt-&gt;module))
+-				ti = NULL;
+-			spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+-			return ti;
+-		}
+-
+-	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+-
+-	return NULL;
+-}
+-
+-static void target_template_put(struct tgt_target_template *tt)
+-{
+-	module_put(tt-&gt;module);
+-}
+-
+-int tgt_target_template_register(struct tgt_target_template *tt)
+-{
+-	static atomic_t target_type_id = ATOMIC_INIT(0);
+-	unsigned long flags;
+-	struct target_type_internal *ti;
+-	int err;
+-
+-	ti = kzalloc(sizeof(*ti), GFP_KERNEL);
+-	if (!ti)
+-		return -ENOMEM;
+-
+-	INIT_LIST_HEAD(&amp;ti-&gt;list);
+-	ti-&gt;tt = tt;
+-
+-	ti-&gt;proto = tgt_protocol_get(tt-&gt;protocol);
+-	if (!ti-&gt;proto) {
+-		eprintk(&quot;Could not find %s protocol\n&quot;, tt-&gt;protocol);
+-		kfree(ti);
+-		return -EINVAL;
+-	}
+-
+-	ti-&gt;typeid = atomic_add_return(1, &amp;target_type_id);
+-
+-	err = tgt_sysfs_register_type(ti);
+-	if (err)
+-		goto proto_put;
+-
+-	/* set some defaults if not set */
+-
+-	/*
+-	 * If the driver imposes no hard sector transfer limit, start at
+-	 * machine infinity initially.
+-	 */
+-	if (!tt-&gt;max_sectors)
+-		tt-&gt;max_sectors = TGT_DEFAULT_MAX_SECTORS;
+-	/*
+-	 * assume a 4GB boundary, if not set
+-	 */
+-	if (!tt-&gt;seg_boundary_mask)
+-		tt-&gt;seg_boundary_mask = 0xffffffff;
+-
+-	if (!tt-&gt;max_segment_size)
+-		tt-&gt;max_segment_size = MAX_SEGMENT_SIZE;
+-
+-	if (!tt-&gt;max_hw_segments)
+-		tt-&gt;max_hw_segments = MAX_HW_SEGMENTS;
+-
+-	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+-	list_add_tail(&amp;ti-&gt;list, &amp;target_tmpl_list);
+-	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+-
+-	return 0;
+-
+-proto_put:
+-	tgt_protocol_put(ti-&gt;proto);
+-	kfree(ti);
+-
+-	return err;
+-}
+-EXPORT_SYMBOL_GPL(tgt_target_template_register);
+-
+-void tgt_target_template_unregister(struct tgt_target_template *tt)
+-{
+-	unsigned long flags;
+-	struct target_type_internal *ti;
+-
+-	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+-
+-	list_for_each_entry(ti, &amp;target_tmpl_list, list)
+-		if (ti-&gt;tt == tt) {
+-			list_del(&amp;ti-&gt;list);
+-			goto found;
+-		}
+-	ti = NULL;
+-found:
+-	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+-
+-	if (ti) {
+-		tgt_protocol_put(ti-&gt;proto);
+-		tgt_sysfs_unregister_type(ti);
+-	}
+-}
+-EXPORT_SYMBOL_GPL(tgt_target_template_unregister);
+-
+-static void tgt_cmd_uspace_queue(struct tgt_target *target, gfp_t gfp_mask)
+-{
+-	unsigned long flags;
+-	struct tgt_cmd *cmd;
+-	int err = 0;
+-
+-retry:
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	if (!list_empty(&amp;target-&gt;uspace_cmd_queue)) {
+-		cmd = list_entry(target-&gt;uspace_cmd_queue.next,
+-				 struct tgt_cmd, cqueue);
+-		list_del(&amp;cmd-&gt;cqueue);
+-		spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-		err = tgt_uspace_cmd_send(cmd, gfp_mask);
+-		if (err &lt; 0) {
+-			spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-			list_add(&amp;cmd-&gt;cqueue, &amp;target-&gt;uspace_cmd_queue);
+-			goto out;
+-		}
+-		goto retry;
+-	}
+-out:
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	if (err &lt; 0)
+-		queue_work(target-&gt;twq, &amp;target-&gt;send_work);
+-}
+-
+-static void tgt_cmd_uspace_queue_worker(void *data)
+-{
+-	struct tgt_target *target = data;
+-
+-	down(&amp;target-&gt;uspace_sem);
+-	tgt_cmd_uspace_queue(target, GFP_KERNEL);
+-	up(&amp;target-&gt;uspace_sem);
+-}
+-
+-struct tgt_target *target_find(int tid)
+-{
+-	struct tgt_target *target;
+-
+-	spin_lock(&amp;all_targets_lock);
+-	list_for_each_entry(target, &amp;all_targets, tlist) {
+-		if (target-&gt;tid == tid)
+-			goto found;
+-	}
+-	target = NULL;
+-found:
+-	spin_unlock(&amp;all_targets_lock);
+-
+-	return target;
+-}
+-
+-struct tgt_target *tgt_target_create(char *target_type, int queued_cmds)
+-{
+-	char name[16];
+-	static int i, target_id;
+-	struct tgt_target *target;
+-	struct target_type_internal *ti;
+-
+-	target = kzalloc(sizeof(*target), GFP_KERNEL);
+-	if (!target)
+-		return NULL;
+-
+-	ti = target_template_get(target_type);
+-	if (!ti)
+-		goto free_target;
+-
+-	target-&gt;state = TGT_CREATED;
+-	target-&gt;tt = ti-&gt;tt;
+-	target-&gt;proto = ti-&gt;proto;
+-	target-&gt;typeid = ti-&gt;typeid;
+-	target-&gt;tid = target_id++;
+-	spin_lock_init(&amp;target-&gt;lock);
+-	init_MUTEX(&amp;target-&gt;uspace_sem);
+-
+-	INIT_LIST_HEAD(&amp;target-&gt;session_list);
+-	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hlist); i++)
+-		INIT_LIST_HEAD(&amp;target-&gt;cmd_hlist[i]);
+-	INIT_LIST_HEAD(&amp;target-&gt;uspace_cmd_queue);
+-
+-	target-&gt;queued_cmds = queued_cmds ? : TGT_QUEUE_DEPTH;
+-
+-	snprintf(name, sizeof(name), &quot;tgtd%d&quot;, target-&gt;tid);
+-	target-&gt;twq = create_workqueue(name);
+-	if (!target-&gt;twq)
+-		goto put_template;
+-
+-	target-&gt;tt_data = kzalloc(target-&gt;tt-&gt;priv_data_size, GFP_KERNEL);
+-	if (!target-&gt;tt_data)
+-		goto free_workqueue;
+-
+-	if (target-&gt;tt-&gt;target_create)
+-		if (target-&gt;tt-&gt;target_create(target))
+-			goto free_priv_tt_data;
+-
+-	if (tgt_sysfs_register_target(target))
+-		goto tt_destroy;
+-
+-	INIT_WORK(&amp;target-&gt;send_work, tgt_cmd_uspace_queue_worker, target);
+-
+-	spin_lock(&amp;all_targets_lock);
+-	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+-	spin_unlock(&amp;all_targets_lock);
+-	return target;
+-
+-tt_destroy:
+-	if (target-&gt;tt-&gt;target_destroy)
+-		target-&gt;tt-&gt;target_destroy(target);
+-free_priv_tt_data:
+-	kfree(target-&gt;tt_data);
+-free_workqueue:
+-	destroy_workqueue(target-&gt;twq);
+-put_template:
+-	target_template_put(target-&gt;tt);
+-free_target:
+-	kfree(target);
+-	return NULL;
+-}
+-EXPORT_SYMBOL_GPL(tgt_target_create);
+-
+-int tgt_target_destroy(struct tgt_target *target)
+-{
+-	unsigned long flags;
+-
+-	dprintk(&quot;%p\n&quot;, target);
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	/* userspace and maybe a hotunplug are racing (TODO refcounts) */
+-	if (target-&gt;state == TGT_DESTROYED)
+-		return -ENODEV;
+-	target-&gt;state = TGT_DESTROYED;
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	spin_lock(&amp;all_targets_lock);
+-	list_del(&amp;target-&gt;tlist);
+-	spin_unlock(&amp;all_targets_lock);
+-
+-	if (target-&gt;tt-&gt;target_destroy)
+-		target-&gt;tt-&gt;target_destroy(target);
+-
+-	destroy_workqueue(target-&gt;twq);
+-	target_template_put(target-&gt;tt);
+-	tgt_sysfs_unregister_target(target);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_target_destroy);
+-
+-static void tgt_session_op_init(struct tgt_session *session,
+-				void (*func)(void *),
+-				tgt_session_done_t *done, void *arg)
+-{
+-	session-&gt;done = done;
+-	session-&gt;arg = arg;
+-	INIT_WORK(&amp;session-&gt;work, func, session);
+-	queue_work(session-&gt;target-&gt;twq, &amp;session-&gt;work);
+-}
+-
+-static void tgt_session_async_create(void *data)
+-{
+-	struct tgt_session *session = (struct tgt_session *) data;
+-	struct tgt_target *target = session-&gt;target;
+-	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+-	unsigned long flags;
+-	int err = 0;
+-
+-	session-&gt;cmd_pool = mempool_create(TGT_MAX_CMD, mempool_alloc_slab,
+-					   mempool_free_slab, proto-&gt;cmd_cache);
+-	if (!session-&gt;cmd_pool)
+-		err = -ENOMEM;
+-
+-	if (!err) {
+-		spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-		list_add(&amp;session-&gt;slist, &amp;target-&gt;session_list);
+-		spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-	}
+-
+-	session-&gt;done(session-&gt;arg, err ? NULL : session);
+-	if (err)
+-		kfree(session);
+-}
+-
+-int tgt_session_create(struct tgt_target *target, tgt_session_done_t *done,
+-		       void *arg)
+-{
+-	struct tgt_session *session;
+-
+-	BUG_ON(!done);
+-	session = kzalloc(sizeof(*session), GFP_ATOMIC);
+-	if (!session)
+-		return -ENOMEM;
+-	session-&gt;target = target;
+-	INIT_LIST_HEAD(&amp;session-&gt;slist);
+-
+-	tgt_session_op_init(session, tgt_session_async_create, done, arg);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_session_create);
+-
+-static void tgt_session_async_destroy(void *data)
+-{
+-	struct tgt_session *session = (struct tgt_session *) data;
+-	struct tgt_target *target = session-&gt;target;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	list_del(&amp;session-&gt;slist);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	if (session-&gt;done)
+-		session-&gt;done(session-&gt;arg, NULL);
+-
+-	mempool_destroy(session-&gt;cmd_pool);
+-	kfree(session);
+-}
+-
+-int tgt_session_destroy(struct tgt_session *session,
+-			tgt_session_done_t *done, void *arg)
+-{
+-	tgt_session_op_init(session, tgt_session_async_destroy,
+-			    done, arg);
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_session_destroy);
+-
+-static void tgt_unmap_user_pages(struct tgt_cmd *cmd)
+-{
+-	struct page *page;
+-	int i;
+-
+-	for (i = 0; i &lt; cmd-&gt;sg_count; i++) {
+-		page = cmd-&gt;pages[i];
+-		if(!page)
+-			break;
+-		if (test_bit(TGT_CMD_RW, &amp;cmd-&gt;flags))
+-			set_page_dirty_lock(page);
+-		page_cache_release(page);
+-	}
+-	kfree(cmd-&gt;pages);
+-}
+-
+-static struct tgt_cmd *__tgt_cmd_hlist_find(struct tgt_target *target,
+-					    uint64_t tag)
+-{
+-	struct tgt_cmd *cmd;
+-	struct list_head *head = &amp;target-&gt;cmd_hlist[cmd_hashfn(tag)];
+-
+-	list_for_each_entry(cmd, head, hash_list) {
+-		if (cmd_tag(cmd) == tag)
+-			return cmd;
+-	}
+-	return NULL;
+-}
+-
+-static struct tgt_cmd *tgt_cmd_hlist_find(struct tgt_target *target, uint64_t tag)
+-{
+-	unsigned long flags;
+-	struct tgt_cmd *cmd;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	cmd = __tgt_cmd_hlist_find(target, tag);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-	return cmd;
+-}
+-
+-static int tgt_cmd_hlist_add(struct tgt_cmd *cmd)
+-{
+-	struct tgt_target *target = cmd-&gt;session-&gt;target;
+-	struct list_head *head;
+-	unsigned long flags;
+-	uint64_t tag = cmd_tag(cmd);
+-	int err = 0;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-
+-	if (__tgt_cmd_hlist_find(target, tag)) {
+-		err = -EINVAL;
+-		eprintk(&quot;%p is already on the hash list.\n&quot;, cmd);
+-	} else {
+-		head = &amp;target-&gt;cmd_hlist[cmd_hashfn(tag)];
+-		list_add_tail(&amp;cmd-&gt;hash_list, head);
+-	}
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	return err;
+-}
+-
+-static void tgt_cmd_hlist_del(struct tgt_cmd *cmd)
+-{
+-	struct tgt_target *target = cmd-&gt;session-&gt;target;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-
+-	cmd = __tgt_cmd_hlist_find(target, cmd_tag(cmd));
+-	if (cmd)
+-		list_del(&amp;cmd-&gt;hash_list);
+-	else
+-		eprintk(&quot;%p is not on the hash list.\n&quot;, cmd);
+-
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-}
+-
+-static void __tgt_cmd_destroy(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
+-
+-	tgt_unmap_user_pages(cmd);
+-	kfree(cmd-&gt;sg);
+-	tgt_uspace_cmd_done_send(cmd, GFP_KERNEL);
+-
+-	tgt_cmd_hlist_del(cmd);
+-
+-	mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
+-}
+-
+-static void tgt_cmd_destroy(struct tgt_cmd *cmd)
+-{
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
+-
+-	/*
+-	 * Goose the queue incase we are blocked on a queue depth
+-	 * limit or resource problem.
+-	 *
+-	 * This is run from a interrpt handler normally so we queue
+-	 * the work
+-	 */
+-	INIT_WORK(&amp;cmd-&gt;work, __tgt_cmd_destroy, cmd);
+-	queue_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-}
+-
+-void tgt_transfer_response(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-	struct tgt_target *target = cmd-&gt;session-&gt;target;
+-	int err;
+-
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
+-
+-	cmd-&gt;done = tgt_cmd_destroy;
+-	err = target-&gt;tt-&gt;transfer_response(cmd);
+-	switch (err) {
+-	case TGT_CMD_XMIT_FAILED:
+-	case TGT_CMD_XMIT_REQUEUE:
+-		/*
+-		 * TODO add a real queue to avoid re-orders and starvation
+-		 * for now just reschedule.
+-		 */
+-		INIT_WORK(&amp;cmd-&gt;work, tgt_transfer_response, cmd);
+-		queue_delayed_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work,
+-				   10 * HZ);
+-		break;
+-	}
+-}
+-EXPORT_SYMBOL_GPL(tgt_transfer_response);
+-
+-static inline void tgt_cmd_queue(struct tgt_target *target, struct tgt_cmd *cmd)
+-{
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	list_add_tail(&amp;cmd-&gt;cqueue, &amp;target-&gt;uspace_cmd_queue);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-}
+-
+-struct tgt_cmd *
+-tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
+-	       uint32_t data_len, enum dma_data_direction data_dir,
+-	       uint8_t *dev_buf, int dev_buf_size, int flags)
+-{
+-	struct tgt_cmd *cmd;
+-	struct tgt_target *target = session-&gt;target;
+-	int err;
+-
+-	cmd = mempool_alloc(session-&gt;cmd_pool, GFP_ATOMIC);
+-	if (!cmd) {
+-		eprintk(&quot;Could not allocate tgt_cmd for %p\n&quot;, session);
+-		return NULL;
+-	}
+-	memset(cmd, 0, sizeof(*cmd));
+-	target-&gt;proto-&gt;cmd_create(cmd, cb, data_len, data_dir,
+-				  dev_buf, dev_buf_size, flags);
+-
+-	cmd-&gt;session = session;
+-	cmd-&gt;private = tgt_priv;
+-	cmd-&gt;done = tgt_cmd_destroy;
+-	atomic_set(&amp;cmd-&gt;state, TGT_CMD_CREATED);
+-
+-	dprintk(&quot;%p %p\n&quot;, session, cmd);
+-
+-	err = tgt_cmd_hlist_add(cmd);
+-	if (err) {
+-		mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
+-		return NULL;
+-	}
+-
+-	tgt_cmd_queue(target, cmd);
+-        if (!in_interrupt() &amp;&amp; !down_trylock(&amp;target-&gt;uspace_sem)) {
+-		tgt_cmd_uspace_queue(target, GFP_ATOMIC);
+-		up(&amp;target-&gt;uspace_sem);
+-	} else
+-		queue_work(target-&gt;twq, &amp;target-&gt;send_work);
+-
+-	return cmd;
+-}
+-EXPORT_SYMBOL_GPL(tgt_cmd_create);
+-
+-static void tgt_write_data_transfer_done(struct tgt_cmd *cmd)
+-{
+-	/*
+-	 * TODO check for errors and add state checking. we may have
+-	 * to internally queue for the target driver
+-	 */
+-	tgt_transfer_response(cmd);
+-}
+-
+-/*
+- * we should jsut pass the cmd pointer between userspace and the kernel
+- * as a handle like open-iscsi
+- */
+-static struct tgt_cmd *tgt_cmd_find(int tid, uint64_t tag)
+-{
+-	struct tgt_target *target;
+-	struct tgt_cmd *cmd;
+-
+-	dprintk(&quot;%d %llu\n&quot;, tid, (unsigned long long) tag);
+-
+-	target = target_find(tid);
+-	if (!target) {
+-		eprintk(&quot;Could not find target %d\n&quot;, tid);
+-		return NULL;
+-	}
+-
+-	cmd = tgt_cmd_hlist_find(target, tag);
+-	if (!cmd)
+-		eprintk(&quot;Could not find rq for cid %llu\n&quot;, (unsigned long long) tag);
+-	return cmd;
+-}
+-
+-#define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_CACHE_MASK)) + PAGE_CACHE_SIZE - 1) &gt;&gt; PAGE_CACHE_SHIFT)
+-
+-static int tgt_map_user_pages(int rw, struct tgt_cmd *cmd)
+-{
+-	int i, err = -EIO, cnt;
+-	struct page *page, **pages;
+-	uint64_t poffset = cmd-&gt;offset &amp; ~PAGE_MASK;
+-	uint32_t size, rest = cmd-&gt;bufflen;
+-
+-	cnt = pgcnt(cmd-&gt;bufflen, cmd-&gt;offset);
+-	pages = kzalloc(cnt * sizeof(struct page *), GFP_KERNEL);
+-	if (!pages)
+-		return -ENOMEM;
+-	cmd-&gt;pages = pages;
+-
+-	cmd-&gt;sg = kmalloc(cnt * sizeof(struct scatterlist), GFP_KERNEL);
+-	if (!cmd-&gt;sg)
+-		goto release_pages;
+-	cmd-&gt;sg_count = cnt;
+-
+-	dprintk(&quot;cmd %p addr %lx cnt %d\n&quot;, cmd, cmd-&gt;uaddr, cnt);
+-
+-	down_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
+-	err = get_user_pages(tgtd_tsk, tgtd_tsk-&gt;mm, cmd-&gt;uaddr, cnt,
+-			     rw == WRITE, 0, pages, NULL);
+-	up_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
+-
+-	if (err &lt; cnt) {
+-		err = -EIO;
+-		goto free_sg;
+-	}
+-
+-	/*
+-	 * We have a request_queue and we have a the SGIO scatterlist stuff in
+-	 * scsi-misc so we can use those functions to make us a request with
+-	 * a proper scatterlist by using block layer funciotns ?????
+-	 *
+-	 * do a:
+-	 * scsi_req_map_sg(cmd-&gt;rq, tmp_sg, cnt, orig_size, GFP_KERNEL);
+-	 * blk_rq_map_sg(cmd-&gt;device-&gt;q or cmd-&gt;target-&gt;q, cmd-&gt;rq, cmd-&gt;sg);
+-	 */
+-	for (i = 0; i &lt; cnt; i++) {
+-		size = min_t(uint32_t, rest, PAGE_SIZE - poffset);
+-
+-		cmd-&gt;sg[i].page = pages[i];
+-		cmd-&gt;sg[i].offset = poffset;
+-		cmd-&gt;sg[i].length = size;
+-
+-		poffset = 0;
+-		rest -= size;
+-	}
+-
+-	return 0;
+-
+-free_sg:
+-	kfree(cmd-&gt;sg);
+-release_pages:
+-	for (i = 0; i &lt; cnt; i++) {
+-		page = pages[i];
+-		if(!page)
+-			break;
+-		if (!err &amp;&amp; rw == WRITE)
+-			set_page_dirty_lock(page);
+-		page_cache_release(page);
+-	}
+-	kfree(pages);
+-
+-	return err;
+-}
+-
+-int uspace_cmd_done(int tid, uint64_t cid,
+-		    int result, uint32_t len, uint64_t offset,
+-		    unsigned long uaddr, uint8_t rw, uint8_t try_map)
+-{
+-	struct tgt_target *target;
+-	struct tgt_cmd *cmd;
+-
+-	cmd = tgt_cmd_find(tid, cid);
+-	if (!cmd) {
+-		eprintk(&quot;Could not find command %llu\n&quot;,
+-			(unsigned long long) cid);
+-		return -EINVAL;
+-	}
+-
+-	dprintk(&quot;cmd %p tag %llu result %d len %d bufflen %u\n&quot;, cmd,
+-		(unsigned long long) cmd_tag(cmd), result, len, cmd-&gt;bufflen);
+-
+-	cmd-&gt;uaddr = uaddr;
+-	cmd-&gt;result = result;
+-	cmd-&gt;offset = offset;
+-	if (len)
+-		cmd-&gt;bufflen = len;
+-	if (rw == WRITE)
+-		__set_bit(TGT_CMD_RW, &amp;cmd-&gt;flags);
+-	if (try_map)
+-		__set_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags);
+-
+-	target = cmd-&gt;session-&gt;target;
+-/* 	target-&gt;proto-&gt;uspace_cmd_complete(cmd); */
+-
+-	if (cmd-&gt;bufflen) {
+-		if (tgt_map_user_pages(rw, cmd))
+-			return -EIO;
+-		if (cmd-&gt;data_dir == DMA_TO_DEVICE) {
+-			cmd-&gt;done = tgt_write_data_transfer_done;
+-			/*
+-			 * TODO handle errors and possibly requeue for the
+-			 * target driver
+-			 */
+-			target-&gt;tt-&gt;transfer_write_data(cmd);
+-			return 0;
+-		}
+-	}
+-
+-	tgt_transfer_response(cmd);
+-	return 0;
+-}
+-
+-static void __exit tgt_exit(void)
+-{
+-	tgt_nl_exit();
+-	tgt_sysfs_exit();
+-}
+-
+-static int __init tgt_init(void)
+-{
+-	int err = -ENOMEM;
+-
+-	spin_lock_init(&amp;all_targets_lock);
+-	spin_lock_init(&amp;target_tmpl_lock);
+-
+-	tgt_protocol_init();
+-
+-	err = tgt_sysfs_init();
+-	if (err)
+-		return err;
+-
+-	err = tgt_nl_init();
+-	if (err)
+-		goto out;
+-
+-	return 0;
+-out:
+-	tgt_sysfs_exit();
+-	return err;
+-}
+-
+-module_init(tgt_init);
+-module_exit(tgt_exit);
+
+Deleted: branches/use-scsi-ml/kernel/tgt.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,116 +0,0 @@
+-/*
+- * Core Target Framework definitions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#ifndef __TGT_H
+-#define __TGT_H
+-
+-#include &lt;linux/mempool.h&gt;
+-#include &lt;linux/bio.h&gt;
+-#include &lt;linux/dma-mapping.h&gt;
+-
+-#include &lt;tgt_types.h&gt;
+-
+-struct tgt_device;
+-struct tgt_protocol;
+-struct tgt_session;
+-
+-/*
+- * this should be in a tgt_target_template
+- */
+-#define	TGT_MAX_CMD	64
+-
+-typedef void (tgt_session_done_t) (void *, struct tgt_session *);
+-
+-struct tgt_session {
+-	struct tgt_target *target;
+-	struct list_head slist;
+-
+-	mempool_t *cmd_pool;
+-
+-	struct work_struct work;
+-	tgt_session_done_t *done;
+-	void *arg;
+-};
+-
+-enum {
+-	TGT_CMD_CREATED,
+-	TGT_CMD_BUF_ALLOCATED,
+-	TGT_CMD_STARTED,
+-	TGT_CMD_READY,
+-	TGT_CMD_RECV,
+-	TGT_CMD_XMIT,
+-	TGT_CMD_DONE,
+-};
+-
+-enum {
+-	TGT_CMD_MAPPED,
+-	TGT_CMD_RW,		/* not set == read, set == write */
+-};
+-
+-struct tgt_cmd {
+-	struct tgt_session *session;
+-	struct tgt_protocol *proto;
+-
+-	struct list_head hash_list;
+-	struct list_head cqueue;
+-
+-	atomic_t state;
+-	unsigned long flags;
+-
+-	struct work_struct work;
+-	void (*done) (struct tgt_cmd *);
+-
+-	enum dma_data_direction data_dir;
+-	int sg_count;
+-	struct scatterlist *sg;
+-	struct page **pages;
+-	uint32_t bufflen;
+-	uint64_t offset;
+-	int result;
+-
+-	unsigned long uaddr;
+-
+-	/*
+-	 * target driver private
+-	 */
+-	void *private;
+-
+-	/*
+-	 * is the alignment still needed?  See scsi_host.h
+-	 */
+-	unsigned long proto_priv[0] __attribute__ ((aligned (sizeof(unsigned long))));
+-};
+-
+-extern int tgt_session_create(struct tgt_target *target,
+-			      tgt_session_done_t *done, void *arg);
+-extern int tgt_session_destroy(struct tgt_session *session,
+-			       tgt_session_done_t *done, void *arg);
+-extern int tgt_msg_send(struct tgt_target *target, void *data, int dlen,
+-			gfp_t flags);
+-extern int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask);
+-extern struct tgt_cmd *
+-tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
+-	       uint32_t data_len, enum dma_data_direction data_dir,
+-	       uint8_t *dev_buf, int dev_buf_size, int flags);
+-extern void tgt_transfer_response(void *cmd);
+-extern int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags);
+-
+-#define DEBUG_TGT 1
+-
+-#define eprintk(fmt, args...)					\
+-do {								\
+-	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-} while (0)
+-
+-#ifdef DEBUG_TGT
+-#define dprintk eprintk
+-#else
+-#define dprintk(fmt, args...)
+-#endif
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt_nl.c
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_nl.c	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_nl.c	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,222 +0,0 @@
+-/*
+- * Target Netlink Framework code
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/netlink.h&gt;
+-#include &lt;net/tcp.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_if.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+-#include &quot;tgt_priv.h&quot;
+-
+-static int tgtd_pid;
+-static struct sock *nls;
+-
+-int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
+-{
+-	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+-	struct sk_buff *skb;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-	char *pdu;
+-	int len, proto_pdu_size = proto-&gt;uspace_pdu_size;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + proto_pdu_size);
+-	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), proto_pdu_size);
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
+-			  len - sizeof(*nlh), 0);
+-	ev = NLMSG_DATA(nlh);
+-	memset(ev, 0, sizeof(*ev));
+-
+-	pdu = (char *) ev-&gt;data;
+-	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+-	ev-&gt;k.cmd_req.cid = cmd_tag(cmd);
+-	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+-	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
+-
+-	proto-&gt;uspace_pdu_build(cmd, pdu);
+-
+-	return netlink_unicast(nls, skb, tgtd_pid, 0);
+-}
+-EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+-
+-static int send_event_res(uint16_t type, struct tgt_event *p,
+-			  void *data, int dlen, gfp_t flags)
+-{
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-	skb = alloc_skb(len, flags);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, type, len - sizeof(*nlh), 0);
+-
+-	ev = NLMSG_DATA(nlh);
+-	memcpy(ev, p, sizeof(*ev));
+-	if (dlen)
+-		memcpy(ev-&gt;data, data, dlen);
+-
+-	return netlink_unicast(nls, skb, tgtd_pid, 0);
+-}
+-
+-int tgt_msg_send(struct tgt_target *target, void *data, int dlen, gfp_t flags)
+-{
+-	struct tgt_event ev;
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.tgt_passthru.tid = target-&gt;tid;
+-	ev.k.tgt_passthru.typeid = target-&gt;typeid;
+-	ev.k.tgt_passthru.len = dlen;
+-
+-	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
+-			      &amp;ev, data, dlen, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_msg_send);
+-
+-int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags)
+-{
+-	struct tgt_event ev;
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.cmd_done.tid = cmd-&gt;session-&gt;target-&gt;tid;
+-	ev.k.cmd_done.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+-	ev.k.cmd_done.uaddr = cmd-&gt;uaddr;
+-	ev.k.cmd_done.len = cmd-&gt;bufflen;
+-	if (test_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags))
+-		ev.k.cmd_done.mmapped = 1;
+-
+-	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, NULL, 0, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
+-
+-static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+-{
+-	int err = 0;
+-	struct tgt_event *ev = NLMSG_DATA(nlh);
+-	struct tgt_target *target;
+-
+-	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
+-		nlh-&gt;nlmsg_pid, current-&gt;pid);
+-
+-	switch (nlh-&gt;nlmsg_type) {
+-	case TGT_UEVENT_START:
+-		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
+-		tgtd_tsk = current;
+-		eprintk(&quot;start target drivers\n&quot;);
+-		break;
+-	case TGT_UEVENT_TARGET_CREATE:
+-		target = tgt_target_create(ev-&gt;u.c_target.type,
+-					   ev-&gt;u.c_target.nr_cmds);
+-		if (target)
+-			err = target-&gt;tid;
+-		else
+-			err = -EINVAL;
+-		break;
+-	case TGT_UEVENT_TARGET_DESTROY:
+-		target = target_find(ev-&gt;u.d_target.tid);
+-		if (target)
+-			err = tgt_target_destroy(target);
+-		else
+-			err = -EINVAL;
+-		break;
+-	case TGT_UEVENT_TARGET_PASSTHRU:
+-		target = target_find(ev-&gt;u.tgt_passthru.tid);
+-		if (!target || !target-&gt;tt-&gt;msg_recv) {
+-			dprintk(&quot;Could not find target %d for passthru\n&quot;,
+-				ev-&gt;u.tgt_passthru.tid);
+-			err = -EINVAL;
+-			break;
+-		}
+-
+-		err = target-&gt;tt-&gt;msg_recv(target, ev-&gt;u.tgt_passthru.len,
+-					   ev-&gt;data);
+-		break;
+-	case TGT_UEVENT_CMD_RES:
+-		err = uspace_cmd_done(ev-&gt;u.cmd_res.tid,
+-				      ev-&gt;u.cmd_res.cid,
+-				      ev-&gt;u.cmd_res.result, ev-&gt;u.cmd_res.len,
+-				      ev-&gt;u.cmd_res.offset,
+-				      ev-&gt;u.cmd_res.uaddr, ev-&gt;u.cmd_res.rw,
+-				      ev-&gt;u.cmd_res.try_map);
+-		break;
+-	default:
+-		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+-		err = -EINVAL;
+-	}
+-
+-	return err;
+-}
+-
+-static int event_recv_skb(struct sk_buff *skb)
+-{
+-	int err;
+-	uint32_t rlen;
+-	struct nlmsghdr	*nlh;
+-
+-	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+-		nlh = (struct nlmsghdr *) skb-&gt;data;
+-		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+-			return 0;
+-		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+-		if (rlen &gt; skb-&gt;len)
+-			rlen = skb-&gt;len;
+-		err = event_recv_msg(skb, nlh);
+-
+-		dprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+-		/*
+-		 * TODO for passthru commands the lower level should
+-		 * probably handle the result or we should modify this
+-		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
+-		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
+-			struct tgt_event ev;
+-
+-			memset(&amp;ev, 0, sizeof(ev));
+-			ev.k.event_res.err = err;
+-			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-				       GFP_KERNEL | __GFP_NOFAIL);
+-		}
+-		skb_pull(skb, rlen);
+-	}
+-	return 0;
+-}
+-
+-static void event_recv(struct sock *sk, int length)
+-{
+-	struct sk_buff *skb;
+-
+-	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
+-		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
+-			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
+-		else
+-			kfree_skb(skb);
+-	}
+-}
+-
+-void __exit tgt_nl_exit(void)
+-{
+-	sock_release(nls-&gt;sk_socket);
+-}
+-
+-int __init tgt_nl_init(void)
+-{
+-	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
+-	if (!nls)
+-		return -ENOMEM;
+-
+-	return 0;
+-}
+
+Deleted: branches/use-scsi-ml/kernel/tgt_priv.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_priv.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_priv.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,34 +0,0 @@
+-#ifndef _TGT_PRIV_H
+-#define _TGT_PRIV_H
+-
+-struct tgt_target;
+-
+-/* tgt core */
+-extern struct tgt_target *target_find(int tid);
+-extern int uspace_cmd_done(int tid, uint64_t cid,
+-			   int result, uint32_t len, uint64_t offset,
+-			   unsigned long addr,
+-			   uint8_t rw, uint8_t try_map);
+-extern struct task_struct *tgtd_tsk;
+-
+-/* netlink */
+-extern void tgt_nl_exit(void);
+-extern int tgt_nl_init(void);
+-
+-/* Sysfs */
+-struct target_type_internal {
+-	int typeid;
+-	struct list_head list;
+-	struct tgt_target_template *tt;
+-	struct tgt_protocol *proto;
+-	struct class_device cdev;
+-};
+-
+-extern int tgt_sysfs_init(void);
+-extern void tgt_sysfs_exit(void);
+-extern int tgt_sysfs_register_type(struct target_type_internal *ti);
+-extern void tgt_sysfs_unregister_type(struct target_type_internal *ti);
+-extern int tgt_sysfs_register_target(struct tgt_target *target);
+-extern void tgt_sysfs_unregister_target(struct tgt_target *target);
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt_protocol.c
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_protocol.c	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_protocol.c	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,83 +0,0 @@
+-/*
+- * Target protocol registration functions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#include &lt;linux/list.h&gt;
+-#include &lt;linux/module.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+-
+-static spinlock_t protocol_lock;
+-static LIST_HEAD(protocol_list);
+-
+-struct tgt_proto_internal {
+-	struct list_head list;
+-	struct tgt_protocol *proto;
+-};
+-
+-struct tgt_protocol *tgt_protocol_get(const char *name)
+-{
+-	unsigned long flags;
+-	struct tgt_proto_internal *tp;
+-
+-	spin_lock_irqsave(&amp;protocol_lock, flags);
+-	list_for_each_entry(tp, &amp;protocol_list, list)
+-		if (!strcmp(name, tp-&gt;proto-&gt;name)) {
+-			if (!try_module_get(tp-&gt;proto-&gt;module))
+-				tp = NULL;
+-			spin_unlock_irqrestore(&amp;protocol_lock, flags);
+-			return tp ? tp-&gt;proto : NULL;
+-		}
+-
+-	spin_unlock_irqrestore(&amp;protocol_lock, flags);
+-
+-	return NULL;
+-}
+-
+-void tgt_protocol_put(struct tgt_protocol *proto)
+-{
+-	module_put(proto-&gt;module);
+-}
+-
+-int tgt_protocol_register(struct tgt_protocol *proto)
+-{
+-	unsigned long flags;
+-	struct tgt_proto_internal *tp;
+-
+-	tp = kzalloc(sizeof(*tp), GFP_KERNEL);
+-	if (!tp)
+-		return -ENOMEM;
+-	INIT_LIST_HEAD(&amp;tp-&gt;list);
+-	tp-&gt;proto = proto;
+-
+-	spin_lock_irqsave(&amp;protocol_lock, flags);
+-	list_add_tail(&amp;tp-&gt;list, &amp;protocol_list);
+-	spin_unlock_irqrestore(&amp;protocol_lock, flags);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_protocol_register);
+-
+-void tgt_protocol_unregister(struct tgt_protocol *proto)
+-{
+-	unsigned long flags;
+-	struct tgt_proto_internal *tp;
+-
+-	spin_lock_irqsave(&amp;protocol_lock, flags);
+-	list_for_each_entry(tp, &amp;protocol_list, list)
+-		if (tp-&gt;proto == proto) {
+-			list_del(&amp;tp-&gt;list);
+-			kfree(tp);
+-			break;
+-		}
+-
+-	spin_unlock_irqrestore(&amp;protocol_lock, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_protocol_unregister);
+-
+-void __init tgt_protocol_init(void)
+-{
+-	spin_lock_init(&amp;protocol_lock);
+-}
+
+Deleted: branches/use-scsi-ml/kernel/tgt_protocol.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_protocol.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_protocol.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,56 +0,0 @@
+-/*
+- * Target Framework Protocol definitions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#ifndef __TGT_PROTOCOL_H
+-#define __TGT_PROTOCOL_H
+-
+-#include &lt;linux/slab.h&gt;
+-#include &lt;linux/dma-mapping.h&gt;
+-
+-struct module;
+-struct tgt_cmd;
+-struct tgt_session;
+-
+-/*
+- * The target driver will interact with tgt core through the protocol
+- * handler. The protocol handler can then use the default tgt_core functions
+- * or build wrappers around them.
+- */
+-struct tgt_protocol {
+-	const char *name;
+-	struct module *module;
+-
+-	kmem_cache_t *cmd_cache;
+-	unsigned uspace_pdu_size;
+-
+- 	/*
+-	 * Create a command and allocate a buffer of size data_len for
+-	 * for transfer. The buffer will be allocated with GFP_KERNEL
+-	 * and preprocesed by tgt/scsi_proto so the next time
+-	 * the target driver is notified about the cmd is when
+-	 * the transfer* is called.
+-	 */
+-	void (* cmd_create)(struct tgt_cmd *cmd, uint8_t *cb,
+-			    uint32_t data_len, enum dma_data_direction data_dir,
+-			    uint8_t *dev_id_buff, int id_buff_size,
+-			    int flags);
+-
+-	/*
+-	 * Build userspace packet
+-	 */
+-	void (* uspace_pdu_build)(struct tgt_cmd *cmd, void *data);
+-
+-	void (* uspace_cmd_complete)(struct tgt_cmd *cmd);
+-};
+-
+-extern void tgt_protocol_init(void);
+-extern int tgt_protocol_register(struct tgt_protocol *proto);
+-extern void tgt_protocol_unregister(struct tgt_protocol *proto);
+-extern struct tgt_protocol *tgt_protocol_get(const char *name);
+-extern void tgt_protocol_put(struct tgt_protocol *proto);
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt_scsi.c
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_scsi.c	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_scsi.c	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,90 +0,0 @@
+-/*
+- * SCSI target protocol
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/module.h&gt;
+-#include &lt;scsi/scsi_cmnd.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_scsi_if.h&gt;
+-
+-static kmem_cache_t *tgt_scsi_cmd_cache;
+-
+-static inline struct tgt_scsi_cmd *tgt_cmd_to_scsi(struct tgt_cmd *cmd)
+-{
+-	return (struct tgt_scsi_cmd *) cmd-&gt;proto_priv;
+-}
+-
+-static void
+-tgt_scsi_cmd_create(struct tgt_cmd *cmd, uint8_t *scb,
+-		    uint32_t data_len, enum dma_data_direction data_dir,
+-		    uint8_t *lun, int lun_size, int tags)
+-{
+-	struct tgt_scsi_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-
+-	memcpy(scmd-&gt;scb, scb, sizeof(scmd-&gt;scb));
+-	memcpy(scmd-&gt;lun, lun, sizeof(scmd-&gt;lun));
+-	scmd-&gt;tags = tags;
+-
+-	cmd-&gt;data_dir = data_dir;
+-	/*
+-	 * set bufflen based on data_len for now, but let device specific
+-	 * handler overide just in case
+-	 */
+-	cmd-&gt;bufflen = data_len;
+-}
+-
+-static void tgt_scsi_pdu_build(struct tgt_cmd *cmd, void *data)
+-{
+-	struct tgt_scsi_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-
+-	memcpy(data, scmd, sizeof(struct tgt_scsi_cmd));
+-}
+-
+-static struct tgt_protocol tgt_scsi_proto = {
+-	.name = &quot;scsi&quot;,
+-	.module = THIS_MODULE,
+-	.cmd_create = tgt_scsi_cmd_create,
+-	.uspace_pdu_build = tgt_scsi_pdu_build,
+-	.uspace_pdu_size = sizeof(struct tgt_scsi_cmd),
+-};
+-
+-static int __init tgt_scsi_init(void)
+-{
+-	int err;
+-	size_t size = sizeof(struct tgt_cmd) + sizeof(struct tgt_scsi_cmd);
+-
+-	tgt_scsi_cmd_cache = kmem_cache_create(&quot;tgt_scsi_cmd&quot;,
+-					       size, 0,
+-					       SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
+-					       NULL, NULL);
+-	if (!tgt_scsi_cmd_cache)
+-		return -ENOMEM;
+-	tgt_scsi_proto.cmd_cache = tgt_scsi_cmd_cache;
+-
+-	err = tgt_protocol_register(&amp;tgt_scsi_proto);
+-	if (err)
+-		goto cache_destroy;
+-
+-	return 0;
+-cache_destroy:
+-	kmem_cache_destroy(tgt_scsi_cmd_cache);
+-
+-	return err;
+-}
+-
+-static void __exit tgt_scsi_exit(void)
+-{
+-	kmem_cache_destroy(tgt_scsi_cmd_cache);
+-	tgt_protocol_unregister(&amp;tgt_scsi_proto);
+-}
+-
+-module_init(tgt_scsi_init);
+-module_exit(tgt_scsi_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+Deleted: branches/use-scsi-ml/kernel/tgt_scsi.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_scsi.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_scsi.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,16 +0,0 @@
+-/*
+- * SCSI target helpers
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#ifndef __TGT_SCSI_H
+-#define __TGT_SCSI_H
+-
+-#include &lt;tgt.h&gt;
+-
+-#define	tgt_scsi_sense_length(cmd)	(cmd)-&gt;bufflen
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt_sysfs.c
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_sysfs.c	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_sysfs.c	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,225 +0,0 @@
+-/*
+- * Target framework core sysfs files
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#include &lt;tgt_types.h&gt;
+-#include &lt;tgt_target.h&gt;
+-
+-#include &quot;tgt_priv.h&quot;
+-
+-static struct class_device_attribute *class_attr_overridden(
+-				struct class_device_attribute **attrs,
+-				struct class_device_attribute *attr)
+-{
+-	int i;
+-
+-	if (!attrs)
+-		return NULL;
+-
+-	for (i = 0; attrs[i]; i++)
+-		if (!strcmp(attrs[i]-&gt;attr.name, attr-&gt;attr.name))
+-			return attrs[i];
+-	return NULL;
+-}
+-
+-static int class_attr_add(struct class_device *classdev,
+-			  struct class_device_attribute **attrs,
+-			  struct class_device_attribute *attr)
+-{
+-	struct class_device_attribute *base_attr;
+-
+-	/*
+-	 * Spare the caller from having to copy things it's not interested in.
+-	*/
+-	base_attr = class_attr_overridden(attrs, attr);
+-	if (base_attr) {
+-		/* extend permissions */
+-		attr-&gt;attr.mode |= base_attr-&gt;attr.mode;
+-
+-		/* override null show/store with default */
+-		if (!attr-&gt;show)
+-			attr-&gt;show = base_attr-&gt;show;
+-		if (!attr-&gt;store)
+-			attr-&gt;store = base_attr-&gt;store;
+-	}
+-
+-	return class_device_create_file(classdev, attr);
+-}
+-
+-#define cdev_to_tgt_type(cdev) \
+-	container_of(cdev, struct target_type_internal, cdev)
+-
+-#define tgt_target_template_show_fn(field, format_string)		\
+-static ssize_t								\
+-show_##field (struct class_device *cdev, char *buf)			\
+-{									\
+-	struct target_type_internal *ti = cdev_to_tgt_type(cdev);	\
+-	return snprintf (buf, 20, format_string, ti-&gt;tt-&gt;field);	\
+-}
+-
+-#define tgt_target_template_rd_attr(field, format_string)		\
+-	tgt_target_template_show_fn(field, format_string)		\
+-static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+-
+-tgt_target_template_rd_attr(name, &quot;%s\n&quot;);
+-tgt_target_template_rd_attr(protocol, &quot;%s\n&quot;);
+-tgt_target_template_rd_attr(subprotocol, &quot;%s\n&quot;);
+-
+-static struct class_device_attribute *tgt_type_attrs[] = {
+-	&amp;class_device_attr_name,
+-	&amp;class_device_attr_protocol,
+-	&amp;class_device_attr_subprotocol,
+-	NULL,
+-};
+-
+-static void tgt_type_class_release(struct class_device *cdev)
+-{
+-	struct target_type_internal *ti = cdev_to_tgt_type(cdev);
+-	kfree(ti);
+-}
+-
+-static struct class tgt_type_class = {
+-	.name = &quot;tgt_type&quot;,
+-	.release = tgt_type_class_release,
+-};
+-
+-int tgt_sysfs_register_type(struct target_type_internal *ti)
+-{
+-	struct class_device *cdev = &amp;ti-&gt;cdev;
+-	int i, err;
+-
+-	cdev-&gt;class = &amp;tgt_type_class;
+-	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;driver%d&quot;, ti-&gt;typeid);
+-
+-	err = class_device_register(cdev);
+-	if (err)
+-		return err;
+-
+-	for (i = 0; tgt_type_attrs[i]; i++) {
+-		err = class_device_create_file(&amp;ti-&gt;cdev,
+-					       tgt_type_attrs[i]);
+-		if (err)
+-			goto cleanup;
+-	}
+-
+-	return 0;
+-
+-cleanup:
+-	class_device_unregister(cdev);
+-
+-	return err;
+-}
+-
+-void tgt_sysfs_unregister_type(struct target_type_internal *ti)
+-{
+-	class_device_unregister(&amp;ti-&gt;cdev);
+-}
+-
+-/*
+- * Target files
+- */
+-#define tgt_target_show_fn(field, format_string)			\
+-static ssize_t								\
+-show_##field (struct class_device *cdev, char *buf)			\
+-{									\
+-	struct tgt_target *target = cdev_to_tgt_target(cdev);		\
+-	return snprintf (buf, 20, format_string, target-&gt;field);	\
+-}
+-
+-#define tgt_target_rd_attr(field, format_string)		\
+-	tgt_target_show_fn(field, format_string)		\
+-static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+-
+-tgt_target_rd_attr(queued_cmds, &quot;%u\n&quot;);
+-tgt_target_rd_attr(typeid, &quot;%d\n&quot;);
+-
+-static struct class_device_attribute *tgt_target_attrs[] = {
+-	&amp;class_device_attr_queued_cmds,
+-	&amp;class_device_attr_typeid,
+-	NULL
+-};
+-
+-static void tgt_target_class_release(struct class_device *cdev)
+-{
+-	struct tgt_target *target = cdev_to_tgt_target(cdev);
+-	kfree(target-&gt;tt_data);
+-	kfree(target);
+-}
+-
+-static struct class tgt_target_class = {
+-	.name = &quot;tgt_target&quot;,
+-	.release = tgt_target_class_release,
+-};
+-
+-int tgt_sysfs_register_target(struct tgt_target *target)
+-{
+-	struct class_device *cdev = &amp;target-&gt;cdev;
+-	int err, i;
+-
+-	cdev-&gt;class = &amp;tgt_target_class;
+-	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;target%d&quot;, target-&gt;tid);
+-
+-	err = class_device_register(cdev);
+-	if (err)
+-		return err;
+-
+-	if (target-&gt;tt-&gt;target_attrs) {
+-		for (i = 0; target-&gt;tt-&gt;target_attrs[i]; i++) {
+-			err = class_attr_add(&amp;target-&gt;cdev,
+-					     tgt_target_attrs,
+-					     target-&gt;tt-&gt;target_attrs[i]);
+-			if (err)
+-				goto cleanup;
+-		}
+-	}
+-
+-	for (i = 0; tgt_target_attrs[i]; i++) {
+-		if (!class_attr_overridden(target-&gt;tt-&gt;target_attrs,
+-					   tgt_target_attrs[i])) {
+-			err = class_device_create_file(&amp;target-&gt;cdev,
+-						       tgt_target_attrs[i]);
+-			if (err)
+-				goto cleanup;
+-		}
+-	}
+-
+-	return 0;
+-
+-cleanup:
+-	class_device_unregister(cdev);
+-	return err;
+-}
+-
+-void tgt_sysfs_unregister_target(struct tgt_target *target)
+-{
+-	class_device_unregister(&amp;target-&gt;cdev);
+-}
+-
+-int tgt_sysfs_init(void)
+-{
+-	int err;
+-
+-	err = class_register(&amp;tgt_type_class);
+-	if (err)
+-		return err;
+-
+-	err = class_register(&amp;tgt_target_class);
+-	if (err)
+-		goto unregister_type;
+-
+-	return 0;
+-
+-unregister_type:
+-	class_unregister(&amp;tgt_type_class);
+-
+-	return err;
+-}
+-
+-void tgt_sysfs_exit(void)
+-{
+-	class_unregister(&amp;tgt_type_class);
+-	class_unregister(&amp;tgt_target_class);
+-}
+
+Deleted: branches/use-scsi-ml/kernel/tgt_target.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_target.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_target.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,137 +0,0 @@
+-/*
+- * Target Framework Target definitions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#ifndef __TGT_TARGET_H
+-#define __TGT_TARGET_H
+-
+-#include &lt;linux/device.h&gt;
+-#include &lt;linux/list.h&gt;
+-
+-struct tgt_protocol;
+-struct tgt_target;
+-struct tgt_cmd;
+-
+-enum {
+-	TGT_CMD_XMIT_OK,
+-	TGT_CMD_XMIT_FAILED,
+-	TGT_CMD_XMIT_REQUEUE,
+-};
+-
+-#define TGT_DEFAULT_MAX_SECTORS 1024
+-#define TGT_MAX_PHYS_SEGMENTS 255
+-/*
+- * this should be a template and device limit probably
+- */
+-#define TGT_QUEUE_DEPTH 64
+-
+-struct tgt_target_template {
+-	const char *name;
+-	struct module *module;
+-	unsigned priv_data_size;
+-
+-	unsigned short max_hw_segments;
+-	unsigned int max_segment_size;
+-	unsigned long seg_boundary_mask;
+-	unsigned short max_sectors;
+-	unsigned use_clustering;
+-
+-	/*
+-	 * Target creation/destroy callbacks useful when userspace
+-	 * initiates these operations
+-	 */
+-	int (* target_create) (struct tgt_target *);
+-	void (* target_destroy) (struct tgt_target *);
+-	/*
+-	 * Called when userspace sends the target a driver specific
+-	 * message. To send a response the target driver should call
+-	 * tgt_msg_send.
+-	 */
+-	int (* msg_recv) (struct tgt_target *, uint32_t, void *);
+-	/*
+-	 * Transfer command response and/or data. If the target driver
+-	 * cannot queue the request and would like it requeued then it
+-	 * should return an appropriate TGT_CMD_XMIT_*. When the
+-	 * the transfer is complete and the target driver is finished with
+-	 * the command the cmd-&gt;done() callback must be called. After the
+-	 * the cmd-&gt;done callback has been called tgt_core owns the cmd and
+-	 * may free it.
+-	 *
+-	 * TODO rename this
+-	 */
+-	int (* transfer_response) (struct tgt_cmd *);
+-	/*
+-	 * Transfer write data to the sg buffer.
+-	 *
+-	 * TODO rename
+-	 */
+-	int (* transfer_write_data) (struct tgt_cmd *);
+-
+-	void (* task_mgmt_done) (uint64_t, int);
+-
+-	/*
+-	 * name of protocol to use
+-	 */
+-	const char *protocol;
+-
+-	/*
+-	 * name of sub-protocol to use
+-	 */
+-	const char *subprotocol;
+-
+-	/*
+-	 * Pointer to the sysfs class properties for this host, NULL terminated.
+-	 */
+-	struct class_device_attribute **target_attrs;
+-};
+-
+-#define TGT_CMD_HASH_ORDER		4
+-#define	cmd_tag(p)	((uint64_t)(unsigned long) p)
+-#define	cmd_hashfn(tag)	hash_long((tag), TGT_CMD_HASH_ORDER)
+-
+-enum {
+-	TGT_CREATED,
+-	TGT_DESTROYED,
+-};
+-
+-struct tgt_target {
+-	int typeid;
+-	int tid;
+-	struct tgt_target_template *tt;
+-	void *tt_data;
+-	struct tgt_protocol *proto;
+-
+-	struct class_device cdev;
+-
+-	int queued_cmds;
+-	int state;
+-
+-	/* Protects session_list, cmd_hlist, and state */
+-	spinlock_t lock;
+-
+-	/* Serializes commands going to user space */
+-	struct semaphore uspace_sem;
+-	struct list_head tlist;
+-
+-	struct list_head session_list;
+-	struct list_head cmd_hlist[1 &lt;&lt; TGT_CMD_HASH_ORDER];
+-
+-	struct list_head uspace_cmd_queue;
+-	struct work_struct send_work;
+-
+-	struct workqueue_struct *twq;
+-};
+-
+-#define cdev_to_tgt_target(cdev) \
+-	container_of(cdev, struct tgt_target, cdev)
+-
+-extern struct tgt_target *tgt_target_create(char *target_type, int nr_cmds);
+-extern int tgt_target_destroy(struct tgt_target *target);
+-
+-extern int tgt_target_template_register(struct tgt_target_template *tt);
+-extern void tgt_target_template_unregister(struct tgt_target_template *tt);
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/kernel/tgt_types.h
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt_types.h	2006-01-26 05:29:12 UTC (rev 230)
++++ branches/use-scsi-ml/kernel/tgt_types.h	2006-01-27 22:01:10 UTC (rev 231)
+@@ -1,18 +0,0 @@
+-#ifndef __TGT_TYPES_H
+-#define __TGT_TYPES_H
+-
+-#include &lt;linux/types.h&gt;
+-
+-/* Is there a smart way? */
+-
+-#if defined(CONFIG_ALPAH) || defined(CONFIG_IA64) || defined(CONFIG_PPC64) || (defined(CONFIG_S390) &amp;&amp; defined(__x390x__)) || defined(CONFIG_SPARC64)
+-#  define __PRI64_PREFIX	&quot;l&quot;
+-# else
+-#  define __PRI64_PREFIX	&quot;ll&quot;
+-# endif
+-
+-# define PRId64		__PRI64_PREFIX &quot;d&quot;
+-# define PRIu64		__PRI64_PREFIX &quot;u&quot;
+-# define PRIx64		__PRI64_PREFIX &quot;x&quot;
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000217.html">[Stgt-svn] r230 - in trunk: . istgt/usr kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000219.html">[Stgt-svn] r232 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#218">[ date ]</a>
+              <a href="thread.html#218">[ thread ]</a>
+              <a href="subject.html#218">[ subject ]</a>
+              <a href="author.html#218">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

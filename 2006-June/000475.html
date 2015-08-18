@@ -1,0 +1,93 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r488 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r488%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200606211232.k5LCWXvP013378%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000474.html">
+   <LINK REL="Next"  HREF="000476.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r488 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r488%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200606211232.k5LCWXvP013378%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r488 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Wed Jun 21 14:32:33 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000474.html">[Stgt-svn] r487 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000476.html">[Stgt-svn] r489 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#475">[ date ]</a>
+              <a href="thread.html#475">[ thread ]</a>
+              <a href="subject.html#475">[ subject ]</a>
+              <a href="author.html#475">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-21 14:32:30 +0200 (Wed, 21 Jun 2006)
+New Revision: 488
+
+Modified:
+   branches/use-scsi-ml/usr/tgtadm.c
+Log:
+Restore hostno option for bind operation.
+
+Modified: branches/use-scsi-ml/usr/tgtadm.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtadm.c	2006-06-02 10:31:02 UTC (rev 487)
++++ branches/use-scsi-ml/usr/tgtadm.c	2006-06-21 12:32:30 UTC (rev 488)
+@@ -61,6 +61,7 @@
+ 	{&quot;lun&quot;, required_argument, NULL, 'l'},
+ 	{&quot;params&quot;, required_argument, NULL, 'p'},
+ 	{&quot;user&quot;, no_argument, NULL, 'u'},
++	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+ 	{&quot;bus&quot;, required_argument, NULL, 'b'},
+ 	{&quot;version&quot;, no_argument, NULL, 'v'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+@@ -472,6 +473,9 @@
+ 			lun = strtoull(optarg, NULL, 10);
+ 			set |= (1 &lt;&lt; MODE_DEVICE);
+ 			break;
++		case 'i':
++			hostno = strtol(optarg, NULL, 10);
++			break;
+ 		case 'b':
+ 			hostno = bus_to_host(optarg);
+ 			break;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000474.html">[Stgt-svn] r487 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000476.html">[Stgt-svn] r489 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#475">[ date ]</a>
+              <a href="thread.html#475">[ thread ]</a>
+              <a href="subject.html#475">[ subject ]</a>
+              <a href="author.html#475">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

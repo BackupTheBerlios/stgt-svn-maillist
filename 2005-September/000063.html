@@ -1,0 +1,409 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r73 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r73%20-%20trunk/kernel&In-Reply-To=%3C200509131242.j8DCgWsD000985%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000062.html">
+   <LINK REL="Next"  HREF="000064.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r73 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r73%20-%20trunk/kernel&In-Reply-To=%3C200509131242.j8DCgWsD000985%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r73 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Sep 13 14:42:32 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000062.html">[Stgt-svn] r72 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000064.html">[Stgt-svn] r74 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#63">[ date ]</a>
+              <a href="thread.html#63">[ thread ]</a>
+              <a href="subject.html#63">[ subject ]</a>
+              <a href="author.html#63">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-13 14:42:31 +0200 (Tue, 13 Sep 2005)
+New Revision: 73
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_target.h
+Log:
+Fix the wrong way to use workqueue.
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-13 01:53:58 UTC (rev 72)
++++ trunk/kernel/tgt.c	2005-09-13 12:42:31 UTC (rev 73)
+@@ -47,16 +47,10 @@
+ static spinlock_t device_tmpl_lock;
+ static LIST_HEAD(device_tmpl_list);
+ 
+-static void session_init_handler(void *data);
+-static spinlock_t atomic_sessions_lock;
+-static LIST_HEAD(atomic_sessions);
+-static DECLARE_WORK(atomic_session_work, session_init_handler,
+-		    &amp;atomic_sessions);
+-
+ static int daemon_pid;
+ static struct sock *nls;
+ 
+-static kmem_cache_t *cmnd_slab, *work_slab;
++static kmem_cache_t *cmnd_slab;
+ 
+ /* TODO: lock per session */
+ static spinlock_t cmnd_hash_lock;
+@@ -64,70 +58,6 @@
+ #define	cmnd_hashfn(key)	hash_long((key), TGT_HASH_ORDER)
+ static struct list_head cmnd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+ 
+-struct atomic_session_args {
+-	struct tgt_session *session;
+-	void (*done) (void *, struct tgt_session *);
+-	int max_cmnds;
+-	void *arg;
+-	struct list_head list;
+-};
+-
+-struct tgt_work {
+-	void (*fn) (void *);
+-	void *arg;
+-	mempool_t *pool;
+-	struct list_head list;
+-};
+-
+-static struct tgt_work * tgt_init_work(struct tgt_session *session,
+-					void (*fn)(void *), void *arg)
+-{
+-	struct tgt_work *work;
+-	mempool_t *pool = session-&gt;work_pool;
+-
+-	work = mempool_alloc(pool, GFP_ATOMIC);
+-	if (!work)
+-		return NULL;
+-
+-	work-&gt;fn = fn;
+-	work-&gt;arg = arg;
+-	work-&gt;pool = pool;
+-
+-	return work;
+-}
+-
+-static void tgt_worker(void *data)
+-{
+-	struct tgt_target *target = (struct tgt_target *) data;
+-	struct tgt_work *work = NULL;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	if (!list_empty(&amp;target-&gt;work_list)) {
+-		work = list_entry(target-&gt;work_list.next, struct tgt_work, list);
+-		list_del(&amp;work-&gt;list);
+-	}
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	if (work) {
+-		work-&gt;fn(work-&gt;arg);
+-		mempool_free(work, work-&gt;pool);
+-	}
+-
+-	return;
+-}
+-
+-static void tgt_queue_work(struct tgt_target *target, struct tgt_work *work)
+-{
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	list_add_tail(&amp;work-&gt;list, &amp;target-&gt;work_list);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	queue_work(target-&gt;twq, &amp;target-&gt;work);
+-}
+-
+ struct target_type_internal {
+ 	struct list_head list;
+ 	struct tgt_target_template *tt;
+@@ -251,7 +181,6 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 	INIT_LIST_HEAD(&amp;target-&gt;work_list);
+ 
+-	INIT_WORK(&amp;target-&gt;work, tgt_worker, target);
+ 	target-&gt;queued_cmnds = queued_cmnds;
+ 
+ 	snprintf(name, sizeof(name), &quot;tgtd%d&quot;, target-&gt;tid);
+@@ -319,11 +248,6 @@
+ 	if (!session-&gt;cmnd_pool)
+ 		goto out;
+ 
+-	session-&gt;work_pool = mempool_create(max_cmnds, mempool_alloc_slab,
+-					    mempool_free_slab, work_slab);
+-	if (!session-&gt;work_pool)
+-		goto out;
+-
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	list_add(&amp;session-&gt;slist, &amp;target-&gt;session_list);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+@@ -333,63 +257,9 @@
+ 	if (session-&gt;cmnd_pool)
+ 		mempool_destroy(session-&gt;cmnd_pool);
+ 
+-	if (session-&gt;work_pool)
+-		mempool_destroy(session-&gt;work_pool);
+-
+ 	return -ENOMEM;
+ }
+ 
+-static void session_init_handler(void *data)
+-{
+-	struct list_head *head = (struct list_head *) data;
+-	struct atomic_session_args *ssa = NULL;
+-	unsigned long flags;
+-	int err;
+-
+-	spin_lock_irqsave(&amp;atomic_sessions_lock, flags);
+-	if (!list_empty(&amp;atomic_sessions)) {
+-		ssa = list_entry(head-&gt;next, struct atomic_session_args, list);
+-		list_del(&amp;ssa-&gt;list);
+-	}
+-	spin_unlock_irqrestore(&amp;atomic_sessions_lock, flags);
+-
+-	if (!ssa)
+-		return;
+-
+-	err = session_init(ssa-&gt;session, ssa-&gt;max_cmnds);
+-	if (err)
+-		kfree(ssa-&gt;session);
+-
+-	ssa-&gt;done(ssa-&gt;arg, err ? NULL : ssa-&gt;session);
+-
+-	kfree(ssa);
+-}
+-
+-static int session_atomic_init(struct tgt_session *session,
+-			       int max_cmnds,
+-			       void (*done) (void *, struct tgt_session *),
+-			       int *arg)
+-{
+-	struct atomic_session_args *ssa;
+-	unsigned long flags;
+-
+-	ssa = kmalloc(sizeof(*ssa), GFP_ATOMIC);
+-	if (!ssa)
+-		return -ENOMEM;
+-
+-	ssa-&gt;session = session;
+-	ssa-&gt;max_cmnds = max_cmnds;
+-	ssa-&gt;arg = arg;
+-
+-	spin_lock_irqsave(&amp;atomic_sessions_lock, flags);
+-	list_add(&amp;ssa-&gt;list, &amp;atomic_sessions);
+-	spin_unlock_irqrestore(&amp;atomic_sessions_lock, flags);
+-
+-	queue_work(session-&gt;target-&gt;twq, &amp;atomic_session_work);
+-
+-	return 0;
+-}
+-
+ struct tgt_session *
+ tgt_session_create(struct tgt_target *target,
+ 		   int max_cmnds,
+@@ -398,16 +268,18 @@
+ {
+ 	struct tgt_session *session;
+ 
+-	if (!target) {
+-		eprintk(&quot;%s\n&quot;, &quot;Null target pointer!&quot;);
+-		return NULL;
+-	}
++	BUG_ON(!target);
+ 
+ 	if (done &amp;&amp; !arg) {
+ 		eprintk(&quot;%s\n&quot;, &quot;Need arg !&quot;);
+ 		return NULL;
+ 	}
+ 
++	if (done) {
++		eprintk(&quot;%s\n&quot;, &quot;Not supported yet!&quot;);
++		BUG();
++	}
++
+ 	dprintk(&quot;%p %d\n&quot;, target, max_cmnds);
+ 
+ 	session = kmalloc(sizeof(*session), done ? GFP_ATOMIC : GFP_KERNEL);
+@@ -418,13 +290,6 @@
+ 	session-&gt;target = target;
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+ 
+-	if (done) {
+-		if (session_atomic_init(session, max_cmnds, done, arg) &lt; 0)
+-			goto out;
+-
+-		return session;
+-	}
+-
+ 	if (session_init(session, max_cmnds) &lt; 0)
+ 		goto out;
+ 
+@@ -439,7 +304,6 @@
+ int tgt_session_destroy(struct tgt_session *session)
+ {
+ 	mempool_destroy(session-&gt;cmnd_pool);
+-	mempool_destroy(session-&gt;work_pool);
+ 	kfree(session);
+ 
+ 	return 0;
+@@ -736,10 +600,10 @@
+ 
+ 	if (done) {
+ 		struct tgt_session *session = cmnd-&gt;session;
+-		struct tgt_work *work;
+ 
+-		work = tgt_init_work(session, tgt_alloc_buffer, cmnd);
+-		tgt_queue_work(session-&gt;target, work);
++		INIT_WORK(&amp;cmnd-&gt;work, tgt_alloc_buffer, cmnd);
++		cmnd-&gt;done = done;
++		queue_work(session-&gt;target-&gt;twq, &amp;cmnd-&gt;work);
+ 		return;
+ 	};
+ 
+@@ -845,22 +709,15 @@
+ 
+ int tgt_cmnd_queue(struct tgt_cmnd *cmnd, void (*done)(struct tgt_cmnd *))
+ {
+-	struct tgt_work *work;
+ 	struct tgt_session *session = cmnd-&gt;session;
+ 
+ 	BUG_ON(cmnd-&gt;done);
++	BUG_ON(!done);
++
+ 	cmnd-&gt;done = done;
+-	if (!done) {
+-		eprintk(&quot;%s\n&quot;, &quot;Null done function!&quot;);
+-		return -EINVAL;
+-	}
++	INIT_WORK(&amp;cmnd-&gt;work, queuecommand, cmnd);
++	queue_work(session-&gt;target-&gt;twq, &amp;cmnd-&gt;work);
+ 
+-	work = tgt_init_work(session, queuecommand, cmnd);
+-	if (!work)
+-		return -ENOMEM;
+-
+-	tgt_queue_work(session-&gt;target, work);
+-
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmnd_queue);
+@@ -1008,9 +865,6 @@
+ 	if (cmnd_slab)
+ 		kmem_cache_destroy(cmnd_slab);
+ 
+-	if (work_slab)
+-		kmem_cache_destroy(work_slab);
+-
+ 	if (nls)
+ 		sock_release(nls-&gt;sk_socket);
+ 
+@@ -1022,7 +876,6 @@
+ 	int i, err = -ENOMEM;
+ 
+ 	spin_lock_init(&amp;all_targets_lock);
+-	spin_lock_init(&amp;atomic_sessions_lock);
+ 	spin_lock_init(&amp;cmnd_hash_lock);
+ 	spin_lock_init(&amp;target_tmpl_lock);
+ 	spin_lock_init(&amp;device_tmpl_lock);
+@@ -1039,12 +892,6 @@
+ 	if (!cmnd_slab)
+ 		goto out;
+ 
+-	work_slab = kmem_cache_create(&quot;tgt_work&quot;, sizeof(struct tgt_work), 0,
+-				      SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
+-				      NULL, NULL);
+-	if (!work_slab)
+-		goto out;
+-
+ 	nls = netlink_kernel_create(NETLINK_TGT, event_recv);
+ 	if (!nls)
+ 		goto out;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-13 01:53:58 UTC (rev 72)
++++ trunk/kernel/tgt.h	2005-09-13 12:42:31 UTC (rev 73)
+@@ -16,7 +16,6 @@
+ 	struct list_head slist;
+ 
+ 	mempool_t *cmnd_pool;
+-	mempool_t *work_pool;
+ };
+ 
+ struct tgt_cmnd {
+@@ -28,6 +27,7 @@
+ 
+ 	int rw;
+ 
++	struct work_struct work;
+ 	void (*done) (struct tgt_cmnd *);
+ 
+ 	struct list_head clist;
+@@ -37,7 +37,6 @@
+ 	struct scatterlist *sg;
+ 	uint32_t bufflen;
+ 	uint64_t offset;
+-
+ 	int result;
+ 
+ 	/* TODO: there should be a better way. */
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-09-13 01:53:58 UTC (rev 72)
++++ trunk/kernel/tgt_target.h	2005-09-13 12:42:31 UTC (rev 73)
+@@ -51,7 +51,6 @@
+ 	struct list_head device_list;
+ 	struct list_head session_list;
+ 
+-	struct work_struct work;
+ 	struct list_head work_list;
+ 	struct workqueue_struct *twq;
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000062.html">[Stgt-svn] r72 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000064.html">[Stgt-svn] r74 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#63">[ date ]</a>
+              <a href="thread.html#63">[ thread ]</a>
+              <a href="subject.html#63">[ subject ]</a>
+              <a href="author.html#63">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

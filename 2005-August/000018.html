@@ -1,0 +1,580 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r24 - in trunk: iscsi/usr kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r24%20-%20in%20trunk%3A%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200508280331.j7S3VQ8B019924%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000017.html">
+   <LINK REL="Next"  HREF="000019.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r24 - in trunk: iscsi/usr kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r24%20-%20in%20trunk%3A%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200508280331.j7S3VQ8B019924%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r24 - in trunk: iscsi/usr kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Aug 28 05:31:26 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000017.html">[Stgt-svn] r23 - in trunk/iscsi: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000019.html">[Stgt-svn] r25 - in trunk: include iscsi/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#18">[ date ]</a>
+              <a href="thread.html#18">[ thread ]</a>
+              <a href="subject.html#18">[ subject ]</a>
+              <a href="author.html#18">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-28 05:31:21 +0200 (Sun, 28 Aug 2005)
+New Revision: 24
+
+Modified:
+   trunk/iscsi/usr/ctldev.c
+   trunk/iscsi/usr/ietadm.c
+   trunk/iscsi/usr/iscsid.h
+   trunk/iscsi/usr/plain.c
+   trunk/kernel/stgt.c
+   trunk/usr/stgtd.c
+Log:
+Fix and clean up IET shutdown code. 'ietadm --op delete' works with no activity.
+
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/iscsi/usr/ctldev.c	2005-08-28 03:31:21 UTC (rev 24)
+@@ -10,12 +10,17 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;dirent.h&gt;
+ 
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/types.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;sys/socket.h&gt;
++#include &lt;sys/un.h&gt;
++#include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
++#include &quot;stgt_if.h&quot;
+ 
+ #define CTL_DEVICE	&quot;/dev/ietctl&quot;
+ 
+@@ -123,11 +128,6 @@
+ 	return ki-&gt;conn_destroy(tid, sid, cid);
+ }
+ 
+-static int __target_del(int fd, u32 tid, void *arg)
+-{
+-	return ki-&gt;target_destroy(tid);
+-}
+-
+ static int proc_session_parse(int fd, struct session_file_operations *ops, void *arg)
+ {
+ 	FILE *f;
+@@ -195,19 +195,37 @@
+ 	.connection_op = conn_retry,
+ };
+ 
+-struct session_file_operations target_del_ops = {
+-	.target_op = __target_del,
+-};
+-
+ int server_stop(void)
+ {
+-	proc_session_parse(ctrl_fd, &amp;conn_close_ops, NULL);
++	DIR *dir;
++	struct dirent *ent;
++	int tid, err;
++	int32_t lun;
+ 
+-	while (proc_session_parse(ctrl_fd, &amp;shutdown_wait_ops, NULL) &lt; 0)
+-		sleep(1);
++	dir = opendir(&quot;/sys/class/stgt_device&quot;);
++	if (!dir)
++		return errno;
+ 
+-	proc_session_parse(ctrl_fd, &amp;target_del_ops, NULL);
++	while ((ent = readdir(dir))) {
++		err = sscanf(ent-&gt;d_name, &quot;device%d:%u&quot;, &amp;tid, &amp;lun);
++		if (err == 2)
++			err = cops-&gt;lunit_del(tid, lun);
++	}
+ 
++	closedir(dir);
++
++	dir = opendir(&quot;/sys/class/stgt_target&quot;);
++	if (!dir)
++		return errno;
++
++	while ((ent = readdir(dir))) {
++		err = sscanf(ent-&gt;d_name, &quot;target%d&quot;, &amp;tid);
++		if (err == 1)
++			err = cops-&gt;target_del(tid);
++	}
++
++	closedir(dir);
++
+ 	return 0;
+ }
+ 
+@@ -330,8 +348,138 @@
+ 	return ioctl(ctrl_fd, ADD_CONN, &amp;info);
+ }
+ 
++/* Temporary stgt glue */
++#define STGT_IPC_NAMESPACE &quot;STGT_IPC_ABSTRACT_NAMESPACE&quot;
++
++static int ipc_cmnd_execute(char *data, int len)
++{
++	int fd, err;
++	struct sockaddr_un addr;
++	char nlm_ev[NLMSG_SPACE(sizeof(struct stgt_event))];
++	struct stgt_event *ev;
++	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++
++	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (fd &lt; 0)
++		return fd;
++
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.sun_family = AF_LOCAL;
++	memcpy((char *) &amp;addr.sun_path + 1, STGT_IPC_NAMESPACE,
++	       strlen(STGT_IPC_NAMESPACE));
++
++	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
++	if (err &lt; 0)
++		return err;
++
++	err = write(fd, data, len);
++	if (err &lt; 0)
++		goto out;
++
++	err = read(fd, nlm_ev, sizeof(nlm_ev));
++	if (err &lt; 0)
++		goto out;
++
++	ev = NLMSG_DATA(nlh);
++	err = ev-&gt;k.event_res.err;
++
++out:
++	if (fd &gt; 0)
++		close(fd);
++
++	return fd;
++}
++
++static void nlmsg_init(struct nlmsghdr *nlh, u32 pid, u32 seq, int type,
++		       int len, int flags)
++{
++	nlh-&gt;nlmsg_pid = pid;
++	nlh-&gt;nlmsg_len = len;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_type = type;
++	nlh-&gt;nlmsg_seq = seq;
++}
++
++static int iscsi_lunit_create(u32 tid, u32 lun, char *args)
++{
++	int err;
++	char nlm_ev[8912], *p, *q, *type = NULL, *path = NULL;
++	char dtype[] = &quot;stgt_vsd&quot;;
++	struct stgt_event *ev;
++	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++
++	fprintf(stderr, &quot;%s %d %s\n&quot;, __FUNCTION__, __LINE__, args);
++
++	if (isspace(*args))
++		args++;
++	if ((p = strchr(args, '\n')))
++		*p = '\0';
++
++	while ((p = strsep(&amp;args, &quot;,&quot;))) {
++		if (!p)
++			continue;
++
++		if (!(q = strchr(p, '=')))
++			continue;
++		*q++ = '\0';
++
++		if (!strcmp(p, &quot;Path&quot;))
++			path = q;
++		else if (!strcmp(p, &quot;Type&quot;))
++			type = q;
++	}
++
++	if (!type)
++		type = dtype;
++	if (!path) {
++		fprintf(stderr, &quot;%s %d NULL path\n&quot;, __FUNCTION__, __LINE__);
++		return -EINVAL;
++	}
++
++	fprintf(stderr, &quot;%s %d %s %s %d %d\n&quot;,
++		__FUNCTION__, __LINE__, type, path, strlen(path), sizeof(*ev));
++
++	memset(nlm_ev, 0, sizeof(nlm_ev));
++	nlmsg_init(nlh, getpid(), 0, STGT_UEVENT_DEVICE_CREATE,
++		   NLMSG_SPACE(sizeof(*ev) + strlen(path)), 0);
++
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.c_device.tid = tid;
++	ev-&gt;u.c_device.lun = lun;
++	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
++	memcpy((char *) ev + sizeof(*ev), path, strlen(path));
++
++	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
++
++	return err;
++}
++
++static int iscsi_lunit_destroy(u32 tid, u32 lun)
++{
++	int err;
++	char nlm_ev[8912];
++	struct stgt_event *ev;
++	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++
++	fprintf(stderr, &quot;%s %d %d %u\n&quot;, __FUNCTION__, __LINE__, tid, lun);
++
++	memset(nlm_ev, 0, sizeof(nlm_ev));
++	nlmsg_init(nlh, getpid(), 0, STGT_UEVENT_DEVICE_DESTROY,
++		   NLMSG_SPACE(sizeof(*ev)), 0);
++
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.d_device.tid = tid;
++	ev-&gt;u.d_device.lun = lun;
++
++	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
++
++	return err;
++}
++
+ struct iscsi_kernel_interface ioctl_ki = {
+ 	.ctldev_open = ctrdev_open,
++	.lunit_create = iscsi_lunit_create,
++	.lunit_destroy = iscsi_lunit_destroy,
+ 	.param_get = iscsi_param_get,
+ 	.param_set = iscsi_param_set,
+ 	.target_create = iscsi_target_create,
+
+Modified: trunk/iscsi/usr/ietadm.c
+===================================================================
+--- trunk/iscsi/usr/ietadm.c	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/iscsi/usr/ietadm.c	2005-08-28 03:31:21 UTC (rev 24)
+@@ -462,7 +462,7 @@
+ {
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1;
+-	u32 tid = 0, cid = 0, lun = 0, set = 0;
++	u32 tid = -1, cid = 0, lun = 0, set = 0;
+ 	u64 sid = 0;
+ 	char *params = NULL;
+ 
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/iscsi/usr/iscsid.h	2005-08-28 03:31:21 UTC (rev 24)
+@@ -202,6 +202,8 @@
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+ 	int (*ctldev_open) (void);
++	int (*lunit_create) (u32 tid, u32 lun, char *args);
++	int (*lunit_destroy) (u32 tid, u32 lun);
+ 	int (*param_get) (u32, u64, struct iscsi_param *);
+ 	int (*param_set) (u32, u64, int, u32, struct iscsi_param *);
+ 	int (*target_create) (u32 *, char *);
+
+Modified: trunk/iscsi/usr/plain.c
+===================================================================
+--- trunk/iscsi/usr/plain.c	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/iscsi/usr/plain.c	2005-08-28 03:31:21 UTC (rev 24)
+@@ -24,7 +24,6 @@
+ #include &lt;arpa/inet.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+-#include &quot;stgt_if.h&quot;
+ 
+ #define BUFSIZE		4096
+ #define CONFIG_FILE	&quot;/etc/ietd.conf&quot;
+@@ -447,119 +446,14 @@
+ 	return err;
+ }
+ 
+-#define STGT_IPC_NAMESPACE &quot;STGT_IPC_ABSTRACT_NAMESPACE&quot;
+-
+-static int ipc_connect(void)
+-{
+-	int fd, err;
+-	struct sockaddr_un addr;
+-
+-	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+-	if (fd &lt; 0)
+-		return fd;
+-
+-	memset(&amp;addr, 0, sizeof(addr));
+-	addr.sun_family = AF_LOCAL;
+-	memcpy((char *) &amp;addr.sun_path + 1, STGT_IPC_NAMESPACE,
+-	       strlen(STGT_IPC_NAMESPACE));
+-
+-	if ((err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
+-		fd = err;
+-
+-	return fd;
+-}
+-
+ static int plain_lunit_create(u32 tid, u32 lun, char *args)
+ {
+-	int fd, err;
+-	char nlm_ev[8912], *p, *q, *type = NULL, *path = NULL;
+-	char dtype[] = &quot;stgt_vsd&quot;;
+-	struct stgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+-
+-	fprintf(stderr, &quot;%s %d %s\n&quot;, __FUNCTION__, __LINE__, args);
+-
+-	fd = ipc_connect();
+-	if (fd &lt; 0) {
+-		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, fd);
+-		return fd;
+-	}
+-
+-	if (isspace(*args))
+-		args++;
+-	if ((p = strchr(args, '\n')))
+-		*p = '\0';
+-
+-	while ((p = strsep(&amp;args, &quot;,&quot;))) {
+-		if (!p)
+-			continue;
+-
+-		if (!(q = strchr(p, '=')))
+-			continue;
+-		*q++ = '\0';
+-
+-		if (!strcmp(p, &quot;Path&quot;))
+-			path = q;
+-		else if (!strcmp(p, &quot;Type&quot;))
+-			type = q;
+-	}
+-
+-	if (!type)
+-		type = dtype;
+-	if (!path) {
+-		fprintf(stderr, &quot;%s %d NULL path\n&quot;, __FUNCTION__, __LINE__);
+-		return -EINVAL;
+-	}
+-
+-	fprintf(stderr, &quot;%s %d %s %s %d %d\n&quot;,
+-		__FUNCTION__, __LINE__, type, path, strlen(path), sizeof(*ev));
+-
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
+-	nlh-&gt;nlmsg_len = NLMSG_SPACE(sizeof(*ev) + strlen(path));
+-	nlh-&gt;nlmsg_type = STGT_UEVENT_DEVICE_CREATE;
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_pid = getpid();
+-
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.c_device.tid = tid;
+-	ev-&gt;u.c_device.lun = lun;
+-	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
+-	memcpy((char *) ev + sizeof(*ev), path, strlen(path));
+-
+-	err = write(fd, nlm_ev, nlh-&gt;nlmsg_len);
+-	if (err &lt; 0)
+-		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, err);
+-
+-	return err;
++	return ki-&gt;lunit_create(tid, lun, args);
+ }
+ 
+ static int plain_lunit_destroy(u32 tid, u32 lun)
+ {
+-	int fd, err;
+-	char nlm_ev[8912];
+-	struct stgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+-
+-	fd = ipc_connect();
+-	if (fd &lt; 0) {
+-		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, fd);
+-		return fd;
+-	}
+-
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
+-
+-	nlh-&gt;nlmsg_len = NLMSG_SPACE(sizeof(*ev));
+-	nlh-&gt;nlmsg_type = STGT_UEVENT_DEVICE_CREATE;
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_pid = getpid();
+-
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.d_device.tid = tid;
+-	ev-&gt;u.d_device.lun = lun;
+-
+-	err = write(fd, nlm_ev, nlh-&gt;nlmsg_len);
+-
+-	return err;
++	return ki-&gt;lunit_destroy(tid, lun);
+ }
+ 
+ static int __plain_param_set(u32 tid, u64 sid, int type,
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/kernel/stgt.c	2005-08-28 03:31:21 UTC (rev 24)
+@@ -138,9 +138,10 @@
+ 	struct stgt_target *target;
+ 
+ 	spin_lock(&amp;all_targets_lock);
+-	list_for_each_entry(target, &amp;all_targets, tlist)
++	list_for_each_entry(target, &amp;all_targets, tlist) {
+ 		if (target-&gt;tid == tid)
+ 			goto found;
++	}
+ 	spin_unlock(&amp;all_targets_lock);
+ 	target = NULL;
+ found:
+@@ -190,6 +191,8 @@
+ 
+ int stgt_target_destroy(struct stgt_target *target)
+ {
++	dprintk(&quot;%p\n&quot;, target);
++
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_del(&amp;target-&gt;tlist);
+ 	spin_unlock(&amp;all_targets_lock);
+@@ -469,7 +472,7 @@
+ static int stgt_device_destroy(int tid, uint32_t lun)
+ {
+ 	struct stgt_device *device;
+-	struct stgt_target *target = device-&gt;target;
++	struct stgt_target *target;
+ 	unsigned long flags;
+ 
+ 	target = target_find(tid);
+@@ -795,6 +798,10 @@
+ 		dprintk(&quot;start %d\n&quot;, daemon_pid);
+ 		break;
+ 	case STGT_UEVENT_DEVICE_CREATE:
++		if (nlh-&gt;nlmsg_len &lt;= NLMSG_SPACE(sizeof(*ev))) {
++			err = -EINVAL;
++			break;
++		}
+ 		err = stgt_device_create(ev-&gt;u.c_device.tid,
+ 					 ev-&gt;u.c_device.lun,
+ 					 ev-&gt;u.c_device.type,
+@@ -853,7 +860,7 @@
+ 			rlen = skb-&gt;len;
+ 		err = event_recv_msg(skb, nlh);
+ 
+-		printk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
++		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+ 		ev-&gt;k.event_res.err = err;
+ 		if (nlh-&gt;nlmsg_type != STGT_UEVENT_SCSI_CMND_RES)
+ 			send_event_res(NETLINK_CREDS(skb)-&gt;pid,
+
+Modified: trunk/usr/stgtd.c
+===================================================================
+--- trunk/usr/stgtd.c	2005-08-27 15:53:08 UTC (rev 23)
++++ trunk/usr/stgtd.c	2005-08-28 03:31:21 UTC (rev 24)
+@@ -14,10 +14,11 @@
+ #include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;signal.h&gt;
++#include &lt;sys/signal.h&gt;
+ #include &lt;sys/poll.h&gt;
+-
++#include &lt;sys/socket.h&gt;
+ #include &lt;asm/types.h&gt;
+-#include &lt;sys/socket.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &lt;stgt_if.h&gt;
+@@ -208,7 +209,9 @@
+ 			return;
+ 		if (errno == EINTR)
+ 			goto retry;
+-		exit(1);
++
++		eprintf(&quot;%d\n&quot;, err);
++		return;
+ 	}
+ 
+ 	nlh = (struct nlmsghdr *) nlm_ev;
+@@ -229,6 +232,7 @@
+ 		execute_cmnd(fd, recvbuf, sendbuf);
+ 		break;
+ 	default:
++		eprintf(&quot;unknown %u\n&quot;, nlh-&gt;nlmsg_type);
+ 		exit(-1);
+ 		break;
+ 	}
+@@ -240,6 +244,9 @@
+ 	POLL_MAX,
+ };
+ 
++static void catch_signal(int signo) {
++}
++
+ int main(int argc, char **argv)
+ {
+ 	static struct pollfd poll_array[POLL_IPC + 1];
+@@ -248,6 +255,17 @@
+ 	nlm_sendbuf = malloc(8192);
+ 	nlm_recvbuf = malloc(8192);
+ 
++	struct sigaction sa_old;
++	struct sigaction sa_new;
++
++	/* do not allow ctrl-c for now... */
++	sa_new.sa_handler = catch_signal;
++	sigemptyset(&amp;sa_new.sa_mask);
++	sa_new.sa_flags = 0;
++	sigaction(SIGINT, &amp;sa_new, &amp;sa_old );
++	sigaction(SIGPIPE, &amp;sa_new, &amp;sa_old );
++	sigaction(SIGTERM, &amp;sa_new, &amp;sa_old );
++
+ 	memset(poll_array, 0, sizeof(poll_array));
+ 
+ 	if ((nl_fd = nl_open()) &lt; 0)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000017.html">[Stgt-svn] r23 - in trunk/iscsi: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000019.html">[Stgt-svn] r25 - in trunk: include iscsi/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#18">[ date ]</a>
+              <a href="thread.html#18">[ thread ]</a>
+              <a href="subject.html#18">[ subject ]</a>
+              <a href="author.html#18">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

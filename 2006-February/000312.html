@@ -1,0 +1,134 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r325 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r325%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602262340.k1QNelh7025894%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000311.html">
+   <LINK REL="Next"  HREF="000313.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r325 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r325%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602262340.k1QNelh7025894%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r325 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 27 00:40:47 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000311.html">[Stgt-svn] r324 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000313.html">[Stgt-svn] r326 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#312">[ date ]</a>
+              <a href="thread.html#312">[ thread ]</a>
+              <a href="subject.html#312">[ subject ]</a>
+              <a href="author.html#312">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-27 00:40:24 +0100 (Mon, 27 Feb 2006)
+New Revision: 325
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+Log:
+Clean up nl_event_handle.
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-26 23:09:46 UTC (rev 324)
++++ branches/use-scsi-ml/usr/target.c	2006-02-26 23:40:24 UTC (rev 325)
+@@ -33,7 +33,6 @@
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+-#include &lt;sys/user.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+ #include &lt;linux/netlink.h&gt;
+@@ -452,45 +451,21 @@
+ 	free(cmd);
+ }
+ 
+-static int set_pdu_size(int fd)
+-{
+-	struct nlmsghdr *nlh;
+-	char buf[1024];
+-	int err;
+-
+-peek_again:
+-	err = __nl_read(fd, buf, sizeof(buf), MSG_PEEK);
+-	if (err &lt; 0) {
+-		if (errno == EAGAIN || errno == EINTR)
+-			goto peek_again;
+-		return err;
+-	}
+-
+-	nlh = (struct nlmsghdr *) buf;
+-
+-	dprintf(&quot;%d\n&quot;, nlh-&gt;nlmsg_len);
+-
+-	return nlh-&gt;nlmsg_len;
+-}
+-
+ void nl_event_handle(int nl_fd)
+ {
+ 	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
+-	static int pdu_size;
+-	char buf[1024];
++	char buf[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 	int err;
+ 
+-	if (!pdu_size)
+-		pdu_size = set_pdu_size(nl_fd);
++	err = __nl_read(nl_fd, buf, sizeof(buf), MSG_WAITALL);
+ 
+-	err = __nl_read(nl_fd, buf, pdu_size, MSG_WAITALL);
+-
+ 	nlh = (struct nlmsghdr *) buf;
+ 	ev = (struct tgt_event *) NLMSG_DATA(nlh);
+ 
+-	if (nlh-&gt;nlmsg_len != pdu_size) {
+-		eprintf(&quot;unexpected len %d %d\n&quot;, nlh-&gt;nlmsg_len, pdu_size);
++	if (nlh-&gt;nlmsg_len != err) {
++		eprintf(&quot;unexpected len %d %d %d %d\n&quot;,
++			nlh-&gt;nlmsg_len, sizeof(*ev), sizeof(buf), err);
+ 		exit(1);
+ 	}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000311.html">[Stgt-svn] r324 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000313.html">[Stgt-svn] r326 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#312">[ date ]</a>
+              <a href="thread.html#312">[ thread ]</a>
+              <a href="subject.html#312">[ subject ]</a>
+              <a href="author.html#312">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

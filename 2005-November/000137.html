@@ -1,0 +1,253 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r143 - in trunk: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r143%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200511021810.jA2IAb3m010586%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000136.html">
+   <LINK REL="Next"  HREF="000138.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r143 - in trunk: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r143%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200511021810.jA2IAb3m010586%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r143 - in trunk: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Wed Nov  2 19:10:37 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000136.html">[Stgt-svn] r142 - trunk/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000138.html">[Stgt-svn] r144 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#137">[ date ]</a>
+              <a href="thread.html#137">[ thread ]</a>
+              <a href="subject.html#137">[ subject ]</a>
+              <a href="author.html#137">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-02 19:10:29 +0100 (Wed, 02 Nov 2005)
+New Revision: 143
+
+Modified:
+   trunk/include/tgt_if.h
+   trunk/kernel/tgt.c
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/netlink.c
+Log:
+Fix target_type_id handling bug and kill tid_to_did().
+
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2005-11-02 16:41:37 UTC (rev 142)
++++ trunk/include/tgt_if.h	2005-11-02 18:10:29 UTC (rev 143)
+@@ -64,10 +64,12 @@
+ 			uint64_t cid;
+ 			int tid;
+ 			uint64_t dev_id;
++			int typeid;
+ 		} cmd_req;
+ 		struct {
+ 			int tid;
+ 			uint32_t len;
++			int typeid;
+ 		} tgt_passthru;
+ 	} k;
+ 
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-11-02 16:41:37 UTC (rev 142)
++++ trunk/kernel/tgt.c	2005-11-02 18:10:29 UTC (rev 143)
+@@ -71,7 +71,7 @@
+ 
+ int tgt_target_template_register(struct tgt_target_template *tt)
+ {
+-	static int target_type_id;
++	static atomic_t target_type_id = ATOMIC_INIT(0);
+ 	unsigned long flags;
+ 	struct target_type_internal *ti;
+ 	int err;
+@@ -90,13 +90,14 @@
+ 		return -EINVAL;
+ 	}
+ 
++	ti-&gt;typeid = atomic_add_return(1, &amp;target_type_id);
++
+ 	err = tgt_sysfs_register_type(ti);
+ 	if (err)
+ 		goto proto_put;
+ 
+ 	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+ 	list_add_tail(&amp;ti-&gt;list, &amp;target_tmpl_list);
+-	ti-&gt;typeid = target_type_id++;
+ 	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+ 
+ 	return 0;
+@@ -769,6 +770,7 @@
+ 	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+ 	ev-&gt;k.cmd_req.dev_id = cmd-&gt;dev_id;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;cid;
++	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+ 
+ 	proto-&gt;build_uspace_pdu(cmd, pdu);
+ 
+@@ -866,6 +868,7 @@
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 	ev.k.tgt_passthru.tid = target-&gt;tid;
++	ev.k.tgt_passthru.typeid = target-&gt;typeid;
+ 	ev.k.tgt_passthru.len = dlen;
+ 
+ 	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-02 16:41:37 UTC (rev 142)
++++ trunk/usr/dl.c	2005-11-02 18:10:29 UTC (rev 143)
+@@ -47,25 +47,6 @@
+ 	return -ENOENT;
+ }
+ 
+-/* This function will be killed soon. */
+-static int tid_to_did(int tid)
+-{
+-	char path[PATH_MAX], buf[PATH_MAX];
+-	int fd, err;
+-
+-	sprintf(path, TGT_TARGET_SYSFSDIR &quot;/target%d/typeid&quot;, tid);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0)
+-		return fd;
+-
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0)
+-		return err;
+-
+-	return atoi(buf);
+-}
+-
+ static char *dlname(char *d_name, char *entry)
+ {
+ 	int fd, err;
+@@ -191,28 +172,18 @@
+ 	return NULL;
+ }
+ 
+-void *dl_proto_cmd_process(int tid)
++void *dl_proto_cmd_process(int tid, int typeid)
+ {
+-	int idx = tid_to_did(tid);
++	if (dinfo[typeid].pdl)
++		return dlsym(dinfo[typeid].pdl, &quot;cmd_process&quot;);
+ 
+-	if (idx &lt; 0)
+-		return NULL;
+-
+-	if (dinfo[idx].pdl)
+-		return dlsym(dinfo[idx].pdl, &quot;cmd_process&quot;);
+-
+ 	return NULL;
+ }
+ 
+-void *dl_event_fn(int tid)
++void *dl_event_fn(int tid, int typeid)
+ {
+-	int idx = tid_to_did(tid);
++	if (dinfo[typeid].dl)
++		return dlsym(dinfo[typeid].dl, &quot;async_event&quot;);
+ 
+-	if (idx &lt; 0)
+-		return NULL;
+-
+-	if (dinfo[idx].dl)
+-		return dlsym(dinfo[idx].dl, &quot;async_event&quot;);
+-
+ 	return NULL;
+ }
+
+Modified: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-11-02 16:41:37 UTC (rev 142)
++++ trunk/usr/dl.h	2005-11-02 18:10:29 UTC (rev 143)
+@@ -10,7 +10,7 @@
+ extern void *dl_poll_init_fn(int idx);
+ extern void *dl_poll_fn(int idx);
+ extern void *dl_ipc_fn(char *driver);
+-extern void *dl_event_fn(int tid);
+-extern void *dl_proto_cmd_process(int tid);
++extern void *dl_event_fn(int tid, int typeid);
++extern void *dl_proto_cmd_process(int tid, int typeid);
+ 
+ #endif
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-11-02 16:41:37 UTC (rev 142)
++++ trunk/usr/netlink.c	2005-11-02 18:10:29 UTC (rev 143)
+@@ -120,7 +120,8 @@
+ 	scb = (uint8_t *) ev_req-&gt;data;
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, scb[0]);
+ 
+-	fn = dl_proto_cmd_process(ev_req-&gt;k.cmd_req.tid);
++	fn = dl_proto_cmd_process(ev_req-&gt;k.cmd_req.tid,
++				  ev_req-&gt;k.cmd_req.typeid);
+ 	if (fn)
+ 		result = fn(ev_req-&gt;k.cmd_req.tid,
+ 			    ev_req-&gt;k.cmd_req.dev_id, scb,
+@@ -136,7 +137,6 @@
+ 	ev_res-&gt;u.cmd_res.len = len;
+ 	ev_res-&gt;u.cmd_res.result = result;
+ 
+-
+ 	log_error(&quot;scsi_cmd_process res %d len %d\n&quot;, result, len);
+ 
+ 	return __nl_write(fd, TGT_UEVENT_CMD_RES, resbuf,
+@@ -162,7 +162,8 @@
+ 		cmd_queue(fd, NLMSG_DATA(recvbuf), sendbuf);
+ 		break;
+ 	case TGT_KEVENT_TARGET_PASSTHRU:
+-		fn = dl_event_fn(ev-&gt;k.tgt_passthru.tid);
++		fn = dl_event_fn(ev-&gt;k.tgt_passthru.tid,
++				 ev-&gt;k.tgt_passthru.typeid);
+ 		if (fn)
+ 			fn(NLMSG_DATA(recvbuf));
+ 		else
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000136.html">[Stgt-svn] r142 - trunk/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000138.html">[Stgt-svn] r144 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#137">[ date ]</a>
+              <a href="thread.html#137">[ thread ]</a>
+              <a href="subject.html#137">[ subject ]</a>
+              <a href="author.html#137">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

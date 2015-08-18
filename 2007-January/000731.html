@@ -1,0 +1,91 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r744 - trunk/usr/xen
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r744%20-%20trunk/usr/xen&In-Reply-To=%3C200701020736.l027aqeE032085%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000732.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r744 - trunk/usr/xen</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r744%20-%20trunk/usr/xen&In-Reply-To=%3C200701020736.l027aqeE032085%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r744 - trunk/usr/xen">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Jan  2 08:36:52 CET 2007</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000732.html">[Stgt-svn] r745 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#731">[ date ]</a>
+              <a href="thread.html#731">[ thread ]</a>
+              <a href="subject.html#731">[ subject ]</a>
+              <a href="author.html#731">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-02 08:36:52 +0100 (Tue, 02 Jan 2007)
+New Revision: 744
+
+Modified:
+   trunk/usr/xen/xenbus.c
+Log:
+Changes for Xen userspace tool
+
+
+Modified: trunk/usr/xen/xenbus.c
+===================================================================
+--- trunk/usr/xen/xenbus.c	2006-12-30 15:46:57 UTC (rev 743)
++++ trunk/usr/xen/xenbus.c	2007-01-02 07:36:52 UTC (rev 744)
+@@ -166,7 +166,7 @@
+ 		return err;
+ 	}
+ 
+-        err = xs_gather(h, bepath, &quot;dev&quot;, NULL, &amp;path, NULL);
++        err = xs_gather(h, bepath, &quot;params&quot;, NULL, &amp;path, NULL);
+         if (err) {
+                 eprintf(&quot;cannot get dev %d\n&quot;, err);
+ 		return err;
+@@ -320,6 +320,7 @@
+         err = xs_gather(h, bepath, &quot;hostno&quot;, &quot;%u&quot;, &amp;hostno, NULL);
+ 	if (err)
+ 		goto free_be;
++	dprintf(&quot;host_no %u\n&quot;, hostno);
+ 
+ 	fd = xen_chrdev_open(&quot;scsiback&quot;, hostno);
+ 	if (fd &lt; 0)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000732.html">[Stgt-svn] r745 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#731">[ date ]</a>
+              <a href="thread.html#731">[ thread ]</a>
+              <a href="subject.html#731">[ subject ]</a>
+              <a href="author.html#731">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

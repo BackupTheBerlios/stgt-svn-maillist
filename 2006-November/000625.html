@@ -1,0 +1,207 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r638 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r638%20-%20trunk/doc&In-Reply-To=%3C200611120939.kAC9dUop007142%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000624.html">
+   <LINK REL="Next"  HREF="000626.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r638 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r638%20-%20trunk/doc&In-Reply-To=%3C200611120939.kAC9dUop007142%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r638 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 12 10:39:30 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000624.html">[Stgt-svn] r637 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000626.html">[Stgt-svn] r639 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#625">[ date ]</a>
+              <a href="thread.html#625">[ thread ]</a>
+              <a href="subject.html#625">[ subject ]</a>
+              <a href="author.html#625">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-12 10:39:29 +0100 (Sun, 12 Nov 2006)
+New Revision: 638
+
+Modified:
+   trunk/doc/README.iscsi
+Log:
+Add some command examples to README.iSCSI. 
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-11-12 09:16:20 UTC (rev 637)
++++ trunk/doc/README.iscsi	2006-11-12 09:39:29 UTC (rev 638)
+@@ -14,16 +14,125 @@
+ iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz) and adds a
+ logical unit (backed by /dev/hdc1) with lun 0.
+ 
++Let's create one target devce and add a logical unit to it:
++
+ host:~/tgt$ su
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode target --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 0 --params Path=/dev/hdc1
+ 
+-iSCSI parameters are not configurable yet.
+ 
++You can get the current configuration:
+ 
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
++tid 1: lld name iscsi
++        lun 0: path /dev/hdc1
++
++
++You can add lots of logical units:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 1 --params Path=/var/tmp/image
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
++tid 1: lld name iscsi
++        lun 1: path /var/tmp/image
++        lun 0: path /dev/hdc1
++
++Now this target is ready to accept initiators.
++
++You can get iSCSI parameters of the target:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show --tid 1
++iqn=iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++MaxRecvDataSegmentLength=8192
++MaxXmitDataSegmentLength=8192
++HeaderDigest=None
++DataDigest=None
++InitialR2T=Yes
++MaxOutstandingR2T=1
++ImmediateData=Yes
++FirstBurstLength=65536
++MaxBurstLength=262144
++DataPDUInOrder=Yes
++DataSequenceInOrder=Yes
++ErrorRecoveryLevel=0
++IFMarker=No
++OFMarker=No
++DefaultTime2Wait=2
++DefaultTime2Retain=20
++OFMarkInt=Reject
++IFMarkInt=Reject
++MaxConnections=1
++
++
++You can chage iSCSI parameters like the folloing (e.g. set
++MaxRecvDataSegmentLength to 16384):
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op update --tid 1 --name MaxRecvDataSegmentLength --value 16384
++
++
++You can get iSCSI parameters again to see it change:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show --tid 1
++iqn=iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++MaxRecvDataSegmentLength=16384
++MaxXmitDataSegmentLength=8192
++HeaderDigest=None
++DataDigest=None
++InitialR2T=Yes
++MaxOutstandingR2T=1
++ImmediateData=Yes
++FirstBurstLength=65536
++MaxBurstLength=262144
++DataPDUInOrder=Yes
++DataSequenceInOrder=Yes
++ErrorRecoveryLevel=0
++IFMarker=No
++OFMarker=No
++DefaultTime2Wait=2
++DefaultTime2Retain=20
++OFMarkInt=Reject
++IFMarkInt=Reject
++MaxConnections=1
++
++
++You can see the initiators that the target accepts:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode session --op show --tid 1
++sid:562950876233792 initiator:iqn.1991-05.com.microsoft:kernel
++sid:281474980708864 initiator:iqn.1987-05.com.cisco:01.4438aca09387
++
++
++You can see the negotiated iSCSI parameters between the target and the
++initiator:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode session --op show --tid 1 --sid  281474980708864
++MaxRecvDataSegmentLength=8192
++MaxXmitDataSegmentLength=1024
++HeaderDigest=None
++DataDigest=None
++InitialR2T=Yes
++MaxOutstandingR2T=1
++ImmediateData=Yes
++FirstBurstLength=65536
++MaxBurstLength=262144
++DataPDUInOrder=Yes
++DataSequenceInOrder=Yes
++ErrorRecoveryLevel=0
++IFMarker=No
++OFMarker=No
++DefaultTime2Wait=2
++DefaultTime2Retain=0
++OFMarkInt=Reject
++IFMarkInt=Reject
++MaxConnections=1
++
++
++You can see the initiator information:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode connection --op show --tid 1 --sid  281474980708864
++cid:0 ip:192.168.11.5
++
++
+ Status
+ -------------
+ It should work under normal circumstances (good initiator, no network
+ problem, etc). However, don't play with important data.
+-
+-Probabaly, the current quality is similar to the IET 0.2.x.
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000624.html">[Stgt-svn] r637 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000626.html">[Stgt-svn] r639 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#625">[ date ]</a>
+              <a href="thread.html#625">[ thread ]</a>
+              <a href="subject.html#625">[ subject ]</a>
+              <a href="author.html#625">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

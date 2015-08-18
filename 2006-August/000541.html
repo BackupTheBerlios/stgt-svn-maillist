@@ -1,0 +1,150 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r554 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r554%20-%20trunk/usr&In-Reply-To=%3C200608282335.k7SNZ4xC028518%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000540.html">
+   <LINK REL="Next"  HREF="000542.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r554 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r554%20-%20trunk/usr&In-Reply-To=%3C200608282335.k7SNZ4xC028518%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r554 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Aug 29 01:35:04 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000540.html">[Stgt-svn] r553 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000542.html">[Stgt-svn] r555 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#541">[ date ]</a>
+              <a href="thread.html#541">[ thread ]</a>
+              <a href="subject.html#541">[ subject ]</a>
+              <a href="author.html#541">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-29 01:35:01 +0200 (Tue, 29 Aug 2006)
+New Revision: 554
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/target.c
+Log:
+Kill target_bind in tgt_driver structure.
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-28 23:05:01 UTC (rev 553)
++++ trunk/usr/driver.h	2006-08-28 23:35:01 UTC (rev 554)
+@@ -7,7 +7,6 @@
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+-	int (*target_bind)(int);
+ 
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+ 	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-28 23:05:01 UTC (rev 553)
++++ trunk/usr/target.c	2006-08-28 23:35:01 UTC (rev 554)
+@@ -199,7 +199,7 @@
+ 	return 0;
+ }
+ 
+-static int cmd_pre_perform(struct tgt_cmd_queue *q, struct cmd *cmd)
++static int cmd_enabled(struct tgt_cmd_queue *q, struct cmd *cmd)
+ {
+ 	int enabled = 0;
+ 
+@@ -231,8 +231,7 @@
+ }
+ 
+ static void cmd_post_perform(struct tgt_cmd_queue *q, struct cmd *cmd,
+-			     unsigned long uaddr,
+-			     int len, uint8_t mmapped)
++			     unsigned long uaddr, int len, uint8_t mmapped)
+ {
+ 	cmd-&gt;uaddr = uaddr;
+ 	cmd-&gt;len = len;
+@@ -260,20 +259,8 @@
+ 
+ 	target = host_to_target(host_no);
+ 	if (!target) {
+-		int tid, lid = 0, err = -1;
+-		if (tgt_drivers[lid]-&gt;target_bind) {
+-			tid = tgt_drivers[0]-&gt;target_bind(host_no);
+-			if (tid &gt;= 0) {
+-				err = tgt_target_bind(tid, host_no, lid);
+-				if (!err)
+-					target = host_to_target(host_no);
+-			}
+-		}
+-
+-		if (!target) {
+-			eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
+-			return -ENOENT;
+-		}
++		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
++		return -ENOENT;
+ 	}
+ 
+ 	/* TODO: preallocate cmd */
+@@ -298,8 +285,7 @@
+ 	} else
+ 		q = &amp;target-&gt;cmd_queue;
+ 
+-	enabled = cmd_pre_perform(q, cmd);
+-
++	enabled = cmd_enabled(q, cmd);
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(target-&gt;lid,
+ 					  host_no, scb,
+@@ -340,7 +326,7 @@
+ 	struct target *target;
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+-		enabled = cmd_pre_perform(q, cmd);
++		enabled = cmd_enabled(q, cmd);
+ 		if (enabled) {
+ 			list_del(&amp;cmd-&gt;qlist);
+ 			target = host_to_target(cmd-&gt;hostno);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000540.html">[Stgt-svn] r553 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000542.html">[Stgt-svn] r555 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#541">[ date ]</a>
+              <a href="thread.html#541">[ thread ]</a>
+              <a href="subject.html#541">[ subject ]</a>
+              <a href="author.html#541">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

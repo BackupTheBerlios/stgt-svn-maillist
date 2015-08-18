@@ -1,0 +1,404 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r543 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r543%20-%20trunk/usr&In-Reply-To=%3C200608261245.k7QCjRxW003554%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000529.html">
+   <LINK REL="Next"  HREF="000531.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r543 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r543%20-%20trunk/usr&In-Reply-To=%3C200608261245.k7QCjRxW003554%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r543 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 26 14:45:27 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000529.html">[Stgt-svn] r542 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000531.html">[Stgt-svn] r544 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#530">[ date ]</a>
+              <a href="thread.html#530">[ thread ]</a>
+              <a href="subject.html#530">[ subject ]</a>
+              <a href="author.html#530">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-26 14:45:22 +0200 (Sat, 26 Aug 2006)
+New Revision: 543
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/mgmt.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Replace poll with epoll.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-26 10:08:40 UTC (rev 542)
++++ trunk/usr/driver.h	2006-08-26 12:45:22 UTC (rev 543)
+@@ -1,11 +1,7 @@
+-#include &lt;poll.h&gt;
+-
+ struct tgt_driver {
+ 	const char *name;
+ 
+ 	int (*init) (int *);
+-	int (*poll_init) (struct pollfd *);
+-	int (*event_handle) (struct pollfd *);
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+@@ -16,7 +12,6 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
+-	int npfd;
+ 	int enable;
+ 	int pfd_index;
+ };
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-08-26 10:08:40 UTC (rev 542)
++++ trunk/usr/mgmt.c	2006-08-26 12:45:22 UTC (rev 543)
+@@ -195,7 +195,7 @@
+ 		eprintf(&quot;can't write, %m\n&quot;);
+ }
+ 
+-void ipc_event_handle(int accept_fd)
++void mgmt_event_handler(int accept_fd, void *data)
+ {
+ 	int fd, err;
+ 	char sbuf[BUFSIZE], rbuf[BUFSIZE];
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-26 10:08:40 UTC (rev 542)
++++ trunk/usr/tgtd.c	2006-08-26 12:45:22 UTC (rev 543)
+@@ -23,7 +23,7 @@
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+ #include &lt;inttypes.h&gt;
+-#include &lt;poll.h&gt;
++#include &lt;sys/epoll.h&gt;
+ #include &lt;signal.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
+@@ -37,14 +37,20 @@
+ #include &quot;list.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;driver.h&quot;
++#include &quot;util.h&quot;
+ 
+-enum {
+-	POLL_KERN, /* kernel interface */
+-	POLL_IPC, /* unix domain socket for tgtdadm */
+-	POLL_END,
++#define MAX_FDS	4096
++
++struct tgt_event {
++	event_handler_t *handler;
++	void *data;
++	int fd;
++	struct list_head e_list;
+ };
+ 
++static int ep_fd;
+ static char program_name[] = &quot;tgtd&quot;;
++static LIST_HEAD(tgt_events_list);
+ 
+ static struct option const long_options[] =
+ {
+@@ -95,16 +101,54 @@
+ 	close(fd);
+ }
+ 
+-static void event_loop(struct pollfd *pfd, int npfd, int timeout)
++int tgt_event_add(int fd, int events, event_handler_t handler, void *data)
+ {
++	struct epoll_event ev;
++	struct tgt_event *tev;
++	int err;
++
++	tev = malloc(sizeof(*tev));
++	if (!tev)
++		return -ENOMEM;
++
++	tev-&gt;data = data;
++	tev-&gt;handler = handler;
++	tev-&gt;fd = fd;
++
++	ev.events = events;
++	ev.data.ptr = tev;
++	err = epoll_ctl(ep_fd, EPOLL_CTL_ADD, fd, &amp;ev);
++	if (err)
++		free(tev);
++	else
++		list_add(&amp;tev-&gt;e_list, &amp;tgt_events_list);
++
++	return err;
++}
++
++void tgt_event_del(int fd)
++{
++	struct tgt_event *tev;
++
++	epoll_ctl(ep_fd, EPOLL_CTL_DEL, fd, NULL);
++
++	list_for_each_entry(tev, &amp;tgt_events_list, e_list) {
++		if (tev-&gt;fd == fd) {
++			list_del(&amp;tev-&gt;e_list);
++			free(tev);
++			break;
++		}
++	}
++}
++
++static void event_loop(int timeout)
++{
+ 	int nevent, i;
+-	struct tgt_driver *d;
++	struct epoll_event events[1024];
++	struct tgt_event *tev;
+ 
+ retry:
+-	/*
+-	 * TODO: replace something efficient than poll.
+-	 */
+-	nevent = poll(pfd, npfd, timeout);
++	nevent = epoll_wait(ep_fd, events, ARRAY_SIZE(events), timeout);
+ 	if (nevent &lt; 0) {
+ 		if (errno != EINTR) {
+ 			eprintf(&quot;%m\n&quot;);
+@@ -118,60 +162,16 @@
+ 		goto retry;
+ 	}
+ 
+-	if (pfd[POLL_KERN].revents) {
+-		kspace_event_handle();
+-		nevent--;
++	for (i = 0; i &lt; nevent; i++) {
++		tev = (struct tgt_event *) events[i].data.ptr;
++		tev-&gt;handler(tev-&gt;fd, tev-&gt;data);
+ 	}
+ 
+-	if (pfd[POLL_IPC].revents) {
+-		dprintf(&quot;ipc event\n&quot;);
+-		ipc_event_handle(pfd[POLL_IPC].fd);
+-		nevent--;
+-	}
+-
+-	if (!nevent)
+-		goto retry;
+-
+-	for (i = 0; tgt_drivers[i]; i++) {
+-		dprintf(&quot;lld event\n&quot;);
+-		d = tgt_drivers[i];
+-		d-&gt;event_handle(pfd + d-&gt;pfd_index);
+-	}
+-
+ 	goto retry;
+ }
+ 
+-static struct pollfd *pfd_init(int npfd, int ki_fd, int ud_fd)
++static int lld_init(char *data)
+ {
+-	struct tgt_driver *d;
+-	struct pollfd *pfd;
+-	int i, idx = POLL_END;
+-
+-	pfd = calloc(npfd, sizeof(struct pollfd));
+-	if (!pfd)
+-		return NULL;
+-
+-	if (ki_fd) {
+-		pfd[POLL_KERN].fd = ki_fd;
+-		pfd[POLL_KERN].events = POLLIN;
+-	}
+-	pfd[POLL_IPC].fd = ud_fd;
+-	pfd[POLL_IPC].events = POLLIN;
+-
+-	for (i = 0; tgt_drivers[i]; i++) {
+-		d = tgt_drivers[i];
+-		if (d-&gt;enable &amp;&amp; d-&gt;npfd) {
+-			d-&gt;pfd_index = idx;
+-			d-&gt;poll_init(pfd + idx);
+-			idx += d-&gt;npfd;
+-		}
+-	}
+-
+-	return pfd;
+-}
+-
+-static int lld_init(char *data, int *npfd)
+-{
+ 	char *list, *p, *q;
+ 	int index, err, np, ndriver = 0;
+ 
+@@ -193,9 +193,7 @@
+ 					continue;
+ 			}
+ 			tgt_drivers[index]-&gt;enable = 1;
+-			tgt_drivers[index]-&gt;npfd = np;
+ 			ndriver++;
+-			*npfd += np;
+ 		}
+ 	}
+ 	free(list);
+@@ -205,12 +203,11 @@
+ 
+ int main(int argc, char **argv)
+ {
+-	struct pollfd *pfd;
+ 	struct sigaction sa_old;
+ 	struct sigaction sa_new;
+-	int err, ch, longindex, nr_lld = 0, nr_pfd = POLL_END;
++	int err, ch, longindex, fd, nr_lld = 0, maxfds = MAX_FDS, timeout = -1;
+ 	int is_daemon = 1, is_debug = 1;
+-	int ki_fd, ipc_fd, timeout = -1;
++	char *modes = NULL;
+ 
+ 	/* do not allow ctrl-c for now... */
+ 	sa_new.sa_handler = signal_catch;
+@@ -224,7 +221,7 @@
+ 				 &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'l':
+-			nr_lld = lld_init(optarg, &amp;nr_pfd);
++			modes = optarg;
+ 			break;
+ 		case 'f':
+ 			is_daemon = 0;
+@@ -244,6 +241,7 @@
+ 		}
+ 	}
+ 
++	nr_lld = lld_init(modes);
+ 	if (!nr_lld) {
+ 		printf(&quot;No available low level driver!\n&quot;);
+ 		exit(1);
+@@ -258,19 +256,25 @@
+ 	if (err)
+ 		exit(1);
+ 
+-	err = kreq_init(&amp;ki_fd);
+-	if (err) {
+-		eprintf(&quot;No kernel interface\n&quot;);
+-		ki_fd = 0;
++	ep_fd = epoll_create(maxfds);
++	if (ep_fd &lt; 0) {
++		eprintf(&quot;can't create epoll fd, %m\n&quot;);
++		exit(1);
+ 	}
+ 
+-	err = ipc_init(&amp;ipc_fd);
++	err = kreq_init(&amp;fd);
+ 	if (err)
++		eprintf(&quot;No kernel interface\n&quot;);
++	else
++		tgt_event_add(fd, POLL_IN, kern_event_handler, NULL);
++
++	err = ipc_init(&amp;fd);
++	if (err)
+ 		exit(1);
++	else
++		tgt_event_add(fd, POLL_IN, mgmt_event_handler, NULL);
+ 
+-	pfd = pfd_init(nr_pfd, ki_fd, ipc_fd);
++	event_loop(timeout);
+ 
+-	event_loop(pfd, nr_pfd, timeout);
+-
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-26 10:08:40 UTC (rev 542)
++++ trunk/usr/tgtd.h	2006-08-26 12:45:22 UTC (rev 543)
+@@ -25,10 +25,10 @@
+ };
+ 
+ extern int kreq_init(int *fd);
+-extern void kspace_event_handle(void);
++extern void kern_event_handler(int, void *data);
+ 
+ extern int ipc_init(int *fd);
+-extern void ipc_event_handle(int accept_fd);
++extern void mgmt_event_handler(int accept_fd, void *data);
+ 
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+@@ -36,6 +36,10 @@
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+ 
++typedef void (event_handler_t)(int fd, void *data);
++extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
++extern void tgt_event_del(int fd);
++
+ typedef int (cmd_end_t)(int host_no, int len, int result, int rw, uint64_t addr,
+ 			 uint64_t tag);
+ typedef int (mgmt_end_t)(int host_no, uint64_t mid, int result);
+@@ -54,4 +58,5 @@
+ 
+ extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq);
++
+ #endif
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-26 10:08:40 UTC (rev 542)
++++ trunk/usr/tgtif.c	2006-08-26 12:45:22 UTC (rev 543)
+@@ -106,7 +106,7 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-void kspace_event_handle(void)
++void kern_event_handler(int fd, void *data)
+ {
+ 	struct tgt_event *ev;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000529.html">[Stgt-svn] r542 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000531.html">[Stgt-svn] r544 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#530">[ date ]</a>
+              <a href="thread.html#530">[ thread ]</a>
+              <a href="subject.html#530">[ subject ]</a>
+              <a href="author.html#530">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

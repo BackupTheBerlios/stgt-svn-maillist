@@ -1,0 +1,2660 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r502 - in trunk: . istgt usr usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r502%20-%20in%20trunk%3A%20.%20istgt%20usr%20usr/iscsi&In-Reply-To=%3C200607121714.k6CHE4WR010764%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000486.html">
+   <LINK REL="Next"  HREF="000490.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r502 - in trunk: . istgt usr usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r502%20-%20in%20trunk%3A%20.%20istgt%20usr%20usr/iscsi&In-Reply-To=%3C200607121714.k6CHE4WR010764%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r502 - in trunk: . istgt usr usr/iscsi">tomo at berlios.de
+       </A><BR>
+    <I>Wed Jul 12 19:14:04 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000486.html">[Stgt-svn] r501 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000490.html">[Stgt-svn] r503 - in trunk: ibmvstgt usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#489">[ date ]</a>
+              <a href="thread.html#489">[ thread ]</a>
+              <a href="subject.html#489">[ subject ]</a>
+              <a href="author.html#489">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-12 19:13:53 +0200 (Wed, 12 Jul 2006)
+New Revision: 502
+
+Added:
+   trunk/usr/driver.c
+   trunk/usr/driver.h
+   trunk/usr/iscsi/
+   trunk/usr/iscsi/iscsi.h
+Removed:
+   trunk/istgt/usr/
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/iscsi/libistgt.c
+   trunk/usr/iscsi/log.c
+   trunk/usr/iscsi/log.h
+   trunk/usr/tgt_sysfs.c
+   trunk/usr/tgt_sysfs.h
+Modified:
+   trunk/Makefile
+   trunk/initd
+   trunk/iscsi
+   trunk/istgt/Makefile
+   trunk/usr/Makefile
+   trunk/usr/iscsi/Makefile
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/istgt.c
+   trunk/usr/iscsi/netlink.c
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+   trunk/usr/mgmt.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Go back to the old design, which tgt daemon handles everything. iSCSI
+code works as library. Right now tgt code and iSCSI code are linked to a
+single image. Later on, I work on something like dll.
+
+
+Modified: trunk/Makefile
+===================================================================
+--- trunk/Makefile	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/Makefile	2006-07-12 17:13:53 UTC (rev 502)
+@@ -9,8 +9,8 @@
+ all:
+ ifeq ($(ARCH), powerpc)
+ 	make -C ibmvstgt
+-#else
+-#	make -C istgt
++else
++	make -C istgt
+ endif
+ 	make -C usr
+ 	make -C kernel
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/initd	2006-07-12 17:13:53 UTC (rev 502)
+@@ -5,7 +5,6 @@
+ 
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ MEM_SIZE=1048576
+-export LD_LIBRARY_PATH=${PWD}/usr:${PWD}/istgt/usr:${PWD}/ibmvstgt/usr:${LD_LIBRARY_PATH}
+ 
+ #
+ # Need to select one
+@@ -52,7 +51,6 @@
+ 
+ 	insmod ${PWD}/istgt/kernel/iscsi_tcp.ko
+ 	insmod ${PWD}/istgt/kernel/iscsi_tcp_target.ko
+-	${PWD}/istgt/usr/istgtd
+ }
+ 
+ stop_iscsi_tcp()
+@@ -81,7 +79,7 @@
+ 		;;
+ 	esac
+ 
+-	${PWD}/usr/tgtd -d0
++	${PWD}/usr/tgtd -d8 --drivers iscsi
+ 
+ 	sleep 1
+ }
+
+Modified: trunk/iscsi
+===================================================================
+--- trunk/iscsi	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/iscsi	2006-07-12 17:13:53 UTC (rev 502)
+@@ -5,5 +5,5 @@
+ 
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ 
+-${PWD}/usr/tgtadm --driver istgt --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-${PWD}/usr/tgtadm --driver istgt --op new --tid 1 --lun 0 --params Path=/dev/hdc1
++${PWD}/usr/tgtadm --driver iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++${PWD}/usr/tgtadm --driver iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
+
+Modified: trunk/istgt/Makefile
+===================================================================
+--- trunk/istgt/Makefile	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/istgt/Makefile	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,17 +1,7 @@
+ SUBDIRS := $(shell pwd)
+ 
+-ifeq ($(KERNELSRC),)
+-	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+-endif
+-
+-all: libs mods
+-
+ mods:
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel modules
+ 
+-libs:
+-	$(MAKE) -C usr
+-
+ clean:
+-	$(MAKE) -C usr clean
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel clean
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/Makefile	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,13 +1,17 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -D_LARGEFILE64_SOURCE
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE -DISCSI
+ PROGRAMS = tgtd tgtadm
++TGTD_OBJS = tgtd.o netlink.o mgmt.o target.o scsi.o log.o driver.o
++TGTD_OBJS += $(addprefix iscsi/, istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o)
++LIBS = -lcrypto
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o netlink.o dl.o mgmt.o target.o scsi.o log.o tgt_sysfs.o
+-	$(CC) -rdynamic -ldl $^ -o $@
++tgtd: $(TGTD_OBJS)
++	$(CC) $^ -g -o $@ $(LIBS)
+ 
+ tgtadm: tgtadm.o
+-	$(CC) -rdynamic -ldl $^ -o $@
++	$(CC) $^ -o $@
+ 
+ clean:
+ 	rm -f *.o $(PROGRAMS)
++	$(MAKE) -C iscsi clean
+
+Deleted: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/dl.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,99 +0,0 @@
+-/*
+- * SCSI target dynamic library
+- *
+- * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;string.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;dlfcn.h&gt;
+-#include &lt;ctype.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;dirent.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;sys/poll.h&gt;
+-
+-#include &quot;log.h&quot;
+-#include &quot;dl.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
+-
+-/*
+- * Software LLDs needs to set up a target (that means tgtd must load
+- * thier libraries) before a scsi_host is created in kernel space. In
+- * short, tgtd needs to load LLD libraries before it knows what
+- * libraries are avilable (through sysfs). I chose the easiest way.
+- */
+-
+-struct driver_info dlinfo[] = {
+-	{&quot;istgt&quot;, }, {&quot;ibmvstgt&quot;,},
+-};
+-
+-/* Bah, any better way? */
+-static char *dl_fn_table[] = {
+-	&quot;poll_init&quot;,
+-	&quot;poll_event&quot;,
+-	&quot;ipc_mgmt&quot;,
+-	&quot;scsi_inquiry&quot;,
+-	&quot;scsi_report_luns&quot;,
+-	&quot;scsi_lun_to_int&quot;,
+-};
+-
+-int dl_init(struct driver_info *dinfo)
+-{
+-	int i, j, fd, err;
+-	char path[PATH_MAX];
+-
+-	system(&quot;rm -rf &quot; TGT_LLD_SYSFSDIR);
+-	err = mkdir(TGT_LLD_SYSFSDIR, DEFDMODE);
+-	if (err &lt; 0) {
+-		perror(&quot;Cannot create &quot; TGT_LLD_SYSFSDIR);
+-		return err;
+-	}
+-
+-	for (i = 0; i &lt; ARRAY_SIZE(dlinfo); i++) {
+-		snprintf(path, sizeof(path), &quot;lib%s.so&quot;, dlinfo[i].name);
+-		dlinfo[i].dl = dlopen(path, RTLD_LAZY);
+-		if (dlinfo[i].dl) {
+-			eprintf(&quot;%s library was loaded.\n&quot;, dlinfo[i].name);
+-			for (j = 0; j &lt; ARRAY_SIZE(dl_fn_table); j++)
+-				dlinfo[i].fn[j] =
+-					dlsym(dlinfo[i].dl, dl_fn_table[j]);
+-		} else
+-			eprintf(&quot;%s library is not loaded.\n&quot;, dlinfo[i].name);
+-
+-		snprintf(path, sizeof(path), TGT_LLD_SYSFSDIR &quot;/%d-%s&quot;,
+-			 i, dlinfo[i].name);
+-
+-		fd = open(path, O_RDWR|O_CREAT|O_EXCL, DEFFMODE);
+-		if (fd &lt; 0) {
+-			eprintf(&quot;Cannot create %s.\n&quot;, path);
+-			exit(1);
+-		}
+-	}
+-
+-	return ARRAY_SIZE(dlinfo);
+-}
+-
+-void *dl_fn(struct driver_info *dinfo, int idx, int function)
+-{
+-	return dinfo[idx].fn[function];
+-}
+
+Deleted: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/dl.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,24 +0,0 @@
+-#ifndef __DL_H
+-#define __DL_H
+-
+-#define	MAX_DL_HANDLES	16
+-
+-#define	DL_FN_POLL_INIT		0
+-#define	DL_FN_POLL_EVENT	1
+-#define	DL_FN_IPC_MGMT		2
+-#define	DL_FN_SCSI_INQUIRY	3
+-#define	DL_FN_SCSI_REPORT_LUNS	4
+-#define	DL_FN_SCSI_LUN_TO_INT	5
+-#define	DL_FN_END		6
+-
+-struct driver_info {
+-	char *name;
+-	void *dl;
+-	void *fn[DL_FN_END];
+-};
+-
+-extern struct driver_info dlinfo[];
+-
+-extern int dl_init(struct driver_info *);
+-extern void *dl_fn(struct driver_info *, int, int);
+-#endif
+
+Added: trunk/usr/driver.c
+===================================================================
+--- trunk/usr/driver.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/driver.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -0,0 +1,51 @@
++#include &lt;errno.h&gt;
++#include &lt;string.h&gt;
++#include &lt;poll.h&gt;
++#include &lt;inttypes.h&gt;
++
++#include &quot;tgtd.h&quot;
++#include &quot;driver.h&quot;
++
++#ifdef ISCSI
++#include &quot;iscsi/iscsi.h&quot;
++#endif
++
++#ifdef IBMVIO
++struct tgt_driver ibmvio = {
++	.name	= &quot;ibmvio&quot;,
++};
++#endif
++
++#ifdef ISCSI
++struct tgt_driver iscsi = {
++	.name		= &quot;iscsi&quot;,
++	.init		= iscsi_init,
++	.poll_init	= iscsi_poll_init,
++	.event_handle	= iscsi_event_handle,
++	.target_create	= iscsi_target_create,
++	.target_destroy	= iscsi_target_destroy,
++	.target_bind	= iscsi_target_bind,
++};
++#endif
++
++struct tgt_driver *tgt_drivers[] = {
++#ifdef IBMVIO
++	&amp;ibmvio,
++#endif
++#ifdef ISCSI
++	&amp;iscsi,
++#endif
++	NULL,
++};
++
++int get_driver_index(char *name)
++{
++	int i;
++
++	for (i = 0; tgt_drivers[i]; i++) {
++		if (!strcmp(name, tgt_drivers[i]-&gt;name))
++			return i;
++	}
++
++	return -ENOENT;
++}
+
+Added: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/driver.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -0,0 +1,27 @@
++#include &lt;poll.h&gt;
++
++struct tgt_driver {
++	const char *name;
++
++	int (*init) (int *);
++	int (*poll_init) (struct pollfd *);
++	int (*event_handle) (struct pollfd *);
++
++	int (*target_create) (int, char *);
++	int (*target_destroy) (int);
++	int (*target_bind)(int);
++
++	uint64_t (*scsi_get_lun)(uint8_t *);
++	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
++				uint8_t *, int *);
++	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
++			    uint8_t *, int *);
++
++	int npfd;
++	int enable;
++	int pfd_index;
++};
++
++extern struct tgt_driver *tgt_drivers[];
++extern int get_driver_index(char *name);
++
+
+Copied: trunk/usr/iscsi (from rev 501, trunk/istgt/usr)
+
+Modified: trunk/usr/iscsi/Makefile
+===================================================================
+--- trunk/istgt/usr/Makefile	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/Makefile	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,16 +1,9 @@
+-CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../include -I../../include -I../../usr
++CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../../istgt/include -I../../include -I../../usr
+ LIBS = -lcrypto
+-OBJS = libistgt.o
+-SHAREDLIB = libistgt.so
+-DAEMON = istgtd
++DAEMON = iscsi.o
+ 
+-all: $(DAEMON) $(SHAREDLIB)
++$(DAEMON): istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o
++	$(CC) -o $@ $^ $(LIBS)
+ 
+-$(DAEMON): log.o istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o
+-	$(CC) $^ -o $@ $(LIBS)
+-
+-$(SHAREDLIB): $(OBJS)
+-	$(CC) -shared -o $@ $(OBJS)
+-
+ clean:
+ 	rm -f *.o istgtd $(SHAREDLIB)
+
+Added: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/istgt/usr/iscsi.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/iscsi.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -0,0 +1,6 @@
++extern int iscsi_init(int *);
++extern int iscsi_poll_init(struct pollfd *);
++extern int iscsi_event_handle(struct pollfd *);
++extern int iscsi_target_create(int, char *);
++extern int iscsi_target_destroy(int);
++extern int iscsi_target_bind(int);
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/istgt/usr/iscsid.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/iscsid.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -27,7 +27,7 @@
+ #define DIGEST_CRC32C           (1 &lt;&lt; 1)
+ 
+ extern uint64_t thandle;
+-extern int nl_fd, ipc_fd;
++extern int nl_fd;
+ 
+ #define sid64(isid, tsih)					\
+ ({								\
+@@ -51,6 +51,7 @@
+ 
+ struct session {
+ 	struct qelem slist;
++	struct qelem hlist;
+ 
+ 	char *initiator;
+ 	struct target *target;
+@@ -187,6 +188,7 @@
+ /* session.c */
+ extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern struct session *session_find_id(int tid, uint64_t sid);
++extern struct session *session_find_hostno(int hostno);
+ extern void session_create(struct connection *conn);
+ extern void session_remove(struct session *session);
+ 
+@@ -225,7 +227,7 @@
+ 			  uint32_t cid, int flag);
+ };
+ 
+-extern int nl_init(void);
++extern int iscsi_nl_init(void);
+ 
+ extern struct iscsi_kernel_interface *ki;
+ 
+
+Modified: trunk/usr/iscsi/istgt.c
+===================================================================
+--- trunk/istgt/usr/istgt.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/istgt.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -41,17 +41,14 @@
+ 
+ enum {
+ 	POLL_LISTEN,
+-	POLL_IPC = POLL_LISTEN + LISTEN_MAX,
+-	POLL_NL,
++	POLL_NL = POLL_LISTEN + LISTEN_MAX,
+ 	POLL_INCOMING,
+ 	POLL_MAX = POLL_INCOMING + INCOMING_MAX,
+ };
+ 
+-static struct pollfd pfd[POLL_MAX];
+ static struct connection *incoming[INCOMING_MAX];
+-static char program_name[] = &quot;istgt&quot;;
+ uint64_t thandle;
+-int nl_fd, ipc_fd;
++int nl_fd;
+ 
+ static void set_non_blocking(int fd)
+ {
+@@ -169,7 +166,7 @@
+ 	return;
+ }
+ 
+-static void poll_event(struct pollfd *pfds)
++void iscsi_event_handle(struct pollfd *pfds)
+ {
+ 	struct connection *conn;
+ 	struct pollfd *pfd;
+@@ -180,12 +177,6 @@
+ 			accept_connection(pfds, pfds[POLL_LISTEN + i].fd);
+ 	}
+ 
+-/* 	if (pfd[POLL_NL].revents) */
+-/* 		handle_iscsi_events(nl_fd); */
+-
+-	if (pfds[POLL_IPC].revents)
+-		ipc_event();
+-
+ 	for (i = 0; i &lt; INCOMING_MAX; i++) {
+ 		conn = incoming[i];
+ 		pfd = &amp;pfds[POLL_INCOMING + i];
+@@ -318,14 +309,12 @@
+ 	}
+ }
+ 
+-static void event_loop(void)
++int iscsi_poll_init(struct pollfd *pfd)
+ {
+-	int i, err;
++	int i;
+ 
+ 	pfd[POLL_NL].fd = nl_fd;
+ 	pfd[POLL_NL].events = POLLIN;
+-	pfd[POLL_IPC].fd = ipc_fd;
+-	pfd[POLL_IPC].events = POLLIN;
+ 
+ 	listen_socket_create(pfd + POLL_LISTEN);
+ 
+@@ -335,59 +324,13 @@
+ 		incoming[i] = NULL;
+ 	}
+ 
+-retry:
+-	err = poll(pfd, POLL_MAX, -1);
+-	if (err &lt; 0) {
+-		if (errno != EINTR) {
+-			eprintf(&quot;%d %d\n&quot;, err, errno);
+-			exit(1);
+-		} else
+-			goto retry;
+-	}
+-
+-	poll_event(pfd);
+-	goto retry;
+-}
+-
+-static int daemon_init(void)
+-{
+-	pid_t pid;
+-
+-	pid = fork();
+-	if (pid &lt; 0)
+-		return -ENOMEM;
+-	else if (pid)
+-		exit(0);
+-
+-	setsid();
+-	chdir(&quot;/&quot;);
+-	close(0);
+-	open(&quot;/dev/null&quot;, O_RDWR);
+-	dup2(0, 1);
+-	dup2(0, 2);
+-
+ 	return 0;
+ }
+ 
+-int main(int argc, char **argv)
++int iscsi_init(int *npfd)
+ {
+-	int err, is_daemon = 1, is_debug = 1;
++	iscsi_nl_init();
++	*npfd = POLL_MAX;
+ 
+-	if (is_daemon &amp;&amp; daemon_init())
+-		exit(1);
+-
+-	if (log_init(program_name, LOG_SPACE_SIZE, is_daemon, is_debug))
+-		exit(1);
+-
+-	err = nl_init();
+-	if (err)
+-		exit(1);
+-
+-	err = ipc_init();
+-	if (err)
+-		exit(1);
+-
+-	event_loop();
+-
+ 	return 0;
+ }
+
+Deleted: trunk/usr/iscsi/libistgt.c
+===================================================================
+--- trunk/istgt/usr/libistgt.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/libistgt.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,86 +0,0 @@
+-/*
+- * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2006 Mike Christie
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published
+- * by the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- *
+- * See the file COPYING included with this distribution for more details.
+- */
+-
+-#include &lt;ctype.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;dirent.h&gt;
+-
+-#include &lt;sys/ioctl.h&gt;
+-#include &lt;sys/types.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;sys/socket.h&gt;
+-#include &lt;sys/un.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/netlink.h&gt;
+-
+-#include &quot;iscsid.h&quot;
+-#include &quot;tgtadm.h&quot;
+-
+-static int ipc_connect(void)
+-{
+-	int fd, err;
+-	struct sockaddr_un addr;
+-
+-	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+-	if (fd &lt; 0)
+-		return fd;
+-
+-	memset(&amp;addr, 0, sizeof(addr));
+-	addr.sun_family = AF_LOCAL;
+-	memcpy((char *) &amp;addr.sun_path + 1, ISTGT_NAMESPACE, strlen(ISTGT_NAMESPACE));
+-
+-	if ((err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
+-		fd = err;
+-
+-	return fd;
+-}
+-
+-int ipc_mgmt(char *sbuf, char *rbuf)
+-{
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+-	struct tgtadm_req *req;
+-	int err = -EINVAL, fd;
+-	char *params;
+-
+-	req = NLMSG_DATA(nlh);
+-	params = (char *) req + sizeof(*req);
+-
+-	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
+-		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
+-
+-	fd = ipc_connect();
+-	if (fd &lt; 0) {
+-		eprintf(&quot;cannot connect istgtd\n&quot;);
+-		return fd;
+-	}
+-
+-	err = write(fd, sbuf, nlh-&gt;nlmsg_len);
+-	if (err &lt; 0) {
+-		eprintf(&quot;cannot connect istgtd\n&quot;);
+-		goto out;
+-	}
+-
+-out:
+-	close(fd);
+-
+-	return err;
+-}
+
+Deleted: trunk/usr/iscsi/log.c
+===================================================================
+--- trunk/istgt/usr/log.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/log.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,345 +0,0 @@
+-/*
+- * Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;
+- *
+- * Released under the terms of the GNU GPL v2.0.
+- */
+-
+-#include &lt;ctype.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;stdarg.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;syslog.h&gt;
+-#include &lt;signal.h&gt;
+-#include &lt;sys/shm.h&gt;
+-#include &lt;sys/ipc.h&gt;
+-#include &lt;sys/types.h&gt;
+-
+-#include &quot;log.h&quot;
+-
+-#define SEMKEY	0xA7L
+-#define LOGDBG 0
+-
+-#if LOGDBG
+-#define logdbg(file, fmt, args...) fprintf(file, fmt, ##args)
+-#else
+-#define logdbg(file, fmt, args...) do {} while (0)
+-#endif
+-
+-static char *log_name;
+-static int is_daemon, is_debug;
+-
+-static int logarea_init (int size)
+-{
+-	int shmid;
+-
+-	logdbg(stderr,&quot;enter logarea_init\n&quot;);
+-
+-	if ((shmid = shmget(IPC_PRIVATE, sizeof(struct logarea),
+-			    0644 | IPC_CREAT | IPC_EXCL)) == -1)
+-		return 1;
+-
+-	la = shmat(shmid, NULL, 0);
+-	if (!la)
+-		return 1;
+-
+-	if (size &lt; MAX_MSG_SIZE)
+-		size = LOG_SPACE_SIZE;
+-
+-	if ((shmid = shmget(IPC_PRIVATE, size,
+-			    0644 | IPC_CREAT | IPC_EXCL)) == -1) {
+-		shmdt(la);
+-		return 1;
+-	}
+-
+-	la-&gt;start = shmat(shmid, NULL, 0);
+-	if (!la-&gt;start) {
+-		shmdt(la);
+-		return 1;
+-	}
+-	memset(la-&gt;start, 0, size);
+-
+-	la-&gt;empty = 1;
+-	la-&gt;end = la-&gt;start + size;
+-	la-&gt;head = la-&gt;start;
+-	la-&gt;tail = la-&gt;start;
+-
+-	if ((shmid = shmget(IPC_PRIVATE, MAX_MSG_SIZE + sizeof(struct logmsg),
+-			    0644 | IPC_CREAT | IPC_EXCL)) == -1) {
+-		shmdt(la-&gt;start);
+-		shmdt(la);
+-		return 1;
+-	}
+-	la-&gt;buff = shmat(shmid, NULL, 0);
+-	if (!la-&gt;buff) {
+-		shmdt(la-&gt;start);
+-		shmdt(la);
+-		return 1;
+-	}
+-
+-	if ((la-&gt;semid = semget(SEMKEY, 1, 0666 | IPC_CREAT)) &lt; 0) {
+-		shmdt(la-&gt;buff);
+-		shmdt(la-&gt;start);
+-		shmdt(la);
+-		return 1;
+-	}
+-
+-	la-&gt;semarg.val=1;
+-	if (semctl(la-&gt;semid, 0, SETVAL, la-&gt;semarg) &lt; 0) {
+-		shmdt(la-&gt;buff);
+-		shmdt(la-&gt;start);
+-		shmdt(la);
+-		return 1;
+-	}
+-
+-	la-&gt;ops[0].sem_num = 0;
+-	la-&gt;ops[0].sem_flg = 0;
+-
+-	return 0;
+-
+-}
+-
+-static void free_logarea (void)
+-{
+-	semctl(la-&gt;semid, 0, IPC_RMID, la-&gt;semarg);
+-	shmdt(la-&gt;buff);
+-	shmdt(la-&gt;start);
+-	shmdt(la);
+-	return;
+-}
+-
+-#if LOGDBG
+-static void dump_logarea (void)
+-{
+-	struct logmsg * msg;
+-
+-	logdbg(stderr, &quot;\n==== area: start addr = %p, end addr = %p ====\n&quot;,
+-		la-&gt;start, la-&gt;end);
+-	logdbg(stderr, &quot;|addr     |next     |prio|msg\n&quot;);
+-
+-	for (msg = (struct logmsg *)la-&gt;head; (void *)msg != la-&gt;tail;
+-	     msg = msg-&gt;next)
+-		logdbg(stderr, &quot;|%p |%p |%i   |%s\n&quot;, (void *)msg, msg-&gt;next,
+-				msg-&gt;prio, (char *)&amp;msg-&gt;str);
+-
+-	logdbg(stderr, &quot;|%p |%p |%i   |%s\n&quot;, (void *)msg, msg-&gt;next,
+-			msg-&gt;prio, (char *)&amp;msg-&gt;str);
+-
+-	logdbg(stderr, &quot;\n\n&quot;);
+-}
+-#endif
+-
+-int log_enqueue (int prio, const char * fmt, va_list ap)
+-{
+-	int len, fwd;
+-	char buff[MAX_MSG_SIZE];
+-	struct logmsg * msg;
+-	struct logmsg * lastmsg;
+-
+-	lastmsg = (struct logmsg *)la-&gt;tail;
+-
+-	if (!la-&gt;empty) {
+-		fwd = sizeof(struct logmsg) +
+-		      strlen((char *)&amp;lastmsg-&gt;str) * sizeof(char) + 1;
+-		la-&gt;tail += fwd;
+-	}
+-	vsnprintf(buff, MAX_MSG_SIZE, fmt, ap);
+-	len = strlen(buff) * sizeof(char) + 1;
+-
+-	/* not enough space on tail : rewind */
+-	if (la-&gt;head &lt;= la-&gt;tail &amp;&amp;
+-	    (len + sizeof(struct logmsg)) &gt; (la-&gt;end - la-&gt;tail)) {
+-		logdbg(stderr, &quot;enqueue: rewind tail to %p\n&quot;, la-&gt;tail);
+-			la-&gt;tail = la-&gt;start;
+-	}
+-
+-	/* not enough space on head : drop msg */
+-	if (la-&gt;head &gt; la-&gt;tail &amp;&amp;
+-	    (len + sizeof(struct logmsg)) &gt; (la-&gt;head - la-&gt;tail)) {
+-		logdbg(stderr, &quot;enqueue: log area overrun, drop msg\n&quot;);
+-
+-		if (!la-&gt;empty)
+-			la-&gt;tail = lastmsg;
+-
+-		return 1;
+-	}
+-
+-	/* ok, we can stage the msg in the area */
+-	la-&gt;empty = 0;
+-	msg = (struct logmsg *)la-&gt;tail;
+-	msg-&gt;prio = prio;
+-	memcpy((void *)&amp;msg-&gt;str, buff, len);
+-	lastmsg-&gt;next = la-&gt;tail;
+-	msg-&gt;next = la-&gt;head;
+-
+-	logdbg(stderr, &quot;enqueue: %p, %p, %i, %s\n&quot;, (void *)msg, msg-&gt;next,
+-		msg-&gt;prio, (char *)&amp;msg-&gt;str);
+-
+-#if LOGDBG
+-	dump_logarea();
+-#endif
+-	return 0;
+-}
+-
+-int log_dequeue (void * buff)
+-{
+-	struct logmsg * src = (struct logmsg *)la-&gt;head;
+-	struct logmsg * dst = (struct logmsg *)buff;
+-	struct logmsg * lst = (struct logmsg *)la-&gt;tail;
+-
+-	if (la-&gt;empty)
+-		return 1;
+-
+-	int len = strlen((char *)&amp;src-&gt;str) * sizeof(char) +
+-		  sizeof(struct logmsg) + 1;
+-
+-	dst-&gt;prio = src-&gt;prio;
+-	memcpy(dst, src,  len);
+-
+-	if (la-&gt;tail == la-&gt;head)
+-		la-&gt;empty = 1; /* we purge the last logmsg */
+-	else {
+-		la-&gt;head = src-&gt;next;
+-		lst-&gt;next = la-&gt;head;
+-	}
+-	logdbg(stderr, &quot;dequeue: %p, %p, %i, %s\n&quot;,
+-		(void *)src, src-&gt;next, src-&gt;prio, (char *)&amp;src-&gt;str);
+-
+-	memset((void *)src, 0,  len);
+-
+-	return la-&gt;empty;
+-}
+-
+-/*
+- * this one can block under memory pressure
+- */
+-static void log_syslog (void * buff)
+-{
+-	struct logmsg * msg = (struct logmsg *)buff;
+-
+-	syslog(msg-&gt;prio, &quot;%s&quot;, (char *)&amp;msg-&gt;str);
+-}
+-
+-static void dolog(int prio, const char *fmt, va_list ap)
+-{
+-	if (is_daemon) {
+-		la-&gt;ops[0].sem_op = -1;
+-		if (semop(la-&gt;semid, la-&gt;ops, 1) &lt; 0) {
+-			syslog(LOG_ERR, &quot;semop up failed&quot;);
+-			return;
+-		}
+-
+-		log_enqueue(prio, fmt, ap);
+-
+-		la-&gt;ops[0].sem_op = 1;
+-		if (semop(la-&gt;semid, la-&gt;ops, 1) &lt; 0) {
+-			syslog(LOG_ERR, &quot;semop down failed&quot;);
+-			return;
+-		}
+-	} else {
+-		fprintf(stderr, &quot;%s: &quot;, log_name);
+-		vfprintf(stderr, fmt, ap);
+-		fflush(stderr);
+-	}
+-}
+-
+-void log_warning(const char *fmt, ...)
+-{
+-	va_list ap;
+-	va_start(ap, fmt);
+-	dolog(LOG_WARNING, fmt, ap);
+-	va_end(ap);
+-}
+-
+-void log_error(const char *fmt, ...)
+-{
+-	va_list ap;
+-	va_start(ap, fmt);
+-	dolog(LOG_ERR, fmt, ap);
+-	va_end(ap);
+-}
+-
+-void log_debug(const char *fmt, ...)
+-{
+-	if (!is_debug)
+-		return;
+-
+-	va_list ap;
+-	va_start(ap, fmt);
+-	dolog(LOG_DEBUG, fmt, ap);
+-	va_end(ap);
+-}
+-
+-static void log_flush(void)
+-{
+-	while (!la-&gt;empty) {
+-		la-&gt;ops[0].sem_op = -1;
+-		if (semop(la-&gt;semid, la-&gt;ops, 1) &lt; 0) {
+-			syslog(LOG_ERR, &quot;semop up failed&quot;);
+-			exit(1);
+-		}
+-		log_dequeue(la-&gt;buff);
+-		la-&gt;ops[0].sem_op = 1;
+-		if (semop(la-&gt;semid, la-&gt;ops, 1) &lt; 0) {
+-			syslog(LOG_ERR, &quot;semop down failed&quot;);
+-			exit(1);
+-		}
+-		log_syslog(la-&gt;buff);
+-	}
+-}
+-
+-int log_init(char *program_name, int size, int daemon, int debug)
+-{
+-	is_daemon = daemon;
+-	is_debug = debug;
+-
+-	logdbg(stderr,&quot;enter log_init\n&quot;);
+-	log_name = program_name;
+-	if (is_daemon) {
+-		struct sigaction sa_old;
+-		struct sigaction sa_new;
+-		pid_t pid;
+-
+-		openlog(log_name, 0, LOG_DAEMON);
+-		setlogmask (LOG_UPTO (LOG_DEBUG));
+-
+-		if (logarea_init(size)) {
+-			syslog(LOG_ERR, &quot;failed to initialize the logger\n&quot;);
+-			return 1;
+-		}
+-
+-		pid = fork();
+-		if (pid &lt; 0) {
+-			syslog(LOG_ERR, &quot;fail to fork the logger\n&quot;);
+-			return 1;
+-		} else if (pid) {
+-			syslog(LOG_WARNING,
+-			       &quot;Target daemon logger with pid=%d started!\n&quot;, pid);
+-			return 0;
+-		}
+-
+-		/* flush on daemon's crash */
+-		sa_new.sa_handler = (void*)log_flush;
+-		sigemptyset(&amp;sa_new.sa_mask);
+-		sa_new.sa_flags = 0;
+-		sigaction(SIGSEGV, &amp;sa_new, &amp;sa_old );
+-
+-		while(1) {
+-			log_flush();
+-			sleep(1);
+-		}
+-		exit(0);
+-	}
+-
+-	return 0;
+-}
+-
+-void log_close (void)
+-{
+-	if (is_daemon) {
+-		closelog();
+-		free_logarea();
+-	}
+-	return;
+-}
+
+Deleted: trunk/usr/iscsi/log.h
+===================================================================
+--- trunk/istgt/usr/log.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/log.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,84 +0,0 @@
+-/*
+- * iSCSI Safe Logging and Tracing Library
+- *
+- * Copyright (C) 2004 Dmitry Yusupov, Alex Aizman
+- * maintained by <A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">open-iscsi at googlegroups.com</A>
+- *
+- * circular buffer code based on log.c from dm-multipath project
+- *
+- * heavily based on code from log.c:
+- *   Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;,
+- *   licensed under the terms of the GNU GPL v2.0,
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published
+- * by the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- *
+- * See the file COPYING included with this distribution for more details.
+- */
+-
+-#ifndef LOG_H
+-#define LOG_H
+-
+-#include &lt;sys/sem.h&gt;
+-
+-union semun {
+-	int val;
+-	struct semid_ds *buf;
+-	unsigned short int *array;
+-	struct seminfo *__buf;
+-};
+-
+-#define LOG_SPACE_SIZE 16384
+-#define MAX_MSG_SIZE 256
+-
+-extern int log_daemon;
+-extern int log_level;
+-
+-struct logmsg {
+-	short int prio;
+-	void *next;
+-	char *str;
+-};
+-
+-struct logarea {
+-	int empty;
+-	void *head;
+-	void *tail;
+-	void *start;
+-	void *end;
+-	char *buff;
+-	struct sembuf ops[1];
+-	int semid;
+-	union semun semarg;
+-};
+-
+-struct logarea *la;
+-
+-extern int log_init (char * progname, int size, int daemon, int debug);
+-extern void log_close (void);
+-extern void dump_logmsg (void *);
+-extern void log_warning(const char *fmt, ...)
+-	__attribute__ ((format (printf, 1, 2)));
+-extern void log_error(const char *fmt, ...)
+-	__attribute__ ((format (printf, 1, 2)));
+-extern void log_debug(const char *fmt, ...)
+-	__attribute__ ((format (printf, 1, 2)));
+-
+-#define eprintf(fmt, args...)						\
+-do {									\
+-	log_error(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-} while (0)
+-
+-#define dprintf(fmt, args...)						\
+-do {									\
+-	log_debug(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-} while (0)
+-
+-#endif	/* LOG_H */
+
+Modified: trunk/usr/iscsi/netlink.c
+===================================================================
+--- trunk/istgt/usr/netlink.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/netlink.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -41,33 +41,6 @@
+ 
+ static struct sockaddr_nl saddr, daddr;
+ 
+-#if 0
+-void async_event(char *data)
+-{
+-	struct tgt_event *ev = (struct tgt_event *) data;
+-	struct iet_msg *msg = (struct iet_msg *) ev-&gt;data;
+-	struct session *session;
+-
+-	eprintf(&quot;%u %u\n&quot;, msg-&gt;msg_type, msg-&gt;result);
+-
+-	switch (msg-&gt;k.conn_state_change.state) {
+-	case E_CONN_CLOSE:
+-		if (!(session = session_find_id(msg-&gt;k.conn_state_change.tid,
+-						msg-&gt;k.conn_state_change.sid))) {
+-			eprintf(&quot;session %#&quot; PRIx64 &quot; not found?&quot;,
+-				msg-&gt;k.conn_state_change.sid);
+-		}
+-
+-		if (!--session-&gt;conn_cnt)
+-			session_remove(session);
+-		break;
+-	default:
+-		eprintf(&quot;%u\n&quot;, msg-&gt;k.conn_state_change.state);
+-		break;
+-	}
+-}
+-#endif
+-
+ static int __nl_read(int fd, void *data, int size, int flags)
+ {
+ 	struct sockaddr_nl saddr;
+@@ -344,7 +317,7 @@
+ 	return err;
+ }
+ 
+-int nl_init(void)
++int iscsi_nl_init(void)
+ {
+ 	int err, rsize = 256 * 1024;
+ 
+@@ -357,6 +330,7 @@
+ 		eprintf(&quot;Fail to create the netlink socket %d\n&quot;, errno);
+ 		return err;
+ 	}
++	eprintf(&quot;create the netlink socket %d\n&quot;, nl_fd);
+ 
+ 	err = setsockopt(nl_fd, SOL_SOCKET, SO_RCVBUF, &amp;rsize, sizeof(rsize));
+ 	if (err) {
+@@ -368,17 +342,18 @@
+ 	saddr.nl_family = AF_NETLINK;
+ 	saddr.nl_pid = getpid();
+ 	saddr.nl_groups = 0; /* not in mcast groups */
+-	err = bind(nl_fd, (struct sockaddr *) &amp;saddr, sizeof(saddr));
+-	if (err) {
+-		eprintf(&quot;can not bind NETLINK_ISCSI socket %d\n&quot;, errno);
+-		close(nl_fd);
+-		return err;
+-	}
++/* 	err = bind(nl_fd, (struct sockaddr *) &amp;saddr, sizeof(saddr)); */
++/* 	if (err) { */
++/* 		eprintf(&quot;can not bind NETLINK_ISCSI socket %d\n&quot;, errno); */
++/* 		close(nl_fd); */
++/* 		return err; */
++/* 	} */
+ 
+ 	memset(&amp;daddr, 0, sizeof(daddr));
+ 	daddr.nl_family = AF_NETLINK;
+ 	daddr.nl_pid = 0; /* kernel */
+ 	daddr.nl_groups = 0; /* unicast */
++	eprintf(&quot;create the netlink socket %d %d\n&quot;, nl_fd, err);
+ 
+ 	return err;
+ }
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/istgt/usr/session.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/session.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -16,6 +16,8 @@
+ 
+ #include &quot;iscsid.h&quot;
+ 
++struct qelem sessions_list = LIST_HEAD_INIT(sessions_list);
++
+ static struct session *session_alloc(int tid)
+ {
+ 	struct session *session;
+@@ -36,6 +38,18 @@
+ 	return session;
+ }
+ 
++int iscsi_target_bind(int hostno)
++{
++	struct session *session;
++
++	list_for_each_entry(session, &amp;sessions_list, hlist) {
++		if (session-&gt;hostno == hostno)
++			return session-&gt;target-&gt;tid;
++	}
++
++	return -ENOENT;
++}
++
+ struct session *session_find_name(int tid, const char *iname, uint8_t *isid)
+ {
+ 	struct session *session;
+@@ -101,7 +115,7 @@
+ 	ki-&gt;create_session(thandle, conn-&gt;exp_cmd_sn, &amp;session-&gt;ksid,
+ 			   &amp;session-&gt;hostno);
+ 
+-	target_bind(session-&gt;target-&gt;tid, session-&gt;hostno);
++	insque(&amp;session-&gt;hlist, &amp;sessions_list);
+ }
+ 
+ void session_remove(struct session *session)
+@@ -121,6 +135,8 @@
+ /* 		session-&gt;target-&gt;nr_sessions--; */
+ 	}
+ 
++	remque(&amp;session-&gt;hlist);
++
+ 	free(session-&gt;initiator);
+ 	free(session);
+ }
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/istgt/usr/target.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/iscsi/target.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -18,7 +18,6 @@
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
+ 
+ struct qelem targets_list = LIST_HEAD_INIT(targets_list);
+ 
+@@ -63,7 +62,7 @@
+ 	return NULL;
+ }
+ 
+-static int destroy_target(int tid)
++int iscsi_target_destroy(int tid)
+ {
+ 	struct target* target;
+ 
+@@ -85,7 +84,7 @@
+ 	return 0;
+ }
+ 
+-static int create_target(int tid, char *name)
++int iscsi_target_create(int tid, char *name)
+ {
+ 	struct target *target;
+ 
+@@ -107,223 +106,3 @@
+ 
+ 	return 0;
+ }
+-
+-static int istgt_target_mgmt(struct tgtadm_req *req, char *params)
+-{
+-	int err = -EINVAL, tid = req-&gt;tid;
+-
+-	switch (req-&gt;op) {
+-	case OP_NEW:
+-		err = create_target(tid, params);
+-		break;
+-	case OP_DELETE:
+-		err = destroy_target(tid);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	return err;
+-}
+-
+-static int ipc_accept(int afd)
+-{
+-	struct sockaddr addr;
+-	socklen_t len;
+-
+-	len = sizeof(addr);
+-	return accept(afd, (struct sockaddr *) &amp;addr, &amp;len);
+-}
+-
+-static int ipc_perm(int fd)
+-{
+-	struct ucred cred;
+-	socklen_t len;
+-	int err;
+-
+-	len = sizeof(cred);
+-	err = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, (void *) &amp;cred, &amp;len);
+-	if (err &lt; 0)
+-		goto out;
+-
+-	if (cred.uid || cred.gid) {
+-		err = -EPERM;
+-		goto out;
+-	}
+-out:
+-	return err;
+-}
+-
+-void ipc_event(void)
+-{
+-	int fd, err;
+-	char sbuf[4096], rbuf[4096];
+-	struct nlmsghdr *nlh;
+-	struct iovec iov;
+-	struct msghdr msg;
+-	struct tgtadm_req *req;
+-
+-	dprintf(&quot;ipc\n&quot;);
+-
+-	fd = ipc_accept(ipc_fd);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, fd);
+-		return;
+-	}
+-
+-	err = ipc_perm(fd);
+-	if (err &lt; 0)
+-		goto fail;
+-
+-	memset(sbuf, 0, sizeof(sbuf));
+-	memset(rbuf, 0, sizeof(rbuf));
+-
+-	nlh = (struct nlmsghdr *) sbuf;
+-	iov.iov_base = nlh;
+-	iov.iov_len = NLMSG_ALIGN(sizeof(struct nlmsghdr));
+-	memset(&amp;msg, 0, sizeof(msg));
+-	msg.msg_iov = &iov;
+-	msg.msg_iovlen = 1;
+-
+-	err = recvmsg(fd, &amp;msg, MSG_PEEK);
+-	if (err != NLMSG_ALIGN(sizeof(struct nlmsghdr))) {
+-		err = -EIO;
+-		goto fail;
+-	}
+-
+-	iov.iov_base = nlh;
+-	iov.iov_len = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+-	memset(&amp;msg, 0, sizeof(msg));
+-	msg.msg_iov = &iov;
+-	msg.msg_iovlen = 1;
+-
+-	err = recvmsg(fd, &amp;msg, MSG_DONTWAIT);
+-	if (err &lt; 0)
+-		goto fail;
+-
+-	req = NLMSG_DATA(nlh);
+-	dprintf(&quot;%d %d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
+-
+-	if (req-&gt;mode == MODE_TARGET)
+-		err = istgt_target_mgmt(req, (char *) req + sizeof(*req));
+-
+-fail:
+-	if (fd &gt; 0)
+-		close(fd);
+-
+-	return;
+-}
+-
+-/* should be moved somewhere */
+-int ipc_init(void)
+-{
+-	int fd, err;
+-	struct sockaddr_un addr;
+-
+-	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+-	if (fd &lt; 0)
+-		return fd;
+-
+-	memset(&amp;addr, 0, sizeof(addr));
+-	addr.sun_family = AF_LOCAL;
+-	memcpy((char *) &amp;addr.sun_path + 1, ISTGT_NAMESPACE,
+-	       strlen(ISTGT_NAMESPACE));
+-
+-	if ((err = bind(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
+-		return err;
+-
+-	if ((err = listen(fd, 32)) &lt; 0)
+-		return err;
+-
+-	ipc_fd = fd;
+-
+-	return 0;
+-}
+-
+-static int filter(const struct dirent *dir)
+-{
+-	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
+-}
+-
+-static int lldname_to_id(char *name)
+-{
+-	struct dirent **namelist;
+-	int i, nr, id = -EINVAL;
+-	char *p;
+-
+-	nr = scandir(TGT_LLD_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -EINVAL;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		p = strchr(namelist[i]-&gt;d_name, '-');
+-		if (p &amp;&amp; !strcmp(name, p + 1)) {
+-			*p='\0';
+-			id = atoi(namelist[i]-&gt;d_name);
+-			break;
+-		}
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return id;
+-}
+-
+-static int ipc_mgmt_connect(void)
+-{
+-	int fd, err;
+-	struct sockaddr_un addr;
+-
+-	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+-	if (fd &lt; 0)
+-		return fd;
+-
+-	memset(&amp;addr, 0, sizeof(addr));
+-	addr.sun_family = AF_LOCAL;
+-	memcpy((char *) &amp;addr.sun_path + 1, TGT_IPC_NAMESPACE, strlen(TGT_IPC_NAMESPACE));
+-
+-	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+-	if (err &lt; 0)
+-		return err;
+-
+-	return fd;
+-}
+-
+-int target_bind(int tid, int hostno)
+-{
+-	struct tgtadm_req *req;
+-	struct nlmsghdr *nlh;
+-	char buf[1024];
+-	int fd, err;
+-
+-	nlh = (struct nlmsghdr *) buf;
+-	req = NLMSG_DATA(nlh);
+-
+-	req-&gt;mode = MODE_TARGET;
+-	req-&gt;op = OP_BIND;
+-	req-&gt;tid = tid;
+-	req-&gt;host_no = hostno;
+-	req-&gt;typeid = lldname_to_id(&quot;istgt&quot;);
+-
+-	nlh-&gt;nlmsg_len = NLMSG_LENGTH(sizeof(*req));
+-	nlh-&gt;nlmsg_type = 0;
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_pid = getpid();
+-
+-	fd = ipc_mgmt_connect();
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Cannot connect tgtd\n&quot;);
+-		return fd;
+-	}
+-
+-	err = write(fd, buf, nlh-&gt;nlmsg_len);
+-	if (err &lt; 0)
+-		eprintf(&quot;Cannot send to tgtd %d\n&quot;, err);
+-
+-	err = read(fd, buf, sizeof(buf));
+-
+-	close(fd);
+-	return 0;
+-}
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/mgmt.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -40,6 +40,7 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;log.h&quot;
+ #include &quot;tgtadm.h&quot;
++#include &quot;driver.h&quot;
+ 
+ static void device_create_parser(char *args, char **path, char **devtype)
+ {
+@@ -65,7 +66,7 @@
+ 	}
+ }
+ 
+-static int target_mgmt(struct tgtadm_req *req, char *params,
++static int target_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+ 		       char *rbuf, int *rlen)
+ {
+ 	int err = -EINVAL;
+@@ -73,12 +74,16 @@
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+ 		err = tgt_target_create(req-&gt;tid);
++		if (!err)
++			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, params);
+ 		break;
+ 	case OP_DELETE:
+ 		err = tgt_target_destroy(req-&gt;tid);
++		if (!err)
++			tgt_drivers[lld_no]-&gt;target_destroy(req-&gt;tid);
+ 		break;
+ 	case OP_BIND:
+-		err = tgt_target_bind(req-&gt;tid, req-&gt;host_no, req-&gt;typeid);
++		err = tgt_target_bind(req-&gt;tid, req-&gt;host_no, lld_no);
+ 		break;
+ 	default:
+ 		break;
+@@ -87,7 +92,7 @@
+ 	return err;
+ }
+ 
+-static int device_mgmt(struct tgtadm_req *req, char *params,
++static int device_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+ 		       char *rbuf, int *rlen)
+ {
+ 	int err = -EINVAL;
+@@ -112,7 +117,7 @@
+ 	return err;
+ }
+ 
+-int tgt_mgmt(char *sbuf, char *rbuf)
++int tgt_mgmt(int lld_no, char *sbuf, char *rbuf)
+ {
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+ 	struct tgtadm_req *req;
+@@ -124,15 +129,15 @@
+ 	params = (char *) req + sizeof(*req);
+ 
+ 	dprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s %d\n&quot;,
+-		nlh-&gt;nlmsg_len,	req-&gt;typeid, req-&gt;mode, req-&gt;op,
++		nlh-&gt;nlmsg_len, lld_no, req-&gt;mode, req-&gt;op,
+ 		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
+ 
+ 	switch (req-&gt;mode) {
+ 	case MODE_TARGET:
+-		err = target_mgmt(req, params, rbuf, &amp;rlen);
++		err = target_mgmt(lld_no, req, params, rbuf, &amp;rlen);
+ 		break;
+ 	case MODE_DEVICE:
+-		err = device_mgmt(req, params, rbuf, &amp;rlen);
++		err = device_mgmt(lld_no, req, params, rbuf, &amp;rlen);
+ 		break;
+ 	default:
+ 		break;
+@@ -174,7 +179,7 @@
+ 	return err;
+ }
+ 
+-void ipc_event_handle(struct driver_info *dinfo, int accept_fd)
++void ipc_event_handle(int accept_fd)
+ {
+ 	int fd, err;
+ 	char sbuf[4096], rbuf[4096];
+@@ -183,7 +188,7 @@
+ 	struct msghdr msg;
+ 	struct tgtadm_res *res;
+ 	struct tgtadm_req *req;
+-	int (*fn) (char *, char *);
++	int lld_no;
+ 
+ 	fd = ipc_accept(accept_fd);
+ 	if (fd &lt; 0) {
+@@ -222,16 +227,17 @@
+ 		goto fail;
+ 
+ 	req = NLMSG_DATA(nlh);
+-	dprintf(&quot;%d %d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
++	dprintf(&quot;%d %s %d %d %d\n&quot;, req-&gt;mode, req-&gt;lld, err, nlh-&gt;nlmsg_len, fd);
++	lld_no = get_driver_index(req-&gt;lld);
++	if (lld_no &lt; 0) {
++		err = -ENOENT;
++		goto fail;
++	}
+ 
+-	err = tgt_mgmt((char *) nlh, rbuf);
++	err = tgt_mgmt(lld_no, (char *) nlh, rbuf);
+ 	if (err)
+ 		eprintf(&quot;%d %d %d %d %d\n&quot;,
+-			req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
+-	fn = dl_fn(dinfo, req-&gt;typeid, DL_FN_IPC_MGMT);
+-	if (fn)
+-		err = fn((char *) nlh, rbuf);
+-
++			req-&gt;mode, lld_no, err, nlh-&gt;nlmsg_len, fd);
+ send:
+ 	err = write(fd, nlh, nlh-&gt;nlmsg_len);
+ 	if (err &lt; 0)
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/scsi.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -24,8 +24,10 @@
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &lt;sys/mman.h&gt;
++#include &lt;poll.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
++#include &quot;driver.h&quot;
+ 
+ #define BLK_SHIFT	9
+ 
+@@ -255,7 +257,8 @@
+ 		   uint8_t *lun_buf, uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	typeof(__inquiry) *fn;
+-	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_INQUIRY) ? : __inquiry;
++
++	fn = tgt_drivers[lid]-&gt;scsi_inquiry ? : __inquiry;
+ 	return fn(dev, host_no, lun_buf, scb, data, len);
+ }
+ 
+@@ -308,7 +311,7 @@
+ 		       uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	typeof(__report_luns) *fn;
+-	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_REPORT_LUNS) ? : __report_luns;
++	fn = tgt_drivers[lid]-&gt;scsi_report_luns ? : __report_luns;
+ 	return fn(dev_list, lun_buf, scb, p, len);
+ }
+ 
+@@ -478,7 +481,7 @@
+ uint64_t scsi_get_devid(int lid, uint8_t *p)
+ {
+ 	typeof(__scsi_get_devid) *fn;
+-	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_LUN_TO_INT) ? : __scsi_get_devid;
++	fn = tgt_drivers[lid]-&gt;scsi_get_lun ? : __scsi_get_devid;
+ 	return fn(p);
+ }
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/target.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -26,6 +26,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;poll.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/socket.h&gt;
+@@ -39,7 +40,7 @@
+ 
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
++#include &quot;driver.h&quot;
+ 
+ /* better if we can include the followings in kernel header files. */
+ #define	MSG_SIMPLE_TAG	0x20
+@@ -251,10 +252,6 @@
+ 		return err;
+ 	}
+ 
+-	err = tgt_device_dir_create(tid, dev_id);
+-	if (err &lt; 0)
+-		goto close_dev_fd;
+-
+ 	if (dev_id &gt;= target-&gt;max_device)
+ 		resize_device_table(target, dev_id);
+ 
+@@ -312,8 +309,6 @@
+ 
+ 	close(device-&gt;fd);
+ 
+-	tgt_device_dir_delete(tid, dev_id);
+-
+ 	list_del(&amp;device-&gt;dlist);
+ 
+ 	free(device);
+@@ -393,12 +388,25 @@
+ 	uint64_t offset, dev_id;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	unsigned long uaddr = 0;
++	int hostno = ev_req-&gt;k.cmd_req.host_no;
+ 
+-	target = host_to_target(ev_req-&gt;k.cmd_req.host_no);
++	target = host_to_target(hostno);
+ 	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;,
+-			ev_req-&gt;k.cmd_req.host_no);
+-		return;
++		int tid, lid = 0, err = -1;
++		if (tgt_drivers[lid]-&gt;target_bind) {
++			tid = tgt_drivers[0]-&gt;target_bind(hostno);
++			if (tid &gt;= 0) {
++				err = tgt_target_bind(tid, hostno, lid);
++				if (!err)
++					target = host_to_target(hostno);
++			}
++		}
++
++		if (!target) {
++			eprintf(&quot;%d is not bind to any target\n&quot;,
++				ev_req-&gt;k.cmd_req.host_no);
++			return;
++		}
+ 	}
+ 
+ 	/* TODO: preallocate cmd */
+@@ -743,8 +751,6 @@
+ 
+ int tgt_target_bind(int tid, int host_no, int lid)
+ {
+-	int err;
+-
+ 	if (!tgtt[tid]) {
+ 		eprintf(&quot;target is not found %d\n&quot;, tid);
+ 		return -EINVAL;
+@@ -756,10 +762,6 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	err = tgt_target_dir_attr_create(tid, &quot;hostno&quot;, &quot;%d\n&quot;, host_no);
+-	if (err &lt; 0)
+-		return -EINVAL;
+-
+ 	eprintf(&quot;Succeed to bind the target %d to the scsi host %d\n&quot;,
+ 		tid, host_no);
+ 	hostt[host_no] = tgtt[tid];
+@@ -802,18 +804,12 @@
+ 	}
+ 	target-&gt;max_device = DEFAULT_NR_DEVICE;
+ 
+-	err = tgt_target_dir_create(tid);
+-	if (err &lt; 0)
+-		goto free_device_table;
+-
+ 	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
+ 
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+ 	tgtt[tid] = target;
+ 	return 0;
+ 
+-free_device_table:
+-	free(target-&gt;devt);
+ free_target:
+ 	free(target);
+ 	return err;
+@@ -836,9 +832,6 @@
+ 
+ 	free(target-&gt;devt);
+ 
+-	tgt_target_dir_attr_delete(tid, &quot;hostno&quot;);
+-	tgt_target_dir_delete(tid);
+-
+ 	tgtt[tid] = NULL;
+ 	free(target);
+ 
+
+Deleted: trunk/usr/tgt_sysfs.c
+===================================================================
+--- trunk/usr/tgt_sysfs.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgt_sysfs.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,167 +0,0 @@
+-/*
+- * SCSI file and directory handling functions
+- *
+- * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdarg.h&gt;
+-#include &lt;stdint.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;linux/limits.h&gt;
+-
+-#include &quot;tgt_sysfs.h&quot;
+-#include &quot;tgtd.h&quot;
+-
+-enum tgt_fs_op {
+-	CREATE = 0,
+-	DELETE,
+-};
+-
+-static int tgt_set_string(char *buf, int size, const char *fmt, va_list ap)
+-{
+-	int err;
+-
+-	err = vsnprintf(buf, size, fmt, ap);
+-	if (err &gt; size)
+-		return -EINVAL;
+-
+-	return 0;
+-}
+-
+-static int tgt_dir(int op, const char *fmt, ...)
+-{
+-	int err;
+-	char path[PATH_MAX];
+-
+-	va_list ap;
+-	va_start(ap, fmt);
+-
+-	err = tgt_set_string(path, sizeof(path), fmt, ap);
+-	if (err)
+-		goto out;
+-
+-	if (op)
+-		err = unlink(path);
+-	else
+-		err = mkdir(path, DEFDMODE);
+-
+-	if (err &lt; 0)
+-		eprintf(&quot;fail to create %s %s\n&quot;,
+-			op ? &quot;delete&quot; : &quot;create&quot;, path);
+-out:
+-	va_end(ap);
+-	return err;
+-}
+-
+-static int tgt_file(int op, const char *fmt, ...)
+-{
+-	int err;
+-	char path[PATH_MAX];
+-
+-	va_list ap;
+-	va_start(ap, fmt);
+-
+-	err = tgt_set_string(path, sizeof(path), fmt, ap);
+-	if (err)
+-		goto out;
+-
+-	if (op)
+-		err = unlink(path);
+-	else
+-		err = open(path, O_RDWR|O_CREAT|O_EXCL, DEFFMODE);
+-
+-	if (err &lt; 0)
+-		eprintf(&quot;fail to %s %s\n&quot;, op ? &quot;delete&quot; : &quot;create&quot;, path);
+-out:
+-	va_end(ap);
+-	return err;
+-}
+-
+-int tgt_target_dir_create(int tid)
+-{
+-	return tgt_dir(CREATE, TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
+-}
+-
+-int tgt_target_dir_delete(int tid)
+-{
+-	return tgt_dir(DELETE, TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
+-}
+-
+-int tgt_device_dir_create(int tid, uint64_t dev_id)
+-{
+-	return tgt_dir(CREATE, TGT_TARGET_SYSFSDIR
+-		       &quot;/target%d/device%&quot; PRIu64, tid, dev_id);
+-}
+-
+-int tgt_device_dir_delete(int tid, uint64_t dev_id)
+-{
+-	return tgt_dir(DELETE, TGT_TARGET_SYSFSDIR
+-		       &quot;/target%d/device%&quot; PRIu64, tid, dev_id);
+-}
+-
+-int tgt_sysfs_init(void)
+-{
+-	int err;
+-
+-	system(&quot;rm -rf &quot; TGT_TARGET_SYSFSDIR);
+-
+-	err = mkdir(TGT_TARGET_SYSFSDIR, DEFDMODE);
+-	if (err &lt; 0)
+-		perror(&quot;Cannot create &quot; TGT_TARGET_SYSFSDIR);
+-
+-	return err;
+-}
+-
+-int tgt_target_dir_attr_create(int tid, const char *name, const char *fmt, ...)
+-{
+-	int err, fd = 0;
+-	char buf[PATH_MAX];
+-	va_list ap;
+-
+-	va_start(ap, fmt);
+-
+-	err = tgt_set_string(buf, sizeof(buf), fmt, ap);
+-	if (err)
+-		goto out;
+-
+-	fd = tgt_file(CREATE, TGT_TARGET_SYSFSDIR &quot;/target%d/%s&quot;, tid, name);
+-	if (fd &lt; 0) {
+-		err = -errno;
+-		goto out;
+-	}
+-	err = write(fd, buf, strlen(buf));
+-	if (err &lt; 0)
+-		eprintf(&quot;fail to write %s\n&quot;, buf);
+-out:
+-	if (fd &gt; 0)
+-		close(fd);
+-	va_end(ap);
+-	return err;
+-}
+-
+-int tgt_target_dir_attr_delete(int tid, char *name)
+-{
+-	return tgt_file(DELETE, TGT_TARGET_SYSFSDIR &quot;/target%d/%s&quot;, tid, name);
+-}
+
+Deleted: trunk/usr/tgt_sysfs.h
+===================================================================
+--- trunk/usr/tgt_sysfs.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgt_sysfs.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,19 +0,0 @@
+-#include &lt;stdint.h&gt;
+-
+-#ifndef	__TGT_SYSFS_H
+-#define	__TGT_SYSFS_H
+-
+-#define	TGT_LLD_SYSFSDIR	&quot;/var/run/tgt_lld&quot;
+-#define	TGT_TARGET_SYSFSDIR	&quot;/var/run/tgt_target&quot;
+-
+-
+-extern int tgt_target_dir_create(int tid);
+-extern int tgt_target_dir_delete(int tid);
+-
+-extern int tgt_device_dir_create(int tid, uint64_t dev_id);
+-extern int tgt_device_dir_delete(int tid, uint64_t dev_id);
+-
+-extern int tgt_target_dir_attr_create(int tid, const char *name, const char *fmt, ...);
+-extern int tgt_target_dir_attr_delete(int tid, char *name);
+-
+-#endif
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgtadm.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -38,18 +38,22 @@
+ #include &lt;linux/types.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
++#include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
++#include &quot;driver.h&quot;
+ 
++#undef eprintf
+ #define eprintf(fmt, args...)						\
+ do {									\
+ 	fprintf(stderr, &quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
+ 
++#undef dprintf
+ #define dprintf eprintf
+ 
++#define BUFSIZE 4096
++
+ static char program_name[] = &quot;tgtadm&quot;;
+-static char *driver;
+ 
+ static struct option const long_options[] =
+ {
+@@ -62,7 +66,6 @@
+ 	{&quot;params&quot;, required_argument, NULL, 'p'},
+ 	{&quot;user&quot;, no_argument, NULL, 'u'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+-	{&quot;bus&quot;, required_argument, NULL, 'b'},
+ 	{&quot;version&quot;, no_argument, NULL, 'v'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+@@ -119,119 +122,6 @@
+ 	exit(status == 0 ? 0 : -1);
+ }
+ 
+-static int filter(const struct dirent *dir)
+-{
+-	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
+-}
+-
+-static void all_devices_destroy(int tid)
+-{
+-	struct dirent **namelist;
+-	char path[PATH_MAX], key[] = &quot;device&quot;;
+-	int i, nr, err;
+-	uint64_t dev_id;
+-
+-	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
+-	nr = scandir(path, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		if (strncmp(namelist[i]-&gt;d_name, key, strlen(key)))
+-			continue;
+-		dev_id = strtoull(namelist[i]-&gt;d_name + strlen(key), NULL, 10);
+-		snprintf(path, sizeof(path),
+-			 &quot;./usr/tgtadm --driver %s --op delete --tid %d --lun %&quot;
+-			 PRIu64, driver, tid, dev_id);
+-		err = system(path);
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-}
+-
+-static int tid_to_hostno(int tid)
+-{
+-	int fd, hostno, err;
+-	char path[PATH_MAX], buf[32];
+-
+-	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/hostno&quot;, tid);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Cannot open %s\n&quot;, path);
+-		return -EINVAL;
+-	}
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		eprintf(&quot;Cannot read\n&quot;);
+-		return -EINVAL;
+-	}
+-
+-	sscanf(buf, &quot;%d\n&quot;, &amp;hostno);
+-
+-	return hostno;
+-}
+-
+-static int hostno_to_name(int hostno, char *buf, int len)
+-{
+-	int fd, err;
+-	char path[PATH_MAX];
+-
+-	snprintf(path, sizeof(path), &quot;/sys/class/scsi_host/host%d/proc_name&quot;,
+-		 hostno);
+-
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Cannot open %s\n&quot;, path);
+-		return -EINVAL;
+-	}
+-	err = read(fd, buf, len);
+-	close(fd);
+-
+-	return strlen(buf);
+-}
+-
+-static int system_mgmt(struct tgtadm_req *req, char *lld)
+-{
+-	int err = -EINVAL, i, nr, hostno;
+-	struct dirent **namelist;
+-	char cmd[PATH_MAX], buf[64], *p;
+-
+-	if (req-&gt;op != OP_DELETE)
+-		return err;
+-
+-	nr = scandir(TGT_TARGET_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -ENOENT;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		int tid;
+-		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-			;
+-		tid = atoi(p);
+-		hostno = tid_to_hostno(tid);
+-		if (hostno &lt; 0)
+-			continue;
+-		hostno_to_name(hostno, buf, sizeof(buf));
+-		if (strcmp(buf, lld))
+-			continue;
+-
+-		all_devices_destroy(tid);
+-		snprintf(cmd, sizeof(cmd),
+-			 &quot;./usr/tgtadm --driver %s --op delete --tid %d&quot;,
+-			 lld, tid);
+-		err = system(cmd);
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return 0;
+-}
+-
+ static int ipc_mgmt_connect(void)
+ {
+ 	int fd, err;
+@@ -350,109 +240,23 @@
+ 	return op;
+ }
+ 
+-static int lldname_to_id(char *name)
+-{
+-	struct dirent **namelist;
+-	int i, nr, id = -EINVAL;
+-	char *p;
+-
+-	nr = scandir(TGT_LLD_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -EINVAL;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		p = strchr(namelist[i]-&gt;d_name, '-');
+-		if (p &amp;&amp; !strcmp(name, p + 1)) {
+-			*p='\0';
+-			id = atoi(namelist[i]-&gt;d_name);
+-			break;
+-		}
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return id;
+-}
+-
+-static int bus_to_host(char *bus)
+-{
+-	int i, nr, host = -1;
+-	char path[PATH_MAX], *p;
+-	char key[] = &quot;host&quot;;
+-	struct dirent **namelist;
+-
+-	p = strchr(bus, ',');
+-	if (!p)
+-		return -EINVAL;
+-	*(p++) = '\0';
+-
+-	snprintf(path, sizeof(path), &quot;/sys/bus/%s/devices/%s&quot;, bus, p);
+-	nr = scandir(path, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -ENOENT;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		if (strncmp(namelist[i]-&gt;d_name, key, strlen(key)))
+-			continue;
+-		p = namelist[i]-&gt;d_name + strlen(key);
+-		host = strtoull(p, NULL, 10);
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return host;
+-}
+-
+-static int lld_id_get(int argc, char **argv)
+-{
+-	int ch, longindex, id = -EINVAL;
+-	char *name = NULL;
+-
+-	while ((ch = getopt_long(argc, argv, &quot;n:&quot;, long_options,
+-				 &amp;longindex)) &gt;= 0) {
+-		switch (ch) {
+-		case 'n':
+-			name = optarg;
+-			break;
+-		}
+-	}
+-
+-	if (name)
+-		id = lldname_to_id(name);
+-
+-	if (id &lt; 0) {
+-		eprintf(&quot;You must specify the driver name\n&quot;);
+-		exit(-1);
+-	}
+-
+-	return id;
+-}
+-
+ int main(int argc, char **argv)
+ {
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1, len;
+ 	int tid = -1;
+-	uint32_t cid = 0, set = 0, hostno = 0, lld_id;
++	uint32_t cid = 0, set = 0, hostno = 0;
+ 	uint64_t sid = 0, lun = 0;
+-	char *params = NULL, *lld_name = NULL;
++	char *params = NULL, *lldname = NULL;
+ 	struct tgtadm_req *req;
+-	char sbuf[8192], rbuf[8912];
++	char sbuf[BUFSIZE], rbuf[BUFSIZE];
+ 
+-	lld_id = lld_id_get(argc, argv);
+-	if (lld_id &lt; 0)
+-		goto out;
+-
+ 	optind = 1;
+-	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:b:p:uvh&quot;,
++	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvh&quot;,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'n':
+-			lld_name = optarg;
++			lldname = optarg;
+ 			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+@@ -477,7 +281,6 @@
+ 			hostno = strtol(optarg, NULL, 10);
+ 			break;
+ 		case 'b':
+-			hostno = bus_to_host(optarg);
+ 			break;
+ 		case 'p':
+ 			params = optarg;
+@@ -513,7 +316,7 @@
+ 	memset(rbuf, 0, sizeof(rbuf));
+ 
+ 	req = (struct tgtadm_req *) sbuf;
+-	req-&gt;typeid = lld_id;
++	strncpy(req-&gt;lld, lldname, sizeof(req-&gt;lld));
+ 	req-&gt;mode = set_to_mode(set);
+ 	req-&gt;op = op;
+ 	req-&gt;tid = tid;
+@@ -527,12 +330,8 @@
+ 		len += strlen(params);
+ 	}
+ 
+-	if (req-&gt;mode == MODE_SYSTEM)
+-		err = system_mgmt(req, lld_name);
+-	else {
+-		err = ipc_mgmt_call(sbuf, len, rbuf);
+-		ipc_mgmt_result(rbuf);
+-	}
++	err = ipc_mgmt_call(sbuf, len, rbuf);
++	ipc_mgmt_result(rbuf);
+ out:
+ 	return err;
+ }
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgtadm.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -1,7 +1,8 @@
+ #ifndef TGTADM_H
+ #define TGTADM_H
+ 
+-#define TGT_IPC_NAMESPACE &quot;TGT_IPC_ABSTRACT_NAMESPACE&quot;
++#define TGT_IPC_NAMESPACE	&quot;TGT_IPC_ABSTRACT_NAMESPACE&quot;
++#define TGT_LLD_NAME_LEN	64
+ 
+ enum tgtadm_op {
+ 	OP_NEW,
+@@ -28,7 +29,7 @@
+ 	uint64_t sid;
+ 	int cid;
+ 	uint64_t lun;
+-	int typeid;
++	char lld[TGT_LLD_NAME_LEN];
+ 	int host_no;
+ 	unsigned long addr;
+ };
+@@ -38,6 +39,4 @@
+ 	unsigned long addr;
+ };
+ 
+-extern int tgt_mgmt(char *sbuf, char *rbuf);
+-
+ #endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgtd.c	2006-07-12 17:13:53 UTC (rev 502)
+@@ -36,16 +36,19 @@
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
++#include &quot;driver.h&quot;
+ 
+-extern int tgt_sysfs_init(void);
+-
+ enum {
+ 	POLL_NL, /* netlink socket between kernel and user space */
+ 	POLL_UD, /* unix domain socket for tgtdadm */
++	POLL_END,
+ };
+ 
++static char program_name[] = &quot;tgtd&quot;;
++
+ static struct option const long_options[] =
+ {
++	{&quot;drivers&quot;, required_argument, 0, 'p'},
+ 	{&quot;foreground&quot;, no_argument, 0, 'f'},
+ 	{&quot;debug&quot;, required_argument, 0, 'd'},
+ 	{&quot;version&quot;, no_argument, 0, 'v'},
+@@ -53,8 +56,6 @@
+ 	{0, 0, 0, 0},
+ };
+ 
+-static char program_name[] = &quot;tgtd&quot;;
+-
+ static int daemon_init(void)
+ {
+ 	pid_t pid;
+@@ -123,79 +124,124 @@
+ 	close(fd);
+ }
+ 
+-/* TODO: rewrite makeshift poll code */
+-
+-static void event_loop(struct driver_info *dlinfo, struct pollfd *pfd, int nr_dls)
++static void event_loop(struct pollfd *pfd, int npfd, int timeout)
+ {
+-	int err, i, poll_max = (nr_dls + 1) * POLLS_PER_DRV;
+-	void (* fn)(struct pollfd *, int);
++	int nevent, i;
++	struct tgt_driver *d;
+ 
+-	while (1) {
+-		if ((err = poll(pfd, poll_max, -1)) &lt; 0) {
+-			if (errno != EINTR) {
+-				eprintf(&quot;%d %d\n&quot;, err, errno);
+-				exit(1);
+-			}
+-			continue;
++retry:
++	/*
++	 * TODO: replace something efficient than poll.
++	 */
++	nevent = poll(pfd, npfd, timeout);
++	if (nevent &lt; 0) {
++		if (errno != EINTR) {
++			eprintf(&quot;%s\n&quot;, strerror(errno));
++			exit(1);
+ 		}
++		goto retry;
++	} else if (nevent == 0) {
++		/*
++		 * TODO: need kinda scheduling stuff like open-iscsi here.
++		 */
++		goto retry;
++	}
+ 
+-		if (pfd[POLL_NL].revents) {
+-			nl_event_handle(pfd[POLL_NL].fd);
+-			err--;
+-		}
++	if (pfd[POLL_NL].revents) {
++		dprintf(&quot;nl event\n&quot;);
++		nl_event_handle(pfd[POLL_NL].fd);
++		nevent--;
++	}
+ 
+-		if (pfd[POLL_UD].revents) {
+-			ipc_event_handle(dlinfo, pfd[POLL_UD].fd);
+-			err--;
+-		}
++	if (pfd[POLL_UD].revents) {
++		dprintf(&quot;ipc event\n&quot;);
++		ipc_event_handle(pfd[POLL_UD].fd);
++		nevent--;
++	}
+ 
+-		if (!err)
+-			continue;
++	if (!nevent)
++		goto retry;
+ 
+-		for (i = 0; i &lt; nr_dls; i++) {
+-			fn = dl_fn(dlinfo, i, DL_FN_POLL_EVENT);
+-			if (fn)
+-				fn(pfd + ((i + 1) * POLLS_PER_DRV), POLLS_PER_DRV);
+-		}
++	for (i = 0; tgt_drivers[i]; i++) {
++		dprintf(&quot;lld event\n&quot;);
++		d = tgt_drivers[i];
++		d-&gt;event_handle(pfd + d-&gt;pfd_index);
+ 	}
++
++	goto retry;
+ }
+ 
+-static struct pollfd * poll_init(int nr, int nl_fd, int ud_fd)
++static struct pollfd *poll_init(int npfd, int nl_fd, int ud_fd)
+ {
++	struct tgt_driver *d;
+ 	struct pollfd *pfd;
+-	void (* fn)(struct pollfd *, int);
+-	int i;
++	int i, idx = POLL_END;
+ 
+-	pfd = calloc((nr + 1) * POLLS_PER_DRV, sizeof(struct pollfd));
+-	if (!pfd) {
+-		eprintf(&quot;Out of memory\n&quot;);
+-		exit(1);
+-	}
++	pfd = calloc(npfd, sizeof(struct pollfd));
++	if (!pfd)
++		return NULL;
+ 
+ 	pfd[POLL_NL].fd = nl_fd;
+ 	pfd[POLL_NL].events = POLLIN;
+ 	pfd[POLL_UD].fd = ud_fd;
+ 	pfd[POLL_UD].events = POLLIN;
+ 
+-	for (i = 0; i &lt; nr; i++) {
+-		fn = dl_fn(dlinfo, i, DL_FN_POLL_INIT);
+-		if (fn)
+-			fn(pfd + (i + 1) * POLLS_PER_DRV, POLLS_PER_DRV);
++	for (i = 0; tgt_drivers[i]; i++) {
++		d = tgt_drivers[i];
++		if (d-&gt;enable &amp;&amp; d-&gt;npfd) {
++			d-&gt;pfd_index = idx;
++			d-&gt;poll_init(pfd + idx);
++			idx += d-&gt;npfd;
++		}
+ 	}
+ 
+ 	return pfd;
+ }
+ 
++static int enable_drivers(char *data, int *npfd)
++{
++	char *list, *p;
++	int index, err, np, ndriver = 0;
++
++	list = strdup(data);
++	if (!list)
++		return 0;
++
++	p = strtok(list, &quot;,&quot;);
++	while (p) {
++		index = get_driver_index(p);
++		if (index &gt;= 0) {
++			np = 0;
++			if (tgt_drivers[index]-&gt;init) {
++				err = tgt_drivers[index]-&gt;init(&amp;np);
++				if (err)
++					continue;
++			}
++			tgt_drivers[index]-&gt;enable = 1;
++			tgt_drivers[index]-&gt;npfd = np;
++			ndriver++;
++			*npfd += np;
++		}
++		p = strtok(NULL, &quot;,&quot;);
++	}
++	free(list);
++
++	return ndriver;
++}
++
+ int main(int argc, char **argv)
+ {
+ 	struct pollfd *pfd;
+-	int ch, longindex, nr;
++	int err, ch, longindex, ndriver = 0, npfd = POLL_END;
+ 	int is_daemon = 1, is_debug = 1;
+-	int nl_fd, ud_fd;
++	int nl_fd, ud_fd, timeout = -1;
+ 
+-	while ((ch = getopt_long(argc, argv, &quot;fd:vh&quot;, long_options,
++	while ((ch = getopt_long(argc, argv, &quot;s:d:fd:vh&quot;, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
++		case 'p':
++			ndriver = enable_drivers(optarg, &amp;npfd);
++			break;
+ 		case 'f':
+ 			is_daemon = 0;
+ 			break;
+@@ -214,17 +260,20 @@
+ 		}
+ 	}
+ 
++	if (!ndriver) {
++		printf(&quot;No driver!\n&quot;);
++		exit(1);
++	}
++
+ 	if (is_daemon &amp;&amp; daemon_init())
+ 		exit(1);
+ 
+ 	tgtd_init();
+ 
+-	if (log_init(program_name, LOG_SPACE_SIZE, is_daemon, is_debug))
++	err = log_init(program_name, LOG_SPACE_SIZE, is_daemon, is_debug);
++	if (err)
+ 		exit(1);
+ 
+-	if (tgt_sysfs_init())
+-		exit(1);
+-
+ 	nl_fd = nl_init();
+ 	if (nl_fd &lt; 0)
+ 		exit(1);
+@@ -233,13 +282,9 @@
+ 	if (ud_fd &lt; 0)
+ 		exit(1);
+ 
+-	nr = dl_init(dlinfo);
+-	if (nr &lt; 0)
+-		exit(1);
++	pfd = poll_init(npfd, nl_fd, ud_fd);
+ 
+-	pfd = poll_init(nr, nl_fd, ud_fd);
++	event_loop(pfd, npfd, timeout);
+ 
+-	event_loop(dlinfo, pfd, nr);
+-
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-07-09 06:56:41 UTC (rev 501)
++++ trunk/usr/tgtd.h	2006-07-12 17:13:53 UTC (rev 502)
+@@ -2,7 +2,6 @@
+ #define __TARGET_DAEMON_H
+ 
+ #include &quot;log.h&quot;
+-#include &quot;dl.h&quot;
+ #include &quot;util.h&quot;
+ 
+ #define	SCSI_ID_LEN	24
+@@ -24,18 +23,14 @@
+ 	struct tgt_cmd_queue cmd_queue;
+ };
+ 
+-/* makeshift */
+-#define	POLLS_PER_DRV	32
+-
+ extern int nl_init(void);
+ extern int __nl_write(int fd, int type, char *data, int len);
+ extern int __nl_read(int fd, void *data, int size, int flags);
+ void nl_event_handle(int nl_fd);
+ 
+ extern int ipc_open(void);
+-extern void ipc_event_handle(struct driver_info *, int fd);
++extern void ipc_event_handle(int accept_fd);
+ 
+-extern int tgt_device_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ extern int tgt_target_create(int tid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000486.html">[Stgt-svn] r501 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000490.html">[Stgt-svn] r503 - in trunk: ibmvstgt usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#489">[ date ]</a>
+              <a href="thread.html#489">[ thread ]</a>
+              <a href="subject.html#489">[ subject ]</a>
+              <a href="author.html#489">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,138 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r788 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r788%20-%20trunk/usr/iscsi&In-Reply-To=%3C200702270759.l1R7xc9B020361%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000774.html">
+   <LINK REL="Next"  HREF="000776.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r788 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r788%20-%20trunk/usr/iscsi&In-Reply-To=%3C200702270759.l1R7xc9B020361%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r788 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Feb 27 08:59:38 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000774.html">[Stgt-svn] r787 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000776.html">[Stgt-svn] r789 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#775">[ date ]</a>
+              <a href="thread.html#775">[ thread ]</a>
+              <a href="subject.html#775">[ subject ]</a>
+              <a href="author.html#775">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-27 08:59:37 +0100 (Tue, 27 Feb 2007)
+New Revision: 788
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+Log:
+Add sense code to iscsi driver.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-02-26 06:48:13 UTC (rev 787)
++++ trunk/usr/iscsi/iscsid.c	2007-02-27 07:59:37 UTC (rev 788)
+@@ -756,6 +756,41 @@
+ 	return 0;
+ }
+ 
++struct iscsi_sense_data {
++	uint16_t length;
++	uint8_t  data[0];
++} __packed;
++
++static int iscsi_sense_rsp_build(struct iscsi_task *task)
++{
++	struct iscsi_connection *conn = task-&gt;conn;
++	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
++	struct iscsi_sense_data *sense;
++	uint16_t sense_len = task-&gt;len;
++
++	memset(rsp, 0, sizeof(*rsp));
++	rsp-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
++	rsp-&gt;itt = task-&gt;tag;
++	rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++	rsp-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
++	rsp-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
++
++	sense = (void *) (unsigned long) task-&gt;addr;
++
++	/* FIXME: we assume that sense_buffer is large enough
++	 * (sense_len + 2 bytes). It's true now, but... */
++
++	memmove(sense-&gt;data, sense, sense_len);
++	sense-&gt;length = cpu_to_be16(sense_len);
++
++	conn-&gt;rsp.datasize = sense_len + sizeof(*sense);
++	hton24(rsp-&gt;dlength, sense_len + sizeof(*sense));
++	conn-&gt;rsp.data = (void *) (unsigned long) task-&gt;addr;
++	task-&gt;offset += sense_len + sizeof(*sense);
++
++	return 0;
++}
++
+ static int iscsi_data_rsp_build(struct iscsi_task *task)
+ {
+ 	struct iscsi_connection *conn = task-&gt;conn;
+@@ -1347,10 +1382,17 @@
+ 	if (task-&gt;r2t_count)
+ 		err = iscsi_r2t_build(task);
+ 	else {
++		/* Needs to clean up this mess. */
++
+ 		if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
+-			err = iscsi_cmd_rsp_build(task);
++			if (task-&gt;result)
++				err = iscsi_sense_rsp_build(task);
++			else
++				err = iscsi_cmd_rsp_build(task);
+ 		else {
+-			if (task-&gt;len)
++			if (task-&gt;result)
++				err = iscsi_sense_rsp_build(task);
++			else if (task-&gt;len)
+ 				err = iscsi_data_rsp_build(task);
+ 			else
+ 				err = iscsi_cmd_rsp_build(task);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000774.html">[Stgt-svn] r787 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000776.html">[Stgt-svn] r789 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#775">[ date ]</a>
+              <a href="thread.html#775">[ thread ]</a>
+              <a href="subject.html#775">[ subject ]</a>
+              <a href="author.html#775">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

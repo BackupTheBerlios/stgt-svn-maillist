@@ -1,0 +1,96 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r411 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r411%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604142316.k3ENGUgD000816%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000397.html">
+   <LINK REL="Next"  HREF="000399.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r411 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r411%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604142316.k3ENGUgD000816%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r411 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 15 01:16:30 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000397.html">[Stgt-svn] r410 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000399.html">[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#398">[ date ]</a>
+              <a href="thread.html#398">[ thread ]</a>
+              <a href="subject.html#398">[ subject ]</a>
+              <a href="author.html#398">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-15 01:16:25 +0200 (Sat, 15 Apr 2006)
+New Revision: 411
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Kill data_in_res_cnt and data_out_res_cnt in iu_entry structure.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 23:13:23 UTC (rev 410)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 23:16:25 UTC (rev 411)
+@@ -116,8 +116,6 @@
+ 	struct {
+ 		dma_addr_t remote_token;
+ 		unsigned long flags;
+-		int data_out_residual_count;
+-		int data_in_residual_count;
+ 	} req;
+ };
+ 
+@@ -194,8 +192,8 @@
+ 	if (test_bit(V_DIOVER, &amp;iue-&gt;req.flags))
+ 		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_DIOVER;
+ 
+-	iu-&gt;srp.rsp.data_in_res_cnt = iue-&gt;req.data_in_residual_count;
+-	iu-&gt;srp.rsp.data_out_res_cnt = iue-&gt;req.data_out_residual_count;
++	iu-&gt;srp.rsp.data_in_res_cnt = 0;
++	iu-&gt;srp.rsp.data_out_res_cnt = 0;
+ 
+ 	iu-&gt;srp.rsp.flags &amp;= ~SRP_RSP_FLAG_RSPVALID;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000397.html">[Stgt-svn] r410 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000399.html">[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#398">[ date ]</a>
+              <a href="thread.html#398">[ thread ]</a>
+              <a href="subject.html#398">[ subject ]</a>
+              <a href="author.html#398">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

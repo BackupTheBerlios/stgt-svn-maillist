@@ -1,0 +1,146 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r300%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602150706.k1F76jhq010372%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000286.html">
+   <LINK REL="Next"  HREF="000288.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r300%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602150706.k1F76jhq010372%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Feb 15 08:06:45 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000286.html">[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000288.html">[Stgt-svn] r301 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#287">[ date ]</a>
+              <a href="thread.html#287">[ thread ]</a>
+              <a href="subject.html#287">[ subject ]</a>
+              <a href="author.html#287">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-15 08:06:40 +0100 (Wed, 15 Feb 2006)
+New Revision: 300
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Add debug code and BUG in TMF.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-14 13:44:19 UTC (rev 299)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-15 07:06:40 UTC (rev 300)
+@@ -356,8 +356,9 @@
+ 		len = vscsis_data_length(&amp;iu-&gt;srp.cmd, 0);
+ 	}
+ 
+-	dprintk(&quot;%p %x %lx %d %d %d\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
++	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;,
++		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags,
++		(unsigned long long) iu-&gt;srp.cmd.tag);
+ 
+ 	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+ 	BUG_ON(!scmd);
+@@ -367,8 +368,8 @@
+ 	scmd-&gt;request_bufflen = len;
+ 	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun, 0);
+ 
+-	dprintk(&quot;%p %x %lx %d %d %d\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
++	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;,
++		iue, scmd, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
+ 
+ 	return 0;
+ }
+@@ -752,8 +753,38 @@
+ 
+ static void process_abort(struct iu_entry *iue)
+ {
++	union viosrp_iu *iu = vio_iu(iue), *tmp_iu = NULL;
++	struct iu_entry *tmp_iue;
+ 	unsigned char status = ABORTED_COMMAND;
++	uint64_t tag = iu-&gt;srp.tsk_mgmt.managed_task_tag;
++	unsigned long flags;
+ 
++	eprintk(&quot;Not supported yet %p %llx\n&quot;, iue, (unsigned long long) tag);
++
++	spin_lock_irqsave(&amp;iue-&gt;adapter-&gt;lock, flags);
++
++	list_for_each_entry(tmp_iue, &amp;iue-&gt;adapter-&gt;cmd_queue, ilist) {
++		tmp_iu = vio_iu(tmp_iue);
++		if (tmp_iu-&gt;srp.cmd.tag != tag)
++			continue;
++
++		__set_bit(V_ABORTED, &amp;tmp_iue-&gt;req.flags);
++		status = NO_SENSE;
++		break;
++	}
++
++	spin_unlock_irqrestore(&amp;iue-&gt;adapter-&gt;lock, flags);
++
++	if (status == NO_SENSE) {
++		int len = vscsis_data_length(&amp;tmp_iu-&gt;srp.cmd,
++					     tmp_iu-&gt;srp.cmd.data_out_format);
++		dprintk(&quot;%p %x %lx %d\n&quot;,
++			tmp_iue, tmp_iu-&gt;srp.cmd.cdb[0], tmp_iu-&gt;srp.cmd.lun, len);
++		dprintk(&quot;abort successful\n&quot;);
++		BUG();
++	} else
++		dprintk(&quot;unable to abort cmd\n&quot;);
++
+ 	send_rsp(iue, status, 0x14);
+ }
+ 
+@@ -762,8 +793,6 @@
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	uint8_t flags = iu-&gt;srp.tsk_mgmt.task_mgmt_flags;
+ 
+-	eprintk(&quot;Not supported yet %p %x\n&quot;, iue, flags);
+-
+ 	if (flags == 0x01)
+ 		process_abort(iue);
+ 	else if (flags == 0x08)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000286.html">[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000288.html">[Stgt-svn] r301 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#287">[ date ]</a>
+              <a href="thread.html#287">[ thread ]</a>
+              <a href="subject.html#287">[ subject ]</a>
+              <a href="author.html#287">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

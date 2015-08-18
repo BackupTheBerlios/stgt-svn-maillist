@@ -1,0 +1,112 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r649 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r649%20-%20trunk/usr&In-Reply-To=%3C200611151137.kAFBb2J5003201%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000635.html">
+   <LINK REL="Next"  HREF="000637.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r649 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r649%20-%20trunk/usr&In-Reply-To=%3C200611151137.kAFBb2J5003201%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r649 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov 15 12:37:02 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000635.html">[Stgt-svn] r648 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000637.html">[Stgt-svn] r650 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#636">[ date ]</a>
+              <a href="thread.html#636">[ thread ]</a>
+              <a href="subject.html#636">[ subject ]</a>
+              <a href="author.html#636">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-15 12:37:01 +0100 (Wed, 15 Nov 2006)
+New Revision: 649
+
+Modified:
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/target.c
+Log:
+Move close(fd) from tgt_device_destroy to bd_*_close for symmetry
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-11-15 08:14:04 UTC (rev 648)
++++ trunk/usr/bd_aio.c	2006-11-15 11:37:01 UTC (rev 649)
+@@ -85,6 +85,7 @@
+ 	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
+ 
+ 	tgt_event_del(bai-&gt;fd);
++	close(bai-&gt;fd);
+ 	free(dev);
+ }
+ 
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2006-11-15 08:14:04 UTC (rev 648)
++++ trunk/usr/bd_mmap.c	2006-11-15 11:37:01 UTC (rev 649)
+@@ -51,6 +51,7 @@
+ 
+ static void bd_mmap_close(struct tgt_device *dev)
+ {
++	close(dev-&gt;fd);
+ 	free(dev);
+ }
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-15 08:14:04 UTC (rev 648)
++++ trunk/usr/target.c	2006-11-15 11:37:01 UTC (rev 649)
+@@ -200,7 +200,6 @@
+ 		return -EBUSY;
+ 
+ 	free(device-&gt;path);
+-	close(device-&gt;fd);
+ 	device_hlist_remove(device);
+ 	device_list_remove(device);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000635.html">[Stgt-svn] r648 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000637.html">[Stgt-svn] r650 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#636">[ date ]</a>
+              <a href="thread.html#636">[ thread ]</a>
+              <a href="subject.html#636">[ subject ]</a>
+              <a href="author.html#636">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

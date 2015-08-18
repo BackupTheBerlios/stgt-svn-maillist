@@ -1,0 +1,272 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r238 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r238%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272356.k0RNukXp026743%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000224.html">
+   <LINK REL="Next"  HREF="000226.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r238 - branches/use-scsi-ml/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r238%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272356.k0RNukXp026743%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r238 - branches/use-scsi-ml/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Jan 28 00:56:46 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000224.html">[Stgt-svn] r237 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000226.html">[Stgt-svn] r239 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#225">[ date ]</a>
+              <a href="thread.html#225">[ thread ]</a>
+              <a href="subject.html#225">[ subject ]</a>
+              <a href="author.html#225">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-28 00:56:43 +0100 (Sat, 28 Jan 2006)
+New Revision: 238
+
+Modified:
+   branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+Log:
+update patch
+
+Modified: branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-01-27 23:56:10 UTC (rev 237)
++++ branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-01-27 23:56:43 UTC (rev 238)
+@@ -576,7 +576,7 @@
+  #define MAX_LINKS 32		
+  
+ diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
+-index 7529f43..452d652 100644
++index 7529f43..ce97272 100644
+ --- a/include/scsi/scsi_cmnd.h
+ +++ b/include/scsi/scsi_cmnd.h
+ @@ -5,9 +5,11 @@
+@@ -599,8 +599,17 @@
+  	struct scsi_device *device;
+  	struct scsi_request *sc_request;
+  
+-@@ -131,6 +134,14 @@ struct scsi_cmnd {
++@@ -84,6 +87,8 @@ struct scsi_cmnd {
++ 	unsigned short sglist_len;	/* size of malloc'd scatter-gather list */
++ 	unsigned bufflen;	/* Size of data buffer */
++ 	void *buffer;		/* Data buffer */
+++	/* offset in cmd we are at (for multi-transfer tgt cmds) */
+++	unsigned offset;
+  
++ 	unsigned underflow;	/* Return error if less than
++ 				   this amount is transferred */
++@@ -131,6 +136,14 @@ struct scsi_cmnd {
++ 
+  	unsigned char tag;	/* SCSI-II queued command tag */
+  	unsigned long pid;	/* Process ID, starts at 0. Unique per host. */
+ +	/*
+@@ -614,7 +623,7 @@
+  };
+  
+  /*
+-@@ -147,9 +158,14 @@ struct scsi_cmnd {
++@@ -147,9 +160,14 @@ struct scsi_cmnd {
+  #define SCSI_STATE_MLQUEUE         0x100b
+  
+  
+@@ -642,7 +651,7 @@
+  extern int scsi_is_sdev_device(const struct device *);
+  extern int scsi_is_target_device(const struct device *);
+ diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
+-index 467274a..fbab68c 100644
++index 467274a..6b06850 100644
+ --- a/include/scsi/scsi_host.h
+ +++ b/include/scsi/scsi_host.h
+ @@ -7,6 +7,7 @@
+@@ -653,7 +662,7 @@
+  struct block_device;
+  struct completion;
+  struct module;
+-@@ -123,6 +124,21 @@ struct scsi_host_template {
++@@ -123,6 +124,36 @@ struct scsi_host_template {
+  			     void (*done)(struct scsi_cmnd *));
+  
+  	/*
+@@ -663,11 +672,26 @@
+ +	 *
+ +	 * return values: see queuecommand
+ +	 *
+++	 * If the LLD accepts the cmd, it should set the result to an
+++	 * appropriate value when completed before calling the done function.
+++	 *
+ +	 * STATUS: REQUIRED FOR TARGET DRIVERS
+ +	 */
+ +	/* TODO: rename */
+ +	int (* transfer_response)(struct scsi_cmnd *,
+ +				  void (*done)(struct scsi_cmnd *));
+++	/*
+++	 * This is called to inform the LLD to transfer cmd-&gt;request_bufflen
+++	 * bytes of the cmd at cmd-&gt;offset in the cmd. The cmd-&gt;use_sg
+++	 * speciefies the number of scatterlist entried in the command
+++	 * and cmd-&gt;request_buffer contains the scatterlist.
+++	 *
+++	 * If the command cannot be processed in one transfer_data call
+++	 * becuase a scatterlist within the LLD's limits cannot be
+++	 * created then transfer_data will be called multiple times.
+++	 * It is initially called from process context, and later
+++	 * calls are from the interrup context.
+++	 */
+ +	int (* transfer_data)(struct scsi_cmnd *,
+ +			      void (*done)(struct scsi_cmnd *));
+ +
+@@ -675,7 +699,7 @@
+  	 * This is an error handling strategy routine.  You don't need to
+  	 * define one of these if you don't want to - there is a default
+  	 * routine that is present that should work in most cases.  For those
+-@@ -573,6 +589,12 @@ struct Scsi_Host {
++@@ -573,6 +604,12 @@ struct Scsi_Host {
+  	 */
+  	unsigned int max_host_blocked;
+  
+@@ -688,7 +712,7 @@
+  	/* legacy crap */
+  	unsigned long base;
+  	unsigned long io_port;
+-@@ -675,6 +697,9 @@ extern void scsi_unblock_requests(struct
++@@ -675,6 +712,9 @@ extern void scsi_unblock_requests(struct
+  extern void scsi_block_requests(struct Scsi_Host *);
+  
+  struct class_container;
+@@ -698,3 +722,96 @@
+  /*
+   * These two functions are used to allocate and free a pseudo device
+   * which will connect to the host adapter itself rather than any
++diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
++new file mode 100644
++index 0000000..c1dc0d2
++--- /dev/null
+++++ b/include/scsi/scsi_tgt.h
++@@ -0,0 +1,10 @@
+++/*
+++ * SCSI target definitions
+++ */
+++
+++struct Scsi_Host;
+++struct scsi_cmnd;
+++struct scsi_lun;
+++
+++extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+++extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, int);
++diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
++new file mode 100644
++index 0000000..f7961d6
++--- /dev/null
+++++ b/include/scsi/scsi_tgt_if.h
++@@ -0,0 +1,71 @@
+++/*
+++ * SCSI target netlink interface
+++ *
+++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+++ * This code is licenced under the GPL.
+++ */
+++
+++#ifndef SCSI_TARGET_FRAMEWORK_IF_H
+++#define SCSI_TARGET_FRAMEWORK_IF_H
+++
+++enum tgt_event_type {
+++	/* user -&gt; kernel */
+++	TGT_UEVENT_START,
+++	TGT_UEVENT_TARGET_SETUP,
+++	TGT_UEVENT_CMD_RES,
+++	TGT_UEVENT_TARGET_BIND,
+++
+++	/* kernel -&gt; user */
+++	TGT_KEVENT_RESPONSE,
+++	TGT_KEVENT_CMD_REQ,
+++	TGT_KEVENT_CMD_DONE,
+++};
+++
+++struct tgt_event {
+++	/* user-&gt; kernel */
+++	union {
+++		struct {
+++			int host_no;
+++			int pid;
+++		} target_bind;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t len;
+++			int result;
+++			uint64_t uaddr;
+++			uint64_t offset;
+++			uint8_t rw;
+++			uint8_t try_map;
+++		} cmd_res;
+++	} u;
+++
+++	/* kernel -&gt; user */
+++	union {
+++		struct {
+++			int err;
+++		} event_res;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t data_len;
+++			uint64_t dev_id;
+++		} cmd_req;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			int result;
+++		} cmd_done;
+++	} k;
+++
+++	/*
+++	 * I think a pointer is a unsigned long but this struct
+++	 * gets passed around from the kernel to userspace and
+++	 * back again so to handle some ppc64 setups where userspace is
+++	 * 32 bits but the kernel is 64 we do this odd thing
+++	 */
+++	uint64_t data[0];
+++} __attribute__ ((aligned (sizeof(uint64_t))));
+++
+++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000224.html">[Stgt-svn] r237 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000226.html">[Stgt-svn] r239 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#225">[ date ]</a>
+              <a href="thread.html#225">[ thread ]</a>
+              <a href="subject.html#225">[ subject ]</a>
+              <a href="author.html#225">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

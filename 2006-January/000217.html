@@ -1,0 +1,835 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r230 - in trunk: . istgt/usr kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r230%20-%20in%20trunk%3A%20.%20istgt/usr%20kernel%20usr&In-Reply-To=%3C200601260529.k0Q5TE4o010913%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000216.html">
+   <LINK REL="Next"  HREF="000218.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r230 - in trunk: . istgt/usr kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r230%20-%20in%20trunk%3A%20.%20istgt/usr%20kernel%20usr&In-Reply-To=%3C200601260529.k0Q5TE4o010913%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r230 - in trunk: . istgt/usr kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Jan 26 06:29:14 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000216.html">[Stgt-svn] r229 - in trunk: . include istgt/kernel istgt/usr kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000218.html">[Stgt-svn] r231 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#217">[ date ]</a>
+              <a href="thread.html#217">[ thread ]</a>
+              <a href="subject.html#217">[ subject ]</a>
+              <a href="author.html#217">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-01-26 06:29:12 +0100 (Thu, 26 Jan 2006)
+New Revision: 230
+
+Modified:
+   trunk/initd
+   trunk/istgt/usr/ctldev.c
+   trunk/kernel/Makefile
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_priv.h
+   trunk/kernel/tgt_target.h
+   trunk/usr/ipc.c
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Fix the previous commit.
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/initd	2006-01-26 05:29:12 UTC (rev 230)
+@@ -41,6 +41,8 @@
+ 
+ 	killall -9 tgtd
+ 
++	sleep 1
++
+ 	if [ $TARGET = &quot;istgt&quot; ] ; then
+ 		rmmod istgt
+ 	else
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/istgt/usr/ctldev.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -409,21 +409,6 @@
+ 	return err;
+ }
+ 
+-static int user_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int conn_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int session_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+ int ipc_mgmt(char *sbuf, char *rbuf)
+ {
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+@@ -439,21 +424,13 @@
+ 		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
+ 
+ 	switch (req-&gt;mode) {
+-	case MODE_DEVICE:
+-	case MODE_SYSTEM:
+-		err = tgt_mgmt(sbuf, rbuf);
+-		break;
+ 	case MODE_TARGET:
+ 		err = istgt_target_mgmt(req, params, rbuf, &amp;rlen);
+ 		break;
+ 	case MODE_SESSION:
+-		err = session_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+ 	case MODE_CONNECTION:
+-		err = conn_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+ 	case MODE_USER:
+-		err = user_mgmt(req, params, rbuf, &amp;rlen);
++		err = 0;
+ 		break;
+ 	default:
+ 		eprintf(&quot;Unknown mode %d\n&quot;, req-&gt;mode);
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/kernel/Makefile	2006-01-26 05:29:12 UTC (rev 230)
+@@ -2,7 +2,7 @@
+ # Makefile for the Linux kernel device drivers.
+ #
+ 
+-EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_TGT=20 -DNETLINK_TGT_CMD=21
++EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_TGT=20
+ 
+ ifneq ($(KERNELRELEASE),)
+ obj-m		+= tgt_core.o
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/kernel/tgt.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -26,6 +26,8 @@
+ 
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
++struct task_struct *tgtd_tsk;
++
+ static spinlock_t all_targets_lock;
+ static LIST_HEAD(all_targets);
+ 
+@@ -195,19 +197,22 @@
+ 	return target;
+ }
+ 
+-struct tgt_target *tgt_target_create(char *target_type, int queued_cmds)
++struct tgt_target *tgt_target_create(char *target_type, int queued_cmds, int pid)
+ {
+ 	char name[16];
+ 	static int i, target_id;
+ 	struct tgt_target *target;
+ 	struct target_type_internal *ti;
+ 
+-	dprintk(&quot;%s %d\n&quot;, target_type, queued_cmds);
++	dprintk(&quot;%s %d %d\n&quot;, target_type, queued_cmds, pid);
+ 
+ 	target = kzalloc(sizeof(*target), GFP_KERNEL);
+ 	if (!target)
+ 		return NULL;
+ 
++	target-&gt;tsk = find_task_by_pid(pid);
++	if (!target-&gt;tsk)
++		goto free_target;
+ 	ti = target_template_get(target_type);
+ 	if (!ti)
+ 		goto free_target;
+@@ -595,6 +600,7 @@
+ 	struct page *page, **pages;
+ 	uint64_t poffset = cmd-&gt;offset &amp; ~PAGE_MASK;
+ 	uint32_t size, rest = cmd-&gt;bufflen;
++	struct task_struct *tsk = cmd-&gt;session-&gt;target-&gt;tsk;
+ 
+ 	cnt = pgcnt(cmd-&gt;bufflen, cmd-&gt;offset);
+ 	pages = kzalloc(cnt * sizeof(struct page *), GFP_KERNEL);
+@@ -609,10 +615,10 @@
+ 
+ 	dprintk(&quot;cmd %p addr %lx cnt %d\n&quot;, cmd, cmd-&gt;uaddr, cnt);
+ 
+-	down_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
+-	err = get_user_pages(tgtd_tsk, tgtd_tsk-&gt;mm, cmd-&gt;uaddr, cnt,
++	down_read(&amp;tsk-&gt;mm-&gt;mmap_sem);
++	err = get_user_pages(tsk, tsk-&gt;mm, cmd-&gt;uaddr, cnt,
+ 			     rw == WRITE, 0, pages, NULL);
+-	up_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
++	up_read(&amp;tsk-&gt;mm-&gt;mmap_sem);
+ 
+ 	if (err &lt; cnt) {
+ 		eprintk(&quot;cannot get user pages %d %d\n&quot;, err, cnt);
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/kernel/tgt_nl.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -16,7 +16,8 @@
+ #include &quot;tgt_priv.h&quot;
+ 
+ static int tgtd_pid;
+-static struct sock *nls, *nls_cmd;
++static struct sock *nls;
++static void *zero_page;
+ 
+ int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
+ {
+@@ -24,6 +25,7 @@
+ 	struct sk_buff *skb;
+ 	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
++	pid_t pid = cmd-&gt;session-&gt;target-&gt;tsk-&gt;pid;
+ 	char *pdu;
+ 	int err, len, proto_pdu_size = proto-&gt;uspace_pdu_size;
+ 
+@@ -33,7 +35,7 @@
+ 		return -ENOMEM;
+ 
+ 	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), proto_pdu_size);
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
++	nlh = __nlmsg_put(skb, pid, 0, TGT_KEVENT_CMD_REQ,
+ 			  len - sizeof(*nlh), 0);
+ 	ev = NLMSG_DATA(nlh);
+ 	memset(ev, 0, sizeof(*ev));
+@@ -45,16 +47,17 @@
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
+ 
+ 	proto-&gt;uspace_pdu_build(cmd, pdu);
+-	err = netlink_unicast(nls_cmd, skb, tgtd_pid, 0);
+-	if (err &lt; 0)
+-		eprintk(&quot;%d\n&quot;, err);
+-
++	err = netlink_unicast(nls, skb, pid, 0);
++	if (err &lt; 0) {
++		eprintk(&quot;%d %d\n&quot;, pid, err);
++		BUG();
++	}
+ 	return err;
+ }
+ EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+ 
+-static int send_event_res(struct sock *sk, uint16_t type, struct tgt_event *p,
+-			  void *data, int dlen, gfp_t flags)
++static int send_event_res(uint16_t type, struct tgt_event *p,
++			  void *data, int dlen, gfp_t flags, uint32_t pid)
+ {
+ 	struct tgt_event *ev;
+ 	struct nlmsghdr *nlh;
+@@ -66,14 +69,14 @@
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, type, len - sizeof(*nlh), 0);
++	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
+ 
+ 	ev = NLMSG_DATA(nlh);
+ 	memcpy(ev, p, sizeof(*ev));
+ 	if (dlen)
+ 		memcpy(ev-&gt;data, data, dlen);
+ 
+-	return netlink_unicast(sk, skb, tgtd_pid, 0);
++	return netlink_unicast(nls, skb, pid, 0);
+ }
+ 
+ int tgt_msg_send(struct tgt_target *target, void *data, int dlen, gfp_t flags)
+@@ -85,8 +88,8 @@
+ 	ev.k.tgt_passthru.typeid = target-&gt;typeid;
+ 	ev.k.tgt_passthru.len = dlen;
+ 
+-	return send_event_res(nls, TGT_KEVENT_TARGET_PASSTHRU,
+-			      &amp;ev, data, dlen, flags);
++	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
++			      &amp;ev, data, dlen, flags, tgtd_pid);
+ }
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
+@@ -94,6 +97,7 @@
+ {
+ 	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+ 	struct tgt_event ev;
++	pid_t pid = cmd-&gt;session-&gt;target-&gt;tsk-&gt;pid;
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 	ev.k.cmd_done.tid = cmd-&gt;session-&gt;target-&gt;tid;
+@@ -104,8 +108,9 @@
+ 	if (test_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags))
+ 		ev.k.cmd_done.mmapped = 1;
+ 
+-	return send_event_res(nls_cmd, TGT_KEVENT_CMD_DONE, &amp;ev,
+-			      empty_zero_page, proto-&gt;uspace_pdu_size, flags);
++	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev,
++			      zero_page,
++			      proto-&gt;uspace_pdu_size, flags, pid);
+ }
+ EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
+ 
+@@ -120,20 +125,23 @@
+ 
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
+-		if (tgtd_pid)
+-			eprintk(&quot;alstart target thread %d\n&quot;, NETLINK_CREDS(skb)-&gt;pid);
++		if (!tgtd_pid) {
++			tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
++			eprintk(&quot;target core start %d\n&quot;, tgtd_pid);
++		} else
++			eprintk(&quot;target core already started %d\n&quot;,
++				NETLINK_CREDS(skb)-&gt;pid);
+ 
+-		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+-		tgtd_tsk = current;
+-		eprintk(&quot;start target drivers %d\n&quot;, tgtd_pid);
+-
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+ 		target = tgt_target_create(ev-&gt;u.c_target.type,
+-					   ev-&gt;u.c_target.nr_cmds);
+-		if (target)
++					   ev-&gt;u.c_target.nr_cmds,
++					   ev-&gt;u.c_target.pid);
++		if (target) {
+ 			err = target-&gt;tid;
+-		else
++			dprintk(&quot;%d %d %d\n&quot;, target-&gt;tid,
++				target-&gt;tsk-&gt;pid, err);
++		} else
+ 			err = -EINVAL;
+ 		break;
+ 	case TGT_UEVENT_TARGET_DESTROY:
+@@ -163,9 +171,11 @@
+ 				      ev-&gt;u.cmd_res.offset,
+ 				      ev-&gt;u.cmd_res.uaddr, ev-&gt;u.cmd_res.rw,
+ 				      ev-&gt;u.cmd_res.try_map);
+-		if (err)
++		if (err) {
+ 			eprintk(&quot;%llx %d\n&quot;,
+ 				(unsigned long long) ev-&gt;u.cmd_res.cid, err);
++			BUG();
++		}
+ 
+ 		break;
+ 	default:
+@@ -202,8 +212,9 @@
+ 
+ 			memset(&amp;ev, 0, sizeof(ev));
+ 			ev.k.event_res.err = err;
+-			send_event_res(nls, TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-				       GFP_KERNEL | __GFP_NOFAIL);
++			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
++				       GFP_KERNEL | __GFP_NOFAIL,
++				       nlh-&gt;nlmsg_pid);
+ 		}
+ 		skb_pull(skb, rlen);
+ 	}
+@@ -224,18 +235,20 @@
+ 
+ void __exit tgt_nl_exit(void)
+ {
++	free_page((unsigned long) zero_page);
+ 	sock_release(nls-&gt;sk_socket);
+ }
+ 
+ int __init tgt_nl_init(void)
+ {
+-	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
+-	if (!nls)
++	zero_page = (void *) get_zeroed_page(GFP_KERNEL);
++	if (!zero_page)
+ 		return -ENOMEM;
+ 
+-	nls_cmd = netlink_kernel_create(NETLINK_TGT_CMD, 1, event_recv, THIS_MODULE);
+-	if (!nls_cmd) {
+-		sock_release(nls-&gt;sk_socket);
++	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
++	if (!nls) {
++		eprintk(&quot;Cannot create netlink socket %d\n&quot;, NETLINK_TGT);
++		free_page((unsigned long) zero_page);
+ 		return -ENOMEM;
+ 	}
+ 
+
+Modified: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/kernel/tgt_priv.h	2006-01-26 05:29:12 UTC (rev 230)
+@@ -9,7 +9,6 @@
+ 			   int result, uint32_t len, uint64_t offset,
+ 			   unsigned long addr,
+ 			   uint8_t rw, uint8_t try_map);
+-extern struct task_struct *tgtd_tsk;
+ 
+ /* netlink */
+ extern void tgt_nl_exit(void);
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/kernel/tgt_target.h	2006-01-26 05:29:12 UTC (rev 230)
+@@ -123,12 +123,13 @@
+ 	struct work_struct send_work;
+ 
+ 	struct workqueue_struct *twq;
++	struct task_struct *tsk;
+ };
+ 
+ #define cdev_to_tgt_target(cdev) \
+ 	container_of(cdev, struct tgt_target, cdev)
+ 
+-extern struct tgt_target *tgt_target_create(char *target_type, int nr_cmds);
++extern struct tgt_target *tgt_target_create(char *target_type, int nr_cmds, int pid);
+ extern int tgt_target_destroy(struct tgt_target *target);
+ 
+ extern int tgt_target_template_register(struct tgt_target_template *tt);
+
+Modified: trunk/usr/ipc.c
+===================================================================
+--- trunk/usr/ipc.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/ipc.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -8,9 +8,11 @@
+ 
+ #include &lt;errno.h&gt;
+ #include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;errno.h&gt;
+ #include &lt;inttypes.h&gt;
++#include &lt;poll.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/types.h&gt;
+ #include &lt;sys/un.h&gt;
+@@ -22,7 +24,9 @@
+ #include &quot;tgtadm.h&quot;
+ #include &quot;dl.h&quot;
+ 
+-extern int target_pfd[1024];
++struct tgt_task {
++	int fd;
++};
+ 
+ static int ipc_accept(int afd)
+ {
+@@ -52,15 +56,61 @@
+ 	return err;
+ }
+ 
++void pipe_event_handle(int fd)
++{
++	struct nlmsghdr *nlh;
++	struct iovec iov;
++	struct msghdr msg;
++	char buf[1024];
++	struct tgtadm_res *res;
++	struct tgt_task *task;
++	int err;
++
++	nlh = (struct nlmsghdr *) buf;
++	iov.iov_base = nlh;
++	iov.iov_len = NLMSG_ALIGN(sizeof(struct nlmsghdr));
++	memset(&amp;msg, 0, sizeof(msg));
++	msg.msg_iov = &iov;
++	msg.msg_iovlen = 1;
++
++	err = recvmsg(fd, &amp;msg, MSG_PEEK);
++	if (err != NLMSG_ALIGN(sizeof(struct nlmsghdr)))
++		return;
++
++	iov.iov_base = nlh;
++	iov.iov_len = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
++	memset(&amp;msg, 0, sizeof(msg));
++	msg.msg_iov = &iov;
++	msg.msg_iovlen = 1;
++
++	err = recvmsg(fd, &amp;msg, MSG_DONTWAIT);
++	if (err &lt; 0)
++		return;
++
++	res = NLMSG_DATA(nlh);
++	dprintf(&quot;%d %d %lx\n&quot;, err, nlh-&gt;nlmsg_len, res-&gt;addr);
++
++	task = (struct tgt_task *) res-&gt;addr;
++	if (!task)
++		return;
++
++	dprintf(&quot;%d\n&quot;, task-&gt;fd);
++
++	err = write(task-&gt;fd, nlh, nlh-&gt;nlmsg_len);
++	close(task-&gt;fd);
++	free(task);
++}
++
+ void ipc_event_handle(struct driver_info *dinfo, int accept_fd)
+ {
+-	int fd, err;
++	int fd, err, done = 0;
+ 	char sbuf[4096], rbuf[4096];
+ 	struct nlmsghdr *nlh;
+ 	struct iovec iov;
+ 	struct msghdr msg;
+ 	struct tgtadm_res *res;
+ 	struct tgtadm_req *req;
++	struct tgt_task *task;
+ 	int (*fn) (char *, char *);
+ 
+ 	fd = ipc_accept(accept_fd);
+@@ -99,26 +149,36 @@
+ 	if (err &lt; 0)
+ 		goto fail;
+ 
++	task = calloc(1, sizeof(*task));
++	if (!task) {
++		err = -ENOMEM;
++		goto fail;
++	}
++	task-&gt;fd = fd;
++
+ 	req = NLMSG_DATA(nlh);
++	dprintf(&quot;%d %d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
+ 
+-	dprintf(&quot;%d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len);
+-
+-	if (req-&gt;mode == MODE_DEVICE) {
+-		dprintf(&quot;%d %d %d %d\n&quot;, req-&gt;tid, req-&gt;typeid, err, nlh-&gt;nlmsg_len);
+-		write(target_pfd[req-&gt;tid], sbuf, NLMSG_ALIGN(nlh-&gt;nlmsg_len));
+-		nlh = (struct nlmsghdr *) rbuf;
+-		nlh-&gt;nlmsg_len = NLMSG_LENGTH(0);
+-		res = NLMSG_DATA(nlh);
+-		res-&gt;err = err;
+-
+-		goto send;
++	switch (req-&gt;mode) {
++	case MODE_DEVICE:
++		dprintf(&quot;%d %d %d %d %lx\n&quot;,
++			req-&gt;tid, req-&gt;typeid, err, nlh-&gt;nlmsg_len,
++			(unsigned long) task);
++		req-&gt;addr = (unsigned long) task;
++		write(poll_array[POLLS_PER_DRV + req-&gt;tid].fd,
++		      sbuf, NLMSG_ALIGN(nlh-&gt;nlmsg_len));
++		break;
++	default:
++		fn = dl_ipc_fn(dinfo, req-&gt;typeid);
++		if (fn)
++			err = fn((char *) nlh, rbuf);
++		else
++			err = tgt_mgmt((char *) nlh, rbuf);
++		done = 1;
+ 	}
+ 
+-	fn = dl_ipc_fn(dinfo, req-&gt;typeid);
+-	if (fn)
+-		err = fn((char *) nlh, rbuf);
+-	else
+-		err = tgt_mgmt((char *) nlh, rbuf);
++	if (!done)
++		return;
+ 
+ send:
+ 	err = write(fd, nlh, nlh-&gt;nlmsg_len);
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/mgmt.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -14,6 +14,7 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
++#include &lt;poll.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+@@ -31,8 +32,6 @@
+ #define O_LARGEFILE	0100000
+ #endif
+ 
+-int target_pfd[1024];
+-
+ static void nlmsg_init(struct nlmsghdr *nlh, uint32_t seq,
+ 		       uint16_t type, uint32_t len, uint16_t flags)
+ {
+@@ -89,7 +88,14 @@
+ 				__ktarget_create);
+ 	if (err &gt;= 0) {
+ 		dprintf(&quot;%d %d\n&quot;, err, fd);
+-		target_pfd[err] = fd;
++
++		/* FIXME */
++		if (err &gt; POLLS_PER_DRV)
++			eprintf(&quot;too large tid %d\n&quot;, err);
++		else {
++			poll_array[POLLS_PER_DRV + err].fd = fd;
++			poll_array[POLLS_PER_DRV + err].events = POLLIN;
++		}
+ 	}
+ 
+ 	return err;
+@@ -252,7 +258,7 @@
+ 	}
+ 
+ 	nlh = (struct nlmsghdr *) rbuf;
+-	nlh-&gt;nlmsg_len = NLMSG_LENGTH(rlen);
++	nlh-&gt;nlmsg_len = NLMSG_LENGTH(sizeof(*res) + rlen);
+ 	res = NLMSG_DATA(nlh);
+ 	res-&gt;err = err;
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/target.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -224,6 +224,7 @@
+ 	struct msghdr msg;
+ 	struct nlmsghdr *nlh;
+ 	struct tgtadm_req *req;
++	struct tgtadm_res *res;
+ 	char rbuf[2048], buf[2048];
+ 	int err;
+ 
+@@ -248,6 +249,12 @@
+ 	dprintf(&quot;%d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len);
+ 
+ 	tgt_mgmt(rbuf, buf);
++
++	nlh = (struct nlmsghdr *) buf;
++	res = NLMSG_DATA(nlh);
++	res-&gt;addr = req-&gt;addr;
++	dprintf(&quot;%d %lx\n&quot;, nlh-&gt;nlmsg_len, res-&gt;addr);
++	err = write(fd, nlh, nlh-&gt;nlmsg_len);
+ }
+ 
+ 
+@@ -371,7 +378,7 @@
+ 		ev-&gt;k.cmd_done.uaddr, ev-&gt;k.cmd_done.len, err);
+ }
+ 
+-void nl_cmd(struct driver_info *dinfo, int fd)
++static void nl_cmd(struct driver_info *dinfo, int fd)
+ {
+ 	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
+@@ -406,6 +413,18 @@
+ 
+ }
+ 
++static int bind_nls(int fd)
++{
++	struct sockaddr_nl addr;
++
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.nl_family = AF_NETLINK;
++	addr.nl_pid = getpid();
++	addr.nl_groups = 0;
++
++	return bind(fd, (struct sockaddr *)&amp;addr, sizeof(addr));
++}
++
+ static void tthread_event_loop(struct target *target)
+ {
+ 	struct driver_info d[MAX_DL_HANDLES];
+@@ -414,8 +433,8 @@
+ 
+ 	fd = nl_init();
+ 	dprintf(&quot;%d\n&quot;, fd);
+-	err = nl_start(fd);
+-	dprintf(&quot;%d %d\n&quot;, fd, err);
++	err = bind_nls(fd);
++	dprintf(&quot;%d\n&quot;, err);
+ 
+ 	target-&gt;pfd[POLL_NL_CMD].fd = fd;
+ 	target-&gt;pfd[POLL_NL_CMD].events = POLLIN;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/tgtadm.h	2006-01-26 05:29:12 UTC (rev 230)
+@@ -31,14 +31,17 @@
+ 	int cid;
+ 	uint64_t lun;
+ 	int pid;
++
++	unsigned long addr;
+ };
+ 
+ struct tgtadm_res {
+ 	int err;
++	unsigned long addr;
+ };
+ 
+-extern int tgt_mgmt(char *sbuf, char *rbuf);
+ extern int ktarget_destroy(int tid);
+ extern int ktarget_create(int typeid);
++extern int tgt_mgmt(char *sbuf, char *rbuf);
+ 
+ #endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/tgtd.c	2006-01-26 05:29:12 UTC (rev 230)
+@@ -26,9 +26,8 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;dl.h&quot;
+ 
+-#define	POLLS_PER_DRV	32
+-
+ int nl_fd, ipc_fd;
++struct pollfd *poll_array;
+ 
+ enum {
+ 	POLL_NL,
+@@ -114,9 +113,11 @@
+ 	close(fd);
+ }
+ 
++/* TODO: rewrite makeshift poll code */
++
+ static void event_loop(int nr_dls, struct pollfd *poll_array)
+ {
+-	int err, i, poll_max = (nr_dls + 1) * POLLS_PER_DRV;
++	int err, i, poll_max = (nr_dls + 2) * POLLS_PER_DRV;
+ 	void (* fn)(struct pollfd *, int);
+ 
+ 	while (1) {
+@@ -128,16 +129,29 @@
+ 			continue;
+ 		}
+ 
+-		if (poll_array[POLL_NL].revents)
++		if (poll_array[POLL_NL].revents) {
+ 			nl_event_handle(dlinfo, nl_fd);
++			err--;
++		}
+ 
+-		if (poll_array[POLL_IPC].revents)
++		if (poll_array[POLL_IPC].revents) {
+ 			ipc_event_handle(dlinfo, ipc_fd);
++			err--;
++		}
+ 
++		if (!err)
++			continue;
++
++		for (i = POLLS_PER_DRV; i &lt; POLLS_PER_DRV * 2; i++)
++			if (poll_array[i].revents) {
++				dprintf(&quot;target process event %d\n&quot;, i);
++				pipe_event_handle(poll_array[i].fd);
++			}
++
+ 		for (i = 0; i &lt; nr_dls; i++) {
+ 			fn = dl_poll_fn(dlinfo, i);
+ 			if (fn)
+-				fn(poll_array + ((i + 1) * POLLS_PER_DRV), POLLS_PER_DRV);
++				fn(poll_array + ((i + 2) * POLLS_PER_DRV), POLLS_PER_DRV);
+ 		}
+ 	}
+ }
+@@ -148,8 +162,7 @@
+ 	void (* fn)(struct pollfd *, int);
+ 	int i;
+ 
+-	array = calloc((nr + 1) * POLLS_PER_DRV,
+-		       sizeof(struct pollfd));
++	array = calloc((nr + 2) * POLLS_PER_DRV, sizeof(struct pollfd));
+ 	if (!array)
+ 		exit(-ENOMEM);
+ 
+@@ -161,7 +174,7 @@
+ 	for (i = 0; i &lt; nr; i++) {
+ 		fn = dl_poll_init_fn(dlinfo, i);
+ 		if (fn)
+-			fn(array + (i + 1) * POLLS_PER_DRV, POLLS_PER_DRV);
++			fn(array + (i + 2) * POLLS_PER_DRV, POLLS_PER_DRV);
+ 	}
+ 
+ 	return array;
+@@ -171,7 +184,6 @@
+ {
+ 	int ch, longindex, nr;
+ 	int is_daemon = 1, is_debug = 1;
+-	struct pollfd *poll_array;
+ 
+ 	while ((ch = getopt_long(argc, argv, &quot;fd:vh&quot;, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-01-22 14:42:20 UTC (rev 229)
++++ trunk/usr/tgtd.h	2006-01-26 05:29:12 UTC (rev 230)
+@@ -6,7 +6,10 @@
+ 
+ #define	TGT_INVALID_DEV_ID	~0ULL
+ 
++/* temporarily */
++#define	POLLS_PER_DRV	32
+ extern int nl_fd;
++extern struct pollfd *poll_array;
+ 
+ extern int target_thread_create(int *fd);
+ 
+@@ -19,6 +22,7 @@
+ 
+ extern int ipc_open(void);
+ extern void ipc_event_handle(struct driver_info *, int fd);
++extern void pipe_event_handle(int fd);
+ 
+ extern int tgt_device_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, int dfd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000216.html">[Stgt-svn] r229 - in trunk: . include istgt/kernel istgt/usr kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000218.html">[Stgt-svn] r231 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#217">[ date ]</a>
+              <a href="thread.html#217">[ thread ]</a>
+              <a href="subject.html#217">[ subject ]</a>
+              <a href="author.html#217">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

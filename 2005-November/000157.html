@@ -1,0 +1,162 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r163 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r163%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051039.jA5Ad10x011597%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000156.html">
+   <LINK REL="Next"  HREF="000158.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r163 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r163%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051039.jA5Ad10x011597%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r163 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 11:39:01 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000156.html">[Stgt-svn] r162 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000158.html">[Stgt-svn] r164 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#157">[ date ]</a>
+              <a href="thread.html#157">[ thread ]</a>
+              <a href="subject.html#157">[ subject ]</a>
+              <a href="author.html#157">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 11:38:59 +0100 (Sat, 05 Nov 2005)
+New Revision: 163
+
+Modified:
+   trunk/istgt/kernel/config.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/nthread.c
+Log:
+Kill tid struct iscsi_target. We use tgt's tid instead.
+
+
+Modified: trunk/istgt/kernel/config.c
+===================================================================
+--- trunk/istgt/kernel/config.c	2005-11-05 10:27:02 UTC (rev 162)
++++ trunk/istgt/kernel/config.c	2005-11-05 10:38:59 UTC (rev 163)
+@@ -77,12 +77,12 @@
+ 	return err;
+ }
+ 
+-int event_send(struct tgt_target *tgt, int tid, uint64_t sid, uint32_t cid,
++int event_send(struct tgt_target *tgt, uint64_t sid, uint32_t cid,
+ 	       uint32_t state)
+ {
+ 	struct iet_msg msg;
+ 
+-	msg.k.conn_state_change.tid = tid;
++	msg.k.conn_state_change.tid = tgt-&gt;tid;
+ 	msg.k.conn_state_change.sid = sid;
+ 	msg.k.conn_state_change.cid = cid;
+ 	msg.k.conn_state_change.state = state;
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-05 10:27:02 UTC (rev 162)
++++ trunk/istgt/kernel/iscsi.c	2005-11-05 10:38:59 UTC (rev 163)
+@@ -1659,7 +1659,6 @@
+ 	struct iscsi_target *target = tt-&gt;tt_data;
+ 
+ 	target-&gt;tt = tt;
+-	target-&gt;tid = target-&gt;tt-&gt;tid;
+ 
+ 	memcpy(&amp;target-&gt;sess_param, &amp;default_session_param, sizeof(default_session_param));
+ 	memcpy(&amp;target-&gt;trgt_param, &amp;default_target_param, sizeof(default_target_param));
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-11-05 10:27:02 UTC (rev 162)
++++ trunk/istgt/kernel/iscsi.h	2005-11-05 10:38:59 UTC (rev 163)
+@@ -61,8 +61,6 @@
+ struct istgt_cmd;
+ 
+ struct iscsi_target {
+-	int tid;
+-
+ 	struct iscsi_sess_param sess_param;
+ 	struct iscsi_trgt_param trgt_param;
+ 
+@@ -213,7 +211,7 @@
+ 
+ /* config.c */
+ extern int iet_msg_recv(struct tgt_target *, uint32_t, void *);
+-extern int event_send(struct tgt_target *tgt, int tid, uint64_t sid,
++extern int event_send(struct tgt_target *tgt, uint64_t sid,
+ 		      uint32_t cid, uint32_t state);
+ 
+ /* session.c */
+
+Modified: trunk/istgt/kernel/nthread.c
+===================================================================
+--- trunk/istgt/kernel/nthread.c	2005-11-05 10:27:02 UTC (rev 162)
++++ trunk/istgt/kernel/nthread.c	2005-11-05 10:38:59 UTC (rev 163)
+@@ -606,10 +606,9 @@
+ 	}
+ 
+ 	eprintk(&quot;%d %&quot; PRIu64 &quot; %u\n&quot;,
+-		session-&gt;target-&gt;tid, session-&gt;sid, conn-&gt;cid);
++		session-&gt;target-&gt;tt-&gt;tid, session-&gt;sid, conn-&gt;cid);
+ 
+-	event_send(session-&gt;target-&gt;tt, session-&gt;target-&gt;tid,
+-		   session-&gt;sid, conn-&gt;cid, E_CONN_CLOSE);
++	event_send(session-&gt;target-&gt;tt, session-&gt;sid, conn-&gt;cid, E_CONN_CLOSE);
+ 	conn_free(conn);
+ 
+ 	if (list_empty(&amp;session-&gt;conn_list))
+@@ -674,11 +673,11 @@
+ 	struct task_struct *task;
+ 
+ 	if (info-&gt;task) {
+-		eprintk(&quot;Target (%u) already runs\n&quot;, target-&gt;tid);
++		eprintk(&quot;Target (%u) already runs\n&quot;, target-&gt;tt-&gt;tid);
+ 		return -EALREADY;
+ 	}
+ 
+-	task = kthread_run(istd, target, &quot;istd%d&quot;, target-&gt;tid);
++	task = kthread_run(istd, target, &quot;istd%d&quot;, target-&gt;tt-&gt;tid);
+ 
+ 	if (IS_ERR(task))
+ 		err = PTR_ERR(task);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000156.html">[Stgt-svn] r162 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000158.html">[Stgt-svn] r164 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#157">[ date ]</a>
+              <a href="thread.html#157">[ thread ]</a>
+              <a href="subject.html#157">[ subject ]</a>
+              <a href="author.html#157">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

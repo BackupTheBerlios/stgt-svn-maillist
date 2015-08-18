@@ -1,0 +1,108 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r719 - in trunk: doc patches
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r719%20-%20in%20trunk%3A%20doc%20patches&In-Reply-To=%3C200612261443.kBQEh1Jv014850%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000705.html">
+   <LINK REL="Next"  HREF="000707.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r719 - in trunk: doc patches</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r719%20-%20in%20trunk%3A%20doc%20patches&In-Reply-To=%3C200612261443.kBQEh1Jv014850%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r719 - in trunk: doc patches">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Dec 26 15:43:01 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000705.html">[Stgt-svn] r718 - in trunk: doc usr
+</A></li>
+        <LI>Next message: <A HREF="000707.html">[Stgt-svn] r720 - in trunk: doc usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#706">[ date ]</a>
+              <a href="thread.html#706">[ thread ]</a>
+              <a href="subject.html#706">[ subject ]</a>
+              <a href="author.html#706">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-26 15:43:00 +0100 (Tue, 26 Dec 2006)
+New Revision: 719
+
+Added:
+   trunk/patches/bsg_large_queue.diff
+Modified:
+   trunk/doc/README.passthrough
+Log:
+Add workaround for too small bsg queue.
+
+
+Modified: trunk/doc/README.passthrough
+===================================================================
+--- trunk/doc/README.passthrough	2006-12-26 12:40:19 UTC (rev 718)
++++ trunk/doc/README.passthrough	2006-12-26 14:43:00 UTC (rev 719)
+@@ -32,8 +32,8 @@
+ 
+ <A HREF="http://www.kernel.org/git/?p=linux/kernel/git/axboe/linux-2.6-block.git;a=summary">http://www.kernel.org/git/?p=linux/kernel/git/axboe/linux-2.6-block.git;a=summary</A>
+ 
+-Second, apply the IOCB_CMD_EPOLL_WAIT patch in the patch directory,
+-rebuild the kernel and reboot with the new kernel.
++Second, apply aioepoll and bsg_large_queue patches in the patch
++directory, rebuild the kernel and reboot with the new kernel.
+ 
+ Third, modify usr/Makefile to complile bd_sg.c.
+ 
+
+Added: trunk/patches/bsg_large_queue.diff
+===================================================================
+--- trunk/patches/bsg_large_queue.diff	2006-12-26 12:40:19 UTC (rev 718)
++++ trunk/patches/bsg_large_queue.diff	2006-12-26 14:43:00 UTC (rev 719)
+@@ -0,0 +1,13 @@
++diff --git a/block/bsg.c b/block/bsg.c
++index 9d77a0c..f915cb6 100644
++--- a/block/bsg.c
+++++ b/block/bsg.c
++@@ -63,7 +63,7 @@ enum {
++ /*
++  * command allocation bitmap defines
++  */
++-#define BSG_CMDS_PAGE_ORDER	(1)
+++#define BSG_CMDS_PAGE_ORDER	(3)
++ #define BSG_CMDS_PER_LONG	(sizeof(unsigned long) * 8)
++ #define BSG_CMDS_MASK		(BSG_CMDS_PER_LONG - 1)
++ #define BSG_CMDS_BYTES		(PAGE_SIZE * (1 &lt;&lt; BSG_CMDS_PAGE_ORDER))
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000705.html">[Stgt-svn] r718 - in trunk: doc usr
+</A></li>
+	<LI>Next message: <A HREF="000707.html">[Stgt-svn] r720 - in trunk: doc usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#706">[ date ]</a>
+              <a href="thread.html#706">[ thread ]</a>
+              <a href="subject.html#706">[ subject ]</a>
+              <a href="author.html#706">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,186 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r393 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r393%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200604062309.k36N9nW3027381%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000381.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r393 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r393%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200604062309.k36N9nW3027381%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r393 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Apr  7 01:09:49 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000381.html">[Stgt-svn] r394 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#380">[ date ]</a>
+              <a href="thread.html#380">[ thread ]</a>
+              <a href="subject.html#380">[ subject ]</a>
+              <a href="author.html#380">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-07 01:09:45 +0200 (Fri, 07 Apr 2006)
+New Revision: 393
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+Sync with the git tree with the submitted patches.
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-03-27 04:36:17 UTC (rev 392)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-04-06 23:09:45 UTC (rev 393)
+@@ -35,7 +35,7 @@
+ static int tgtd_pid;
+ static struct sock *nl_sk;
+ 
+-static int send_event_rsp(uint16_t type, struct tgt_event *p, gfp_t gfp_mask,
++static int send_event_rsp(uint16_t type, struct tgt_event *p, gfp_t flags,
+ 			  pid_t pid)
+ {
+ 	struct tgt_event *ev;
+@@ -44,7 +44,7 @@
+ 	uint32_t len;
+ 
+ 	len = NLMSG_SPACE(sizeof(*ev));
+-	skb = alloc_skb(len, gfp_mask);
++	skb = alloc_skb(len, flags);
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+@@ -53,11 +53,10 @@
+ 	ev = NLMSG_DATA(nlh);
+ 	memcpy(ev, p, sizeof(*ev));
+ 
+-	return netlink_unicast(nl_sk, skb, pid, gfp_mask &amp; GFP_ATOMIC);
++	return netlink_unicast(nl_sk, skb, pid, 0);
+ }
+ 
+-int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun,
+-			 gfp_t gfp_mask)
++int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t gfp_mask)
+ {
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	struct sk_buff *skb;
+@@ -92,9 +91,10 @@
+ 		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag,
+ 		(unsigned long long) ev-&gt;k.cmd_req.tag);
+ 
+-	err = netlink_unicast(nl_sk, skb, tgtd_pid, gfp_mask &amp; GFP_ATOMIC);
++	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+ 	if (err &lt; 0)
+-		eprintk(&quot;fail to send skb %d\n&quot;, err);
++		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb %d\n&quot;,
++		       err);
+ 	return err;
+ }
+ 
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-03-27 04:36:17 UTC (rev 392)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-04-06 23:09:45 UTC (rev 393)
+@@ -20,7 +20,6 @@
+  * 02110-1301 USA
+  */
+ #include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/elevator.h&gt;
+ #include &lt;linux/hash.h&gt;
+ #include &lt;linux/module.h&gt;
+ #include &lt;linux/pagemap.h&gt;
+@@ -52,8 +51,8 @@
+ 	struct request *rq;
+ };
+ 
+-#define	TGT_HASH_ORDER	4
+-#define	cmd_hashfn(cid)	hash_long((cid), TGT_HASH_ORDER)
++#define TGT_HASH_ORDER	4
++#define cmd_hashfn(cid)	hash_long((cid), TGT_HASH_ORDER)
+ 
+ struct scsi_tgt_queuedata {
+ 	struct Scsi_Host *shost;
+@@ -114,8 +113,8 @@
+ static void init_scsi_tgt_cmd(struct request *rq, struct scsi_tgt_cmd *tcmd)
+ {
+ 	struct scsi_tgt_queuedata *qdata = rq-&gt;q-&gt;queuedata;
+-	struct list_head *head;
+ 	unsigned long flags;
++	struct list_head *head;
+ 	static u32 tag = 0;
+ 
+ 	tcmd-&gt;lun = rq-&gt;end_io_data;
+@@ -174,7 +173,6 @@
+ 		init_scsi_tgt_cmd(rq, tcmd);
+ 
+ 	cmd = rq-&gt;special;
+-
+ 	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC);
+ 	if (err &lt; 0) {
+ 		eprintk(&quot;failed to send: %p %d\n&quot;, cmd, err);
+@@ -185,7 +183,6 @@
+ 	}
+ 
+ 	mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-
+ out:
+ 	/* TODO: proper error handling */
+ 	if (err &lt; 0)
+@@ -544,7 +541,6 @@
+ 		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
+ 		return -EINVAL;
+ 	}
+-	scsi_host_put(shost);
+ 
+ 	rq = tgt_cmd_hash_lookup(shost-&gt;uspace_req_q, cid);
+ 	if (!rq) {
+@@ -597,6 +593,7 @@
+ 	err = scsi_tgt_transfer_data(cmd);
+ 
+ done:
++	scsi_host_put(shost);
+ 	return err;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000381.html">[Stgt-svn] r394 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#380">[ date ]</a>
+              <a href="thread.html#380">[ thread ]</a>
+              <a href="subject.html#380">[ subject ]</a>
+              <a href="author.html#380">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,151 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r652 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r652%20-%20trunk/doc&In-Reply-To=%3C200611170149.kAH1nPei014894%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000638.html">
+   <LINK REL="Next"  HREF="000640.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r652 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r652%20-%20trunk/doc&In-Reply-To=%3C200611170149.kAH1nPei014894%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r652 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 17 02:49:25 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000638.html">[Stgt-svn] r651 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000640.html">[Stgt-svn] r653 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#639">[ date ]</a>
+              <a href="thread.html#639">[ thread ]</a>
+              <a href="subject.html#639">[ subject ]</a>
+              <a href="author.html#639">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-17 02:49:25 +0100 (Fri, 17 Nov 2006)
+New Revision: 652
+
+Modified:
+   trunk/doc/README.iscsi
+Log:
+Update iSCSI doc.
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-11-17 01:48:59 UTC (rev 651)
++++ trunk/doc/README.iscsi	2006-11-17 01:49:25 UTC (rev 652)
+@@ -1,5 +1,16 @@
+-Starting
++Preface
+ -------------
++This document describes how to configure the iSCSI target driver with tgtadm.
++
++tgtadm is not so handly; you can need several commands to do one thing
++mainly because it must be generic to work for all the transport protocols.
++
++We plan to implement a frontend tool, iscsitgtadm, to wrap tgtadm and
++offer considerably more user friendly interface in the future.
++
++
++Starting the daemon
++-------------
+ Try the following commands:
+ 
+ host:~/tgt$ su
+@@ -24,19 +35,23 @@
+ You can get the current configuration:
+ 
+ host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
+-tid 1: lld name iscsi
++tid 1: lld name iscsi: state suspended
+         lun 0: path /dev/hdc1
+ 
+ 
++If you don't need no more configuration (iSCSI parameters, security,
++etc), you are ready to accept initiators. In this case, you can go to
++`accepting initiators` session.
++
++
+ You can add lots of logical units:
+ 
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 1 --params Path=/var/tmp/image
+ host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
+-tid 1: lld name iscsi
++tid 1: lld name iscsi: state suspended
+         lun 1: path /var/tmp/image
+         lun 0: path /dev/hdc1
+ 
+-Now this target is ready to accept initiators.
+ 
+ You can get iSCSI parameters of the target:
+ 
+@@ -171,6 +186,30 @@
+ accounts. We don't support removing or unbinding accounts now.
+ 
+ 
++Accepting initiators
++-------------
++Now this target is ready to accept initiators. Make sure what you have
++now once again:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
++tid 1: lld name iscsi: state suspended
++        lun 1: path /var/tmp/image
++        lun 0: path /dev/hdc1
++
++
++If you are happy about it:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode target --tid 1 --name state --value running
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --mode target --op show
++tid 1: lld name iscsi: state running
++        lun 1: path /var/tmp/image
++        lun 0: path /dev/hdc1
++
++
++Now your target accepts initiators.
++
++
+ Shutdown
+ -------------
+ host:~/tgt# killall -9 tgtd
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000638.html">[Stgt-svn] r651 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000640.html">[Stgt-svn] r653 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#639">[ date ]</a>
+              <a href="thread.html#639">[ thread ]</a>
+              <a href="subject.html#639">[ subject ]</a>
+              <a href="author.html#639">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

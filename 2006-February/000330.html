@@ -1,0 +1,98 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r343 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r343%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602280345.k1S3jgi9030492%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000329.html">
+   <LINK REL="Next"  HREF="000331.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r343 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r343%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602280345.k1S3jgi9030492%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r343 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 28 04:45:42 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000329.html">[Stgt-svn] r342 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000331.html">[Stgt-svn] r344 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#330">[ date ]</a>
+              <a href="thread.html#330">[ thread ]</a>
+              <a href="subject.html#330">[ subject ]</a>
+              <a href="author.html#330">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-28 04:45:02 +0100 (Tue, 28 Feb 2006)
+New Revision: 343
+
+Modified:
+   branches/use-scsi-ml/usr/netlink.c
+Log:
+Seems that we sometimes hit sk_rcvbuf. So set it larger.
+
+
+Modified: branches/use-scsi-ml/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/usr/netlink.c	2006-02-28 02:51:16 UTC (rev 342)
++++ branches/use-scsi-ml/usr/netlink.c	2006-02-28 03:45:02 UTC (rev 343)
+@@ -141,7 +141,7 @@
+ 
+ int nl_init(void)
+ {
+-	int err, nl_fd;
++	int err, nl_fd, rsize = 256 * 1024;
+ 
+ 	nl_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_TGT);
+ 	if (nl_fd &lt; 0) {
+@@ -149,6 +149,12 @@
+ 		exit(1);
+ 	}
+ 
++	err = setsockopt(nl_fd, SOL_SOCKET, SO_RCVBUF, &amp;rsize, sizeof(rsize));
++	if (err) {
++		eprintf(&quot;fail to setsockopt %d\n&quot;, errno);
++		exit(1);
++	}
++
+ 	err = tgtd_bind(nl_fd);
+ 	if (err)
+ 		exit(1);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000329.html">[Stgt-svn] r342 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000331.html">[Stgt-svn] r344 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#330">[ date ]</a>
+              <a href="thread.html#330">[ thread ]</a>
+              <a href="subject.html#330">[ subject ]</a>
+              <a href="author.html#330">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

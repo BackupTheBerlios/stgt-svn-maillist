@@ -1,0 +1,1238 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r87 - in trunk: . iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r87%20-%20in%20trunk%3A%20.%20iscsi/kernel%20kernel&In-Reply-To=%3C200509230033.j8N0XhGI019506%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000079.html">
+   <LINK REL="Next"  HREF="000081.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r87%20-%20in%20trunk%3A%20.%20iscsi/kernel%20kernel&In-Reply-To=%3C200509230033.j8N0XhGI019506%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel">mnc at berlios.de
+       </A><BR>
+    <I>Fri Sep 23 02:33:43 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000079.html">[Stgt-svn] r86 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000081.html">[Stgt-svn] r88 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#80">[ date ]</a>
+              <a href="thread.html#80">[ thread ]</a>
+              <a href="subject.html#80">[ subject ]</a>
+              <a href="author.html#80">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-23 02:33:42 +0200 (Fri, 23 Sep 2005)
+New Revision: 87
+
+Added:
+   trunk/kernel/tgt_vsd.c
+Removed:
+   trunk/kernel/tgt_vdev.c
+Modified:
+   trunk/initd
+   trunk/iscsi/kernel/iscsi.c
+   trunk/kernel/Makefile
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+Log:
+Do tgt_type/lld -&gt; transport/sub-protocol (iscsi, fc, etc (not done yet) -&gt;  protocol (scsi/ide) -&gt; device (this is protocol specific device like SCSI Tape, or SCSI Disk) -&gt; tgt_core (sometimes we can bypass a layer like for sending/recieving target driver messages since those are not device or protocol specific). Move some scsi disk things to tgt_vsd (NOTE CHANGE YOUR IETD.CONF TO REFLECT NAME CHANGE), and moved some things around to fix sense bug and allow devices to be able to better control sense/error-values 
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/initd	2005-09-23 00:33:42 UTC (rev 87)
+@@ -10,7 +10,7 @@
+ {
+ 	insmod ${PWD}/kernel/tgt_core.ko
+ 	insmod ${PWD}/kernel/tgt_scsi.ko
+-	insmod ${PWD}/kernel/tgt_vdev.ko
++	insmod ${PWD}/kernel/tgt_vsd.ko
+ 	${PWD}/usr/tgtd
+ 
+ 	modprobe -q crc32c
+@@ -26,7 +26,7 @@
+ 
+ 	rmmod iscsi_trgt
+ 
+-	rmmod tgt_vdev
++	rmmod tgt_vsd
+ 	rmmod tgt_scsi
+ 	rmmod tgt_core
+ }
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-23 00:33:42 UTC (rev 87)
+@@ -12,6 +12,8 @@
+ 
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
++#include &lt;tgt_scsi.h&gt;
++#include &lt;tgt_protocol.h&gt;
+ 
+ #include &lt;iscsi.h&gt;
+ #include &lt;iscsi_dbg.h&gt;
+@@ -261,6 +263,7 @@
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+ 	struct iscsi_sense_data *sense;
++	struct scsi_tgt_cmnd *stc;
+ 	struct scatterlist *sg = &amp;req-&gt;sense_sg;
+ 
+ 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+@@ -272,13 +275,17 @@
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
+ 
+-	sense = (struct iscsi_sense_data *) req-&gt;tc-&gt;error_buff;
+-	memmove(sense-&gt;data, sense, req-&gt;tc-&gt;error_buff_len);
+-	sense-&gt;length = cpu_to_be16(req-&gt;tc-&gt;error_buff_len);
++	stc = tgt_cmnd_to_scsi(req-&gt;tc);
++	sense = (struct iscsi_sense_data *) stc-&gt;sense_buff;
++	memmove(sense-&gt;data, sense, stc-&gt;sense_len);
++	/*
++	 * this looks broken for ppc
++	 */
++	sense-&gt;length = cpu_to_be16(stc-&gt;sense_len);
+ 
+-	sg-&gt;page = virt_to_page(req-&gt;tc-&gt;error_buff);
+-	sg-&gt;offset = offset_in_page(req-&gt;tc-&gt;error_buff);
+-	sg-&gt;length = req-&gt;tc-&gt;error_buff_len + sizeof(struct iscsi_sense_data);
++	sg-&gt;page = virt_to_page(stc-&gt;sense_buff);
++	sg-&gt;offset = offset_in_page(stc-&gt;sense_buff);
++	sg-&gt;length = stc-&gt;sense_len + sizeof(struct iscsi_sense_data);
+ 	rsp-&gt;pdu.datasize = sg-&gt;length;
+ 	rsp-&gt;sg = sg;
+ 
+@@ -288,6 +295,7 @@
+ static struct iscsi_cmnd *create_sense_rsp(struct iscsi_cmnd *req,
+ 					   u8 sense_key, u8 asc, u8 ascq)
+ {
++	struct scsi_tgt_cmnd *stc;
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+ 	struct iscsi_sense_data *sense;
+@@ -302,11 +310,12 @@
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
+ 
+-	sg-&gt;page = virt_to_page(req-&gt;tc-&gt;error_buff);
+-	sg-&gt;offset = offset_in_page(req-&gt;tc-&gt;error_buff);
+-	sg-&gt;length = req-&gt;tc-&gt;error_buff_len;
++	stc = tgt_cmnd_to_scsi(req-&gt;tc);
++	sg-&gt;page = virt_to_page(stc-&gt;sense_buff);
++	sg-&gt;offset = offset_in_page(stc-&gt;sense_buff);
++	sg-&gt;length = stc-&gt;sense_len;
+ 
+-	sense = (struct iscsi_sense_data *) req-&gt;tc-&gt;error_buff;
++	sense = (struct iscsi_sense_data *) stc-&gt;sense_buff;
+ 	sense-&gt;length = cpu_to_be16(14);
+ 	sense-&gt;data[0] = 0xf0;
+ 	sense-&gt;data[2] = sense_key;
+@@ -746,9 +755,12 @@
+ 		if (!cmnd-&gt;is_unsolicited_data)
+ 			send_r2t(cmnd);
+ 	} else {
++		struct tgt_protocol *proto = cmnd-&gt;tc-&gt;session-&gt;target-&gt;proto;
++ 
+ 		set_cmnd_waitio(cmnd);
+ 		cmnd-&gt;tc-&gt;private = cmnd;
+-		tgt_cmnd_queue(cmnd-&gt;tc, scsi_cmnd_done);
++
++		proto-&gt;queue_cmnd(cmnd-&gt;tc, scsi_cmnd_done);
+ 	}
+ }
+ 
+@@ -829,15 +841,15 @@
+ 
+ static void scsi_cmnd_start(struct iscsi_conn *conn, struct iscsi_cmnd *req)
+ {
++	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
+ 
+ 	dprintk(D_GENERIC, &quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+ 	eprintk(&quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+-	req-&gt;tc = tgt_cmnd_create(conn-&gt;session-&gt;ts, req_hdr-&gt;cdb,
+-				   req_hdr-&gt;lun,
+-				   sizeof(req_hdr-&gt;lun));
++	req-&gt;tc = proto-&gt;create_cmnd(conn-&gt;session-&gt;ts, req_hdr-&gt;cdb,
++				     req_hdr-&gt;lun, sizeof(req_hdr-&gt;lun));
+ 	assert(req-&gt;tc);
+ 
+ 	switch (req_hdr-&gt;cdb[0]) {
+@@ -881,8 +893,7 @@
+ 			cmnd_skip_data(req);
+ 		}
+ 
+-		tgt_cmnd_alloc_buffer(req-&gt;tc, NULL);
+-
++		proto-&gt;alloc_cmnd_buffer(req-&gt;tc, NULL);
+ 		break;
+ 	}
+ 	case WRITE_6:
+@@ -907,7 +918,7 @@
+ 		if (req_hdr-&gt;cdb[0] == WRITE_VERIFY &amp;&amp; req_hdr-&gt;cdb[1] &amp; 0x02)
+ 			eprintk(&quot;Verification is ignored %x\n&quot;, cmnd_itt(req));
+ 
+-		tgt_cmnd_alloc_buffer(req-&gt;tc, NULL);
++		proto-&gt;alloc_cmnd_buffer(req-&gt;tc, NULL);
+ 
+ 		if (req-&gt;pdu.datasize) {
+ 			if (cmnd_recv_pdu(conn, req-&gt;tc, 0, req-&gt;pdu.datasize) &lt; 0)
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/Makefile	2005-09-23 00:33:42 UTC (rev 87)
+@@ -8,7 +8,7 @@
+ obj-m		+= tgt_core.o
+ tgt_core-objs	:= tgt.o tgt_sysfs.o tgt_protocol.o
+ 
+-obj-m		+= tgt_vdev.o tgt_scsi.o
++obj-m		+= tgt_vsd.o tgt_scsi.o
+ else
+ 
+ ifeq ($(KERNELSRC),)
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt.c	2005-09-23 00:33:42 UTC (rev 87)
+@@ -14,6 +14,7 @@
+ #include &lt;linux/slab.h&gt;
+ #include &lt;linux/mempool.h&gt;
+ #include &lt;linux/netlink.h&gt;
++#include &lt;linux/file.h&gt;
+ #include &lt;asm/scatterlist.h&gt;
+ #include &lt;net/tcp.h&gt;
+ 
+@@ -427,8 +428,7 @@
+ 	return NULL;
+ }
+ 
+-static struct tgt_device *
+-tgt_device_find(struct tgt_target *target, uint64_t dev_id)
++struct tgt_device *tgt_device_find(struct tgt_target *target, uint64_t dev_id)
+ {
+ 	static struct tgt_device *device;
+ 	unsigned long flags;
+@@ -439,6 +439,7 @@
+ 
+ 	return device;
+ }
++EXPORT_SYMBOL_GPL(tgt_device_find);
+ 
+ static int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+ 			     int fd, unsigned long dflags)
+@@ -463,14 +464,19 @@
+ 	device-&gt;target = target;
+ 	device-&gt;fd = fd;
+ 
++	device-&gt;file = fget(fd);
++	if (!device-&gt;file) {
++		eprintk(&quot;Could not get fd %d\n&quot;, fd);
++		goto free_device;
++	}
++
+ 	device-&gt;dt = device_template_get(device_type);
+ 	if (!device-&gt;dt) {
+ 		eprintk(&quot;Could not get devive type %s\n&quot;, device_type);
+-		goto free_device;
++		goto put_fd;
+ 	}
+ 
+-	device-&gt;dt_data = kmalloc(device-&gt;dt-&gt;priv_data_size,
+-				  GFP_KERNEL);
++	device-&gt;dt_data = kmalloc(device-&gt;dt-&gt;priv_data_size, GFP_KERNEL);
+ 	if (!device-&gt;dt_data)
+ 		goto put_template;
+ 
+@@ -494,6 +500,8 @@
+ 	kfree(device-&gt;dt_data);
+ put_template:
+ 	device_template_put(device-&gt;dt);
++put_fd:
++	fput(device-&gt;file);
+ free_device:
+ 	kfree(device);
+ 	return -EINVAL;
+@@ -519,17 +527,15 @@
+ 	if (device-&gt;dt-&gt;destroy)
+ 		device-&gt;dt-&gt;destroy(device);
+ 
++	fput(device-&gt;file);
+ 	device_template_put(device-&gt;dt);
+ 	tgt_sysfs_unregister_device(device);
+ 
+ 	return 0;
+ }
+ 
+-struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session,
+-				 uint8_t *proto_data,
+-				 uint8_t *id_buff, int buff_size)
++struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session)
+ {
+-	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 	struct tgt_cmnd *cmnd;
+ 	unsigned long flags;
+ 
+@@ -547,8 +553,6 @@
+ 
+ 	dprintk(&quot;%p %llu\n&quot;, session, cmnd-&gt;cid);
+ 
+-	proto-&gt;init_cmnd(cmnd, proto_data, id_buff, buff_size);
+-
+ 	spin_lock_irqsave(&amp;cmnd_hash_lock, flags);
+ 	list_add_tail(&amp;cmnd-&gt;hash_list, &amp;cmnd_hash[cmnd_hashfn(cmnd-&gt;cid)]);
+ 	spin_unlock_irqrestore(&amp;cmnd_hash_lock, flags);
+@@ -620,12 +624,8 @@
+ 
+ void tgt_cmnd_alloc_buffer(struct tgt_cmnd *cmnd, void (*done)(struct tgt_cmnd *))
+ {
+-	struct tgt_protocol *proto = cmnd-&gt;session-&gt;target-&gt;proto;
+-
+ 	BUG_ON(!list_empty(&amp;cmnd-&gt;clist));
+ 
+-	proto-&gt;init_cmnd_buffer(cmnd);
+-
+ 	if (done) {
+ 		struct tgt_session *session = cmnd-&gt;session;
+ 
+@@ -639,7 +639,7 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmnd_alloc_buffer);
+ 
+-static int uspace_cmnd_send(struct tgt_cmnd *cmnd)
++int tgt_uspace_cmnd_send(struct tgt_cmnd *cmnd)
+ {
+ 	struct tgt_protocol *proto = cmnd-&gt;session-&gt;target-&gt;proto;
+ 	struct sk_buff *skb;
+@@ -668,16 +668,12 @@
+ 
+ 	return netlink_unicast(nls, skb, tgt_pid, 0);
+ }
++EXPORT_SYMBOL_GPL(tgt_uspace_cmnd_send);
+ 
+-static void cmnd_done(struct tgt_cmnd *cmnd, int result)
++static void cmnd_done(struct tgt_cmnd *cmnd)
+ {
+-	struct tgt_target *target = cmnd-&gt;session-&gt;target;
+-	struct tgt_protocol *proto = target-&gt;proto;
+ 	void (*done)(struct tgt_cmnd *);
+ 
+-	proto-&gt;cmnd_done(cmnd, result);
+-	cmnd-&gt;result = result;
+-
+ 	done = cmnd-&gt;done;
+ 	cmnd-&gt;done = NULL;
+ 	done(cmnd);
+@@ -686,6 +682,7 @@
+ static void uspace_cmnd_done(struct tgt_cmnd *cmnd, void *data,
+ 			     int result, uint32_t len)
+ {
++	struct tgt_device *device = cmnd-&gt;device;
+ 	char *p = data;
+ 	int i;
+ 	BUG_ON(!cmnd-&gt;done);
+@@ -707,7 +704,10 @@
+ 		}
+ 	}
+ 
+-	cmnd_done(cmnd, result);
++	cmnd-&gt;result = result;
++	if (device-&gt;dt-&gt;complete_uspace_cmnd)
++		device-&gt;dt-&gt;complete_uspace_cmnd(cmnd);
++	cmnd_done(cmnd);
+ }
+ 
+ static void queuecommand(void *data)
+@@ -715,34 +715,28 @@
+ 	int err = 0;
+ 	struct tgt_cmnd *cmnd = data;
+ 	struct tgt_target *target = cmnd-&gt;session-&gt;target;
+-	struct tgt_device *device;
++	struct tgt_device *device = cmnd-&gt;device;
+ 
+-	dprintk(&quot;cid %llu rw %d\n&quot;, cmnd-&gt;cid, cmnd-&gt;rw);
++	dprintk(&quot;cid %llu\n&quot;, cmnd-&gt;cid);
+ 
+ 	/* Should we do this earlier? */
+-	device = tgt_device_find(target, cmnd-&gt;dev_id);
++	if (!device)
++		cmnd-&gt;device = device = tgt_device_find(target, cmnd-&gt;dev_id);
+ 	if (device)
+ 		dprintk(&quot;found %llu\n&quot;, cmnd-&gt;dev_id);
+ 
+-	if (cmnd-&gt;rw == READ || cmnd-&gt;rw == WRITE)
+-		err = device-&gt;dt-&gt;queue_cmnd(device, cmnd);
+-	else {
+-		/*
+-		 * TODO: if we fail to get the command to userspace there
+-		 * will be no setup sense buffer below so we need to add
+-		 * something.
+-		 */
+-		err = uspace_cmnd_send(cmnd);
+-		if (err &gt;= 0)
+-			/* sent to userspace */
+-			return;
+-	}
++	err = device-&gt;dt-&gt;queue_cmnd(cmnd);
+ 
+-	/* kspace command failure or failed to send commands to space. */
+-	if (unlikely(err))
+-		eprintk(&quot;failed cmnd %llu %d %d\n&quot;, cmnd-&gt;cid, err, cmnd-&gt;rw);
+-
+-	cmnd_done(cmnd, err);
++	switch (err) {
++	case TGT_CMND_FAILED:
++	case TGT_CMND_COMPLETED:
++		dprintk(&quot;command completed %d\n&quot;, err);
++		if (device-&gt;dt-&gt;complete_kern_cmnd)
++			device-&gt;dt-&gt;complete_kern_cmnd(cmnd);
++		cmnd_done(cmnd);
++	default:
++		dprintk(&quot;command %llu queued\n&quot;, cmnd-&gt;cid);
++	};
+ }
+ 
+ int tgt_cmnd_queue(struct tgt_cmnd *cmnd, void (*done)(struct tgt_cmnd *))
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt.h	2005-09-23 00:33:42 UTC (rev 87)
+@@ -11,6 +11,9 @@
+ 
+ #include &lt;linux/mempool.h&gt;
+ 
++struct tgt_device;
++struct tgt_protocol;
++
+ struct tgt_session {
+ 	struct tgt_target *target;
+ 	struct list_head slist;
+@@ -20,13 +23,13 @@
+ 
+ struct tgt_cmnd {
+ 	struct tgt_session *session;
++	struct tgt_device *device;
++	struct tgt_protocol *proto;
+ 
+ 	uint32_t state;
+ 	uint64_t dev_id;
+ 	uint64_t cid;
+ 
+-	int rw;
+-
+ 	struct work_struct work;
+ 	void (*done) (struct tgt_cmnd *);
+ 
+@@ -39,10 +42,6 @@
+ 	uint64_t offset;
+ 	int result;
+ 
+-	/* TODO: there should be a better way. */
+-	uint8_t *error_buff;
+-	int error_buff_len;
+-
+ 	/*
+ 	 * target driver private
+ 	 */
+@@ -62,9 +61,8 @@
+ 
+ extern int tgt_msg_send(struct tgt_target *target, void *data, int data_len,
+ 			unsigned int gfp_flags);
+-extern struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session,
+-					uint8_t *proto_data,
+-					uint8_t *id_buff, int buff_size);
++extern int tgt_uspace_cmnd_send(struct tgt_cmnd *cmnd);
++extern struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session);
+ extern void tgt_cmnd_destroy(struct tgt_cmnd *cmnd);
+ extern void tgt_cmnd_alloc_buffer(struct tgt_cmnd *cmnd,
+ 				  void (*done)(struct tgt_cmnd *));
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt_device.h	2005-09-23 00:33:42 UTC (rev 87)
+@@ -14,14 +14,47 @@
+ struct tgt_device;
+ struct tgt_cmnd;
+ 
++enum {
++	TGT_CMND_COMPLETED,
++	TGT_CMND_FAILED,
++	/*
++	 * if the device has queued the command it is responsible for
++	 * for completing it
++	 */
++	TGT_CMND_USPACE_QUEUED,
++	TGT_CMND_KERN_QUEUED
++};
++
+ struct tgt_device_template {
+ 	const char *name;
+ 	struct module *module;
+ 	unsigned priv_data_size;
+ 
++	/*
++	 * setup and destroy private structures
++	 */
+ 	int (* create)(struct tgt_device *);
+ 	void (* destroy)(struct tgt_device *);
+-	int (* queue_cmnd)(struct tgt_device *device, struct tgt_cmnd *cmnd);
++	/*
++	 * queue or execute command. Return TGT_CMND*.
++	 * If returning TGT_CMND_COMPLETED or TGT_CMND_FAILED the result
++	 * field must be set.
++	 */
++	int (* queue_cmnd)(struct tgt_cmnd *cmnd);
++	/*
++	 * complete a userspace command
++	 */
++	void ( *complete_uspace_cmnd)(struct tgt_cmnd *cmnd);
++	/*
++	 * complete a kernel command if your queue_command was async
++	 * and the device used one of the tgt threads to process the
++	 * command
++	 */
++	void (*complete_kern_cmnd)(struct tgt_cmnd *cmnd);
++	/*
++	 * setup buffer or device fields if needed
++	 */
++	void (* prep_cmnd)(struct tgt_cmnd *cmnd);
+ 
+ 	/*
+ 	 * Pointer to the sysfs class properties for this host, NULL terminated.
+@@ -36,6 +69,7 @@
+ 	struct class_device cdev;
+ 
+ 	int fd;
++	struct file *file;
+ 	uint64_t dev_id;
+ 	uint32_t blk_shift;
+ 	uint64_t size;
+@@ -47,6 +81,8 @@
+ #define cdev_to_tgt_device(cdev) \
+         container_of(cdev, struct tgt_device, cdev)
+ 
++extern struct tgt_device *tgt_device_find(struct tgt_target *target,
++					  uint64_t dev_id);
+ extern int tgt_sysfs_register_device(struct tgt_device *device);
+ extern void tgt_sysfs_unregister_device(struct tgt_device *device);
+ extern int tgt_device_template_register(struct tgt_device_template *dt);
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt_protocol.h	2005-09-23 00:33:42 UTC (rev 87)
+@@ -12,7 +12,13 @@
+ 
+ struct module;
+ struct tgt_cmnd;
++struct tgt_session;
+ 
++/*
++ * The target driver will interact with tgt core through the protocol
++ * handler. The protocol handler can then use the default tgt_core functions
++ * or build wrappers around them.
++ */
+ struct tgt_protocol {
+ 	const char *name;
+ 	struct module *module;
+@@ -21,20 +27,31 @@
+ 	int uspace_pdu_size;
+ 
+ 	/*
+-	 * perform command preparation, such as setting the rw field
+-	 * and dev_id
++	 * create a command.
+ 	 */
+-	void (* init_cmnd)(struct tgt_cmnd *cmnd, uint8_t *proto_data,
+-			   uint8_t *id_buff, int buff_size);
++	struct tgt_cmnd *(* create_cmnd)(struct tgt_session *session,
++					uint8_t *cmd, uint8_t *dev_id_buff,
++					int buff_size);
+ 	/*
+-	 * setup buffer fields like offset and len
++	 * destroy a command. This will free the command and buffer
+ 	 */
+-	void (* init_cmnd_buffer)(struct tgt_cmnd *cmd);
++	void (* destroy_cmnd)(struct tgt_cmnd *cmd); 
+ 	/*
+-	 * process completion of a command
++	 * allocoate a comand buffer. If this is called from irq context
++	 * a done callback can be set so the allocation is done in process
++	 * context.
+ 	 */
+-	void (* cmnd_done)(struct tgt_cmnd *cmd, int err);
+-
++	void (* alloc_cmnd_buffer)(struct tgt_cmnd *cmnd,
++				   void (*done)(struct tgt_cmnd *));
++	/*
++	 * queue a command to be executed in a workqueue. A done() callback
++	 * must be passed in.
++	 */
++	int (* queue_cmnd)(struct tgt_cmnd *cmnd,
++			   void (*done)(struct tgt_cmnd *));
++	/*
++	 * build userspace packet
++	 */
+ 	void (* build_uspace_pdu)(struct tgt_cmnd *cmnd, void *data);
+ };
+ 
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt_scsi.c	2005-09-23 00:33:42 UTC (rev 87)
+@@ -13,16 +13,12 @@
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ 
+ #include &lt;tgt.h&gt;
++#include &lt;tgt_scsi.h&gt;
++#include &lt;tgt_device.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
+ static kmem_cache_t *scsi_tgt_cmnd_cache;
+ 
+-struct scsi_tgt_cmnd {
+-	uint8_t scb[MAX_COMMAND_SIZE];
+-	uint8_t sense_buff[SCSI_SENSE_BUFFERSIZE];
+-	int tags;
+-};
+-
+ /*
+  * we should be able to use scsi-ml's functions for this
+  */
+@@ -46,143 +42,81 @@
+ 	return lun;
+ }
+ 
+-static void scsi_tgt_init_cmnd_buffer(struct tgt_cmnd *cmnd)
++/*
++ * we may have to add a wrapper becuase people are passing the lun in
++ * differently
++ */
++static struct tgt_cmnd *
++scsi_tgt_create_cmnd(struct tgt_session *session, uint8_t *scb, uint8_t *lun,
++		     int lun_size)
+ {
+-	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
+-	uint8_t *scb = scmnd-&gt;scb;
+-	uint64_t off = 0;
+-	uint32_t len = 0;
++	struct tgt_device *device;
++	struct tgt_cmnd *cmnd;
++	struct scsi_tgt_cmnd *scmnd;
+ 
+-	/*
+-	 * set bufflen and offset
+-	 */
+-	switch (scb[0]) {
+-	case READ_6:
+-	case WRITE_6:
+-		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
+-		len = scb[4];
+-		if (!len)
+-			len = 256;
+-		break;
+-	case READ_10:
+-	case WRITE_10:
+-	case WRITE_VERIFY:
+-		off = be32_to_cpu(*(u32 *) &amp;scb[2]);
+-		len = (scb[7] &lt;&lt; 8) + scb[8];
+-		break;
+-	case READ_16:
+-	case WRITE_16:
+-		off = be64_to_cpu(*(u64 *)&amp;scb[2]);
+-		len = be32_to_cpu(*(u32 *)&amp;scb[10]);
+-		break;
+-	default:
+-		break;
++	cmnd = tgt_cmnd_create(session);
++	if (!cmnd) {
++		printk(KERN_ERR &quot;Could not allocate command\n&quot;);
++		return NULL;
+ 	}
++	scmnd = tgt_cmnd_to_scsi(cmnd);
++	memcpy(scmnd-&gt;scb, scb, sizeof(scmnd-&gt;scb));
+ 
+-	off &lt;&lt;= 9;
+-	len &lt;&lt;= 9;
+-
+-	cmnd-&gt;bufflen = len;
+-	cmnd-&gt;offset = off;
+-}
+-
+-static void scsi_tgt_init_cmnd(struct tgt_cmnd *cmnd, uint8_t *proto_data,
+-			       uint8_t *id_buff, int buff_size)
+-{
+-	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
+-	uint8_t *scb = scmnd-&gt;scb;
+-
+-	memcpy(scb, proto_data, sizeof(scmnd-&gt;scb));
+-
+-	/* set operation */
+-	switch (scb[0]) {
+-	case READ_6:
+-	case READ_10:
+-	case READ_16:
+-		cmnd-&gt;rw = READ;
+-		break;
+-	case WRITE_6:
+-	case WRITE_10:
+-	case WRITE_16:
+-	case WRITE_VERIFY:
+-		cmnd-&gt;rw = WRITE;
+-		break;
+-	default:
+-		cmnd-&gt;rw = SPECIAL;
+-	};
+-
+ 	/* translate target driver LUN to device id */
+-	cmnd-&gt;dev_id = scsi_tgt_translate_lun(id_buff, buff_size);
+-}
+-
+-/*
+- * TODO: better error handling
+- * We should get ASC and ASCQ from the device code.
+- */
+-static uint8_t error_to_sense_key(int err)
+-{
+-	uint8_t key;
+-
+-	switch (err) {
+-	case -ENOMEM:
+-		key = ABORTED_COMMAND;
+-		break;
+-	case -EOVERFLOW:
+-		key = HARDWARE_ERROR;
+-		break;
+-	default:
+-		key = HARDWARE_ERROR;
+-		break;
++	cmnd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
++	device = tgt_device_find(session-&gt;target, cmnd-&gt;dev_id);
++	if (!device) {
++		printk(KERN_ERR &quot;Could not find device if %llu\n&quot;,
++		       cmnd-&gt;dev_id);
++		return NULL;
+ 	}
++	cmnd-&gt;device = device;
+ 
+-	return key;
++	/* do scsi device specific setup */
++	device-&gt;dt-&gt;prep_cmnd(cmnd);
++	return cmnd;
+ }
+ 
+-static int sense_data_build(struct tgt_cmnd *cmnd, int err)
++/* kspace command failure */
++int scsi_tgt_sense_data_build(struct tgt_cmnd *cmnd, uint8_t key,
++			      uint8_t ascode, uint8_t ascodeq)
+ {
+-	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
++	struct scsi_tgt_cmnd *scmnd = tgt_cmnd_to_scsi(cmnd);
+ 	int len = 8, alen = 6;
+ 	uint8_t *data = scmnd-&gt;sense_buff;
+ 
+ 	memset(data, 0, sizeof(scmnd-&gt;sense_buff));
+ 
+-	if (cmnd-&gt;rw == READ || cmnd-&gt;rw == WRITE) {
+-		uint8_t key = error_to_sense_key(err);
+-		/* kspace command failure */
++	data[0] = 0x70 | 1U &lt;&lt; 7;
++	data[2] = key;
++	data[7] = alen;
++	data[12] = ascode;
++	data[13] = ascodeq;
++	cmnd-&gt;result = SAM_STAT_CHECK_CONDITION;
++	scmnd-&gt;sense_len = len + alen;
+ 
+-		data[0] = 0x70 | 1U &lt;&lt; 7;
+-		data[2] = key;
+-		data[7] = alen;
+-		/*
+-		 * TODO
+-		 */
+-		data[12] = 0;
+-		data[13] = 0;
+-		cmnd-&gt;result = SAM_STAT_CHECK_CONDITION;
+-	} else {
+-		/* uspace command failure */
++	return len + alen;
++}
++EXPORT_SYMBOL_GPL(scsi_tgt_sense_data_build);
+ 
+-		len = min(cmnd-&gt;bufflen, sizeof(scmnd-&gt;sense_buff));
+-		alen = 0;
++/* uspace command failure */
++int scsi_tgt_sense_copy(struct tgt_cmnd *cmnd)
++{
++	struct scsi_tgt_cmnd *scmnd = tgt_cmnd_to_scsi(cmnd);
++	uint8_t *data = scmnd-&gt;sense_buff;
++	int len;
+ 
+-		memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
+-		cmnd-&gt;result = err;
+-	}
++	memset(data, 0, sizeof(scmnd-&gt;sense_buff));
++	len = min(cmnd-&gt;bufflen, sizeof(scmnd-&gt;sense_buff));
+ 
+-	cmnd-&gt;error_buff = data;
+-	cmnd-&gt;error_buff_len = len + alen;
++	/* userspace did everything for us */
++	memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
++	scmnd-&gt;sense_len = len;
+ 
+-	return len + alen;
++	return len;
+ }
++EXPORT_SYMBOL_GPL(scsi_tgt_sense_copy);
+ 
+-static void scsi_tgt_cmnd_done(struct tgt_cmnd *cmnd, int err)
+-{
+-	if (err != 0)
+-		sense_data_build(cmnd, err);
+-	else
+-		cmnd-&gt;result = SAM_STAT_GOOD;
+-}
+-
+ void scsi_tgt_build_uspace_pdu(struct tgt_cmnd *cmnd, void *data)
+ {
+ 	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
+@@ -192,9 +126,10 @@
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
+-	.init_cmnd = scsi_tgt_init_cmnd,
+-	.init_cmnd_buffer = scsi_tgt_init_cmnd_buffer,
+-	.cmnd_done = scsi_tgt_cmnd_done,
++	.create_cmnd = scsi_tgt_create_cmnd,
++	.destroy_cmnd = tgt_cmnd_destroy,
++	.alloc_cmnd_buffer = tgt_cmnd_alloc_buffer,
++	.queue_cmnd = tgt_cmnd_queue,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+
+Deleted: trunk/kernel/tgt_vdev.c
+===================================================================
+--- trunk/kernel/tgt_vdev.c	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt_vdev.c	2005-09-23 00:33:42 UTC (rev 87)
+@@ -1,147 +0,0 @@
+-/*
+- * Target virtual device functions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/uio.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;linux/file.h&gt;
+-#include &lt;linux/writeback.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_device.h&gt;
+-
+-struct tgt_vdev {
+-	struct file *filp;
+-};
+-
+-static void tgt_vdev_destroy(struct tgt_device *device)
+-{
+-	struct tgt_vdev *vdev = device-&gt;dt_data;
+-	fput(vdev-&gt;filp);
+-}
+-
+-static int open_file(struct tgt_vdev *vdev, int fd)
+-{
+-	struct file *filp;
+-
+-	filp = fget(fd);
+-	if (!filp) {
+-		printk(&quot;Could not get fd %d\n&quot;, fd);
+-		return -EINVAL;
+-	}
+-
+-	vdev-&gt;filp = filp;
+-	return 0;
+-}
+-
+-static int tgt_vdev_create(struct tgt_device *device)
+-{
+-	struct tgt_vdev *vdev = device-&gt;dt_data;
+-	struct inode *inode;
+-	int err;
+-
+-	err = open_file(vdev, device-&gt;fd);
+-	if (err)
+-		return err;
+-
+-	inode = vdev-&gt;filp-&gt;f_dentry-&gt;d_inode;
+-	if (S_ISREG(inode-&gt;i_mode))
+-		;
+-	else if (S_ISBLK(inode-&gt;i_mode))
+-		inode = inode-&gt;i_bdev-&gt;bd_inode;
+-	else {
+-		err = -EINVAL;
+-		goto out;
+-	}
+-
+-	device-&gt;size = inode-&gt;i_size;
+-	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+-
+-	return 0;
+-out:
+-	fput(vdev-&gt;filp);
+-	return err;
+-}
+-
+-/*
+- * TODO: We need to redo our scatter lists so they take into account
+- * this common usage, but also not violate HW limits
+- */
+-static struct iovec* sg_to_iovec(struct scatterlist *sg, int sg_count)
+-{
+-	struct iovec* iov;
+-	int i;
+-
+-	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
+-	if (!iov)
+-		return NULL;
+-
+-	for (i = 0; i &lt; sg_count; i++) {
+-		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
+-		iov[i].iov_len = sg[i].length;
+-	}
+-
+-	return iov;
+-}
+-
+-static int tgt_vdev_queue(struct tgt_device *device, struct tgt_cmnd *cmnd)
+-{
+-	struct tgt_vdev *vdev = device-&gt;dt_data;
+-	ssize_t size;
+-	struct iovec *iov;
+-	loff_t pos = cmnd-&gt;offset;
+-	int err = 0;
+-
+-	if (cmnd-&gt;bufflen + pos &gt; device-&gt;size)
+-		return -EOVERFLOW;
+-
+-	iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
+-	if (!iov)
+-		return -ENOMEM;
+-
+-	if (cmnd-&gt;rw == READ)
+-		size = generic_file_readv(vdev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-	else
+-		size = generic_file_writev(vdev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-
+-	kfree(iov);
+-
+-/* not yet used
+-	if (sync)
+-		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
+-				      (size_t) cmnd-&gt;bufflen);
+-*/
+-	if ((size != cmnd-&gt;bufflen) || err)
+-		return -EIO;
+-	else
+-		return 0;
+-}
+-
+-static struct tgt_device_template tgt_vdev = {
+-	.name = &quot;tgt_vdev&quot;,
+-	.module = THIS_MODULE,
+-	.create = tgt_vdev_create,
+-	.destroy = tgt_vdev_destroy,
+-	.queue_cmnd = tgt_vdev_queue,
+-	.priv_data_size = sizeof(struct tgt_vdev),
+-};
+-
+-static int __init tgt_vdev_init(void)
+-{
+-	return tgt_device_template_register(&amp;tgt_vdev);
+-}
+-
+-static void __exit tgt_vdev_exit(void)
+-{
+-	tgt_device_template_unregister(&amp;tgt_vdev);
+-}
+-
+-module_init(tgt_vdev_init);
+-module_exit(tgt_vdev_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+Added: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-09-22 19:48:27 UTC (rev 86)
++++ trunk/kernel/tgt_vsd.c	2005-09-23 00:33:42 UTC (rev 87)
+@@ -0,0 +1,215 @@
++/*
++ * virtual scsi disk functions
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;linux/types.h&gt;
++#include &lt;linux/blkdev.h&gt;
++#include &lt;linux/uio.h&gt;
++#include &lt;linux/fs.h&gt;
++#include &lt;linux/file.h&gt;
++#include &lt;linux/writeback.h&gt;
++
++#include &lt;scsi/scsi.h&gt;
++
++#include &lt;tgt.h&gt;
++#include &lt;tgt_device.h&gt;
++#include &lt;tgt_scsi.h&gt;
++
++static int tgt_vsd_create(struct tgt_device *device)
++{
++	struct inode *inode;
++
++	inode = device-&gt;file-&gt;f_dentry-&gt;d_inode;
++	if (S_ISREG(inode-&gt;i_mode))
++		;
++	else if (S_ISBLK(inode-&gt;i_mode))
++		inode = inode-&gt;i_bdev-&gt;bd_inode;
++	else
++		return -EINVAL;
++
++	device-&gt;size = inode-&gt;i_size;
++	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
++
++	return 0;
++}
++
++/*
++ * is this device specific or common? Should it be moved to the protocol.
++ */
++static void tgt_vsd_prep(struct tgt_cmnd *cmnd)
++{
++	struct scsi_tgt_cmnd *scmnd = tgt_cmnd_to_scsi(cmnd);
++	uint8_t *scb = scmnd-&gt;scb;
++	uint64_t off = 0;
++	uint32_t len = 0;
++
++	/*
++	 * set bufflen and offset
++	 */
++	switch (scb[0]) {
++	case READ_6:
++	case WRITE_6:
++		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
++		len = scb[4];
++		if (!len)
++			len = 256;
++		break;
++	case READ_10:
++	case WRITE_10:
++	case WRITE_VERIFY:
++		off = be32_to_cpu(*(u32 *) &amp;scb[2]);
++		len = (scb[7] &lt;&lt; 8) + scb[8];
++		break;
++	case READ_16:
++	case WRITE_16:
++		off = be64_to_cpu(*(u64 *)&amp;scb[2]);
++		len = be32_to_cpu(*(u32 *)&amp;scb[10]);
++		break;
++	default:
++		break;
++	}
++
++	off &lt;&lt;= 9;
++	len &lt;&lt;= 9;
++
++	cmnd-&gt;bufflen = len;
++	cmnd-&gt;offset = off;
++}
++
++static void tgt_vsd_uspace_complete(struct tgt_cmnd *cmnd)
++{
++	/* userspace did everything for us just copy the buffer */
++	if (cmnd-&gt;result != SAM_STAT_GOOD)
++		scsi_tgt_sense_copy(cmnd);
++}
++
++/*
++ * TODO: We need to redo our scatter lists so they take into account
++ * this common usage, but also not violate HW limits
++ */
++static struct iovec* sg_to_iovec(struct scatterlist *sg, int sg_count)
++{
++	struct iovec* iov;
++	int i;
++
++	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
++	if (!iov)
++		return NULL;
++
++	for (i = 0; i &lt; sg_count; i++) {
++		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
++		iov[i].iov_len = sg[i].length;
++	}
++
++	return iov;
++}
++
++/*
++ * TODO this will move to a io_handler callout
++ */
++static int vsd_queue_file_io(struct tgt_cmnd *cmnd, int op)
++{
++	struct file *file = cmnd-&gt;device-&gt;file;
++	ssize_t size;
++	struct iovec *iov;
++	loff_t pos = cmnd-&gt;offset;
++
++	iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
++	if (!iov)
++		return -ENOMEM;
++
++	if (op == READ)
++		size = generic_file_readv(file, iov, cmnd-&gt;sg_count, &amp;pos);
++	else
++		size = generic_file_writev(file, iov, cmnd-&gt;sg_count, &amp;pos);
++
++	kfree(iov);
++
++/* not yet used
++	if (sync)
++		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
++				      (size_t) cmnd-&gt;bufflen);
++*/
++	return size;
++}
++
++static int tgt_vsd_queue(struct tgt_cmnd *cmnd)
++{
++	struct scsi_tgt_cmnd *scmnd = tgt_cmnd_to_scsi(cmnd);
++	struct tgt_device *device = cmnd-&gt;device;
++	loff_t pos = cmnd-&gt;offset;
++	int err = 0, rw;
++
++	if (cmnd-&gt;bufflen + pos &gt; device-&gt;size) {
++		scsi_tgt_sense_data_build(cmnd, HARDWARE_ERROR, 0, 0);
++		return TGT_CMND_FAILED;
++	}
++
++	switch (scmnd-&gt;scb[0]) {
++	case READ_6:
++	case READ_10:
++	case READ_16:
++		rw = READ;
++		break;
++	case WRITE_6:
++	case WRITE_10:
++	case WRITE_16:
++	case WRITE_VERIFY:
++		rw = WRITE;
++		break;
++	default:
++		err = tgt_uspace_cmnd_send(cmnd);
++		/*
++		 * successfully queued
++		 */
++		if (err &gt;= 0)
++			return TGT_CMND_USPACE_QUEUED;
++
++		scsi_tgt_sense_data_build(cmnd, HARDWARE_ERROR, 0, 0);
++		return TGT_CMND_FAILED;
++	};
++
++	/*
++	 * TODO this will become device-&gt;io_handler-&gt;queue_cmnd
++	 * when we seperate the io_handlers
++	 */
++	err = vsd_queue_file_io(cmnd, rw);
++	/*
++	 * we should to a switch but I am not sure of all the err values
++	 * returned. If you find one add it
++	 */
++	if (err != cmnd-&gt;bufflen) {
++		scsi_tgt_sense_data_build(cmnd, HARDWARE_ERROR, 0, 0);
++		return TGT_CMND_FAILED;
++	} else {
++		cmnd-&gt;result = SAM_STAT_GOOD;
++		return TGT_CMND_COMPLETED;
++	}
++}
++
++static struct tgt_device_template tgt_vsd = {
++	.name = &quot;tgt_vsd&quot;,
++	.module = THIS_MODULE,
++	.create = tgt_vsd_create,
++	.queue_cmnd = tgt_vsd_queue,
++	.prep_cmnd = tgt_vsd_prep,
++	.complete_uspace_cmnd = tgt_vsd_uspace_complete,
++};
++
++static int __init tgt_vsd_init(void)
++{
++	return tgt_device_template_register(&amp;tgt_vsd);
++}
++
++static void __exit tgt_vsd_exit(void)
++{
++	tgt_device_template_unregister(&amp;tgt_vsd);
++}
++
++module_init(tgt_vsd_init);
++module_exit(tgt_vsd_exit);
++MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000079.html">[Stgt-svn] r86 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000081.html">[Stgt-svn] r88 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#80">[ date ]</a>
+              <a href="thread.html#80">[ thread ]</a>
+              <a href="subject.html#80">[ subject ]</a>
+              <a href="author.html#80">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

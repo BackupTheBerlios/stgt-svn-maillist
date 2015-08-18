@@ -1,0 +1,283 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r537 - branches/user-iscsi/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r537%20-%20branches/user-iscsi/usr/iscsi&In-Reply-To=%3C200608201954.k7KJsRP9031405%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000523.html">
+   <LINK REL="Next"  HREF="000525.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r537 - branches/user-iscsi/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r537%20-%20branches/user-iscsi/usr/iscsi&In-Reply-To=%3C200608201954.k7KJsRP9031405%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r537 - branches/user-iscsi/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Aug 20 21:54:27 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000523.html">[Stgt-svn] r536 - in branches/user-iscsi: . usr usr/include
+</A></li>
+        <LI>Next message: <A HREF="000525.html">[Stgt-svn] r538 - branches/user-iscsi/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#524">[ date ]</a>
+              <a href="thread.html#524">[ thread ]</a>
+              <a href="subject.html#524">[ subject ]</a>
+              <a href="author.html#524">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-20 21:54:26 +0200 (Sun, 20 Aug 2006)
+New Revision: 537
+
+Modified:
+   branches/user-iscsi/usr/iscsi/conn.c
+   branches/user-iscsi/usr/iscsi/iscsid.c
+   branches/user-iscsi/usr/iscsi/iscsid.h
+   branches/user-iscsi/usr/iscsi/istgt.c
+Log:
+Honor max burst about data response.
+
+
+Modified: branches/user-iscsi/usr/iscsi/conn.c
+===================================================================
+--- branches/user-iscsi/usr/iscsi/conn.c	2006-08-20 19:15:18 UTC (rev 536)
++++ branches/user-iscsi/usr/iscsi/conn.c	2006-08-20 19:54:26 UTC (rev 537)
+@@ -105,10 +105,11 @@
+ 	conn-&gt;rwsize = BHS_SIZE;
+ }
+ 
+-void conn_write_pdu(struct connection *conn)
++void conn_write_pdu(struct connection *conn, int clear)
+ {
+ 	conn-&gt;tx_iostate = IOSTATE_WRITE_BHS;
+-	memset(&amp;conn-&gt;rsp, 0, sizeof(conn-&gt;rsp));
++	if (clear)
++		memset(&amp;conn-&gt;rsp, 0, sizeof(conn-&gt;rsp));
+ 	conn-&gt;buffer = (void *)&amp;conn-&gt;rsp.bhs;
+ 	conn-&gt;rwsize = BHS_SIZE;
+ }
+
+Modified: branches/user-iscsi/usr/iscsi/iscsid.c
+===================================================================
+--- branches/user-iscsi/usr/iscsi/iscsid.c	2006-08-20 19:15:18 UTC (rev 536)
++++ branches/user-iscsi/usr/iscsi/iscsid.c	2006-08-20 19:54:26 UTC (rev 537)
+@@ -782,6 +782,7 @@
+ 	struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;ctask-&gt;req;
+ 	int residual, datalen, exp_datalen = ntohl(req-&gt;data_length);
++	int max_burst = conn-&gt;session_param[ISCSI_PARAM_MAX_XMIT_DLENGTH].val;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_DATA_IN;
+@@ -794,22 +795,24 @@
+ 	rsp-&gt;cmd_status = ctask-&gt;result;
+ 
+ 	datalen = min(exp_datalen, ctask-&gt;len);
+-	if (datalen &gt; conn-&gt;session_param[ISCSI_PARAM_MAX_XMIT_DLENGTH].val)
+-		eprintf(&quot;cannot handle %d %d %d %d\n&quot;,
+-			datalen, exp_datalen, ctask-&gt;len,
+-			conn-&gt;session_param[ISCSI_PARAM_MAX_XMIT_DLENGTH].val);
++	datalen -= ctask-&gt;offset;
+ 
+-	rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
+-	if (ctask-&gt;len &lt; exp_datalen) {
+-		rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
+-		residual = exp_datalen - ctask-&gt;len;
+-	} else if (ctask-&gt;len &gt; exp_datalen) {
+-		rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
+-		residual = ctask-&gt;len - exp_datalen;
++	dprintf(&quot;%d %d %d %d\n&quot;, datalen, exp_datalen, ctask-&gt;len, max_burst);
++
++	if (datalen &lt;= max_burst) {
++		rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
++		if (ctask-&gt;len &lt; exp_datalen) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
++			residual = exp_datalen - ctask-&gt;len;
++		} else if (ctask-&gt;len &gt; exp_datalen) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
++			residual = ctask-&gt;len - exp_datalen;
++		} else
++			residual = 0;
++		rsp-&gt;residual_count = cpu_to_be32(residual);
+ 	} else
+-		residual = 0;
++		datalen = max_burst;
+ 
+-	rsp-&gt;residual_count = cpu_to_be32(residual);
+ 	if (rsp-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
+ 		rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
+ 	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+@@ -818,7 +821,10 @@
+ 	conn-&gt;rsp.datasize = datalen;
+ 	hton24(rsp-&gt;dlength, datalen);
+ 	conn-&gt;rsp.data = (void *) (unsigned long) ctask-&gt;addr;
++	conn-&gt;rsp.data += ctask-&gt;offset;
+ 
++	ctask-&gt;offset += datalen;
++
+ 	return 0;
+ }
+ 
+@@ -1021,13 +1027,21 @@
+ 	return 0;
+ }
+ 
+-void iscsi_cmd_tx_done(struct connection *conn)
++void iscsi_cmd_tx_done(struct connection *conn, int *more_rsp)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;rsp.bhs;
+ 
++	*more_rsp = 0;
++
+ 	switch (hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK) {
+ 	case ISCSI_OP_R2T:
+ 		break;
++	case ISCSI_OP_SCSI_DATA_IN:
++		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)) {
++			iscsi_data_rsp_build(conn-&gt;ctask);
++			*more_rsp = 1;
++			return;
++		}
+ 	default:
+ 		target_cmd_done(conn-&gt;session-&gt;tsih, conn-&gt;ctask-&gt;tag);
+ 		list_del(&amp;conn-&gt;ctask-&gt;c_hlist);
+
+Modified: branches/user-iscsi/usr/iscsi/iscsid.h
+===================================================================
+--- branches/user-iscsi/usr/iscsi/iscsid.h	2006-08-20 19:15:18 UTC (rev 536)
++++ branches/user-iscsi/usr/iscsi/iscsid.h	2006-08-20 19:54:26 UTC (rev 537)
+@@ -195,7 +195,7 @@
+ extern struct connection * conn_find(struct session *session, uint32_t cid);
+ extern int conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+-extern void conn_write_pdu(struct connection *conn);
++extern void conn_write_pdu(struct connection *conn, int clear);
+ extern void conn_free_pdu(struct connection *conn);
+ extern void conn_add_to_session(struct connection *conn, struct session *session);
+ 
+@@ -208,7 +208,7 @@
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ extern int iscsi_cmd_rx_start(struct connection *conn);
+ extern int iscsi_cmd_rx_done(struct connection *conn, int *is_rsp);
+-extern void iscsi_cmd_tx_done(struct connection *conn);
++extern void iscsi_cmd_tx_done(struct connection *conn, int *more_rsp);
+ 
+ /* session.c */
+ extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
+@@ -222,36 +222,6 @@
+ extern void target_list_build(struct connection *, char *, char *);
+ extern int target_bind(int tid, int hostno);
+ 
+-/* netlink.c */
+-struct iscsi_kernel_interface {
+-	int (*set_param) (uint64_t transport_handle, uint32_t sid,
+-			  uint32_t cid, enum iscsi_param param,
+-			  void *value, int len, int *retcode);
+-
+-	int (*create_session) (uint64_t transport_handle,
+-			       uint32_t initial_cmdsn,
+-			       uint32_t *out_sid, uint32_t *out_hostno);
+-
+-	int (*destroy_session) (uint64_t transport_handle, uint32_t sid);
+-
+-	int (*create_conn) (uint64_t transport_handle,
+-			    uint32_t sid, uint32_t cid, uint32_t *out_cid);
+-	int (*destroy_conn) (uint64_t transport_handle, uint32_t sid,
+-			     uint32_t cid);
+-	int (*bind_conn) (uint64_t transport_handle, uint32_t sid,
+-			  uint32_t cid, uint64_t transport_eph,
+-			  int is_leading, int *retcode);
+-	int (*start_conn) (uint64_t transport_handle, uint32_t sid,
+-			   uint32_t cid, int *retcode);
+-
+-	int (*stop_conn) (uint64_t transport_handle, uint32_t sid,
+-			  uint32_t cid, int flag);
+-};
+-
+-extern int iscsi_nl_init(void);
+-
+-extern struct iscsi_kernel_interface *ki;
+-
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+ 
+
+Modified: branches/user-iscsi/usr/iscsi/istgt.c
+===================================================================
+--- branches/user-iscsi/usr/iscsi/istgt.c	2006-08-20 19:15:18 UTC (rev 536)
++++ branches/user-iscsi/usr/iscsi/istgt.c	2006-08-20 19:54:26 UTC (rev 537)
+@@ -220,7 +220,7 @@
+ 
+ 				dprintf(&quot;done\n&quot;);
+ 
+-				conn_write_pdu(conn);
++				conn_write_pdu(conn, 0);
+ 				pfd-&gt;events = POLLOUT;
+ 				res = iscsi_cmd_rx_done(conn, &amp;rsp);
+ 				if (!res &amp;&amp; !rsp) {
+@@ -228,7 +228,7 @@
+ 					pfd-&gt;events = POLLIN;
+ 				}
+ 			} else {
+-				conn_write_pdu(conn);
++				conn_write_pdu(conn, 1);
+ 				pfd-&gt;events = POLLOUT;
+ 				res = cmnd_execute(conn);
+ 			}
+@@ -243,7 +243,7 @@
+ 
+ static void iscsi_tx(struct pollfd *pfd, struct connection *conn)
+ {
+-	int opt, res;
++	int opt, res, more_rsp;
+ 
+ 	switch (conn-&gt;tx_iostate) {
+ 	case IOSTATE_WRITE_BHS:
+@@ -311,7 +311,11 @@
+ 			case STATE_CLOSE:
+ 				break;
+ 			case STATE_SCSI:
+-				iscsi_cmd_tx_done(conn);
++				iscsi_cmd_tx_done(conn, &amp;more_rsp);
++				if (more_rsp) {
++					conn_write_pdu(conn, 0);
++					goto write_again;
++				}
+ 			default:
+ 				conn_read_pdu(conn);
+ 				pfd-&gt;events = POLLIN;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000523.html">[Stgt-svn] r536 - in branches/user-iscsi: . usr usr/include
+</A></li>
+	<LI>Next message: <A HREF="000525.html">[Stgt-svn] r538 - branches/user-iscsi/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#524">[ date ]</a>
+              <a href="thread.html#524">[ thread ]</a>
+              <a href="subject.html#524">[ subject ]</a>
+              <a href="author.html#524">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

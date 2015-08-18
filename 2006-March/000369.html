@@ -1,0 +1,278 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r382 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r382%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200603140711.k2E7BbFn014088%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000368.html">
+   <LINK REL="Next"  HREF="000370.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r382 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r382%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200603140711.k2E7BbFn014088%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r382 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Mar 14 08:11:37 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000368.html">[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr
+</A></li>
+        <LI>Next message: <A HREF="000370.html">[Stgt-svn] r383 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#369">[ date ]</a>
+              <a href="thread.html#369">[ thread ]</a>
+              <a href="subject.html#369">[ subject ]</a>
+              <a href="author.html#369">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-14 08:11:28 +0100 (Tue, 14 Mar 2006)
+New Revision: 382
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+   branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+Log:
+Add TMF support (not completed yet). Currently only ABORT_TASK request is supported.
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-03-13 23:12:45 UTC (rev 381)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-03-14 07:11:28 UTC (rev 382)
+@@ -86,9 +86,11 @@
+ 	memcpy(ev-&gt;k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev-&gt;k.cmd_req.scb));
+ 	memcpy(ev-&gt;k.cmd_req.lun, lun, sizeof(ev-&gt;k.cmd_req.lun));
+ 	ev-&gt;k.cmd_req.attribute = cmd-&gt;tag;
++	ev-&gt;k.cmd_req.tag = *((u64 *) (cmd-&gt;sense_buffer));
+ 
+-	dprintk(&quot;%p %d %u %u %x\n&quot;, cmd, shost-&gt;host_no, ev-&gt;k.cmd_req.cid,
+-		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag);
++	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev-&gt;k.cmd_req.cid,
++		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag,
++		(unsigned long long) ev-&gt;k.cmd_req.tag);
+ 
+ 	err = netlink_unicast(nl_sk, skb, tgtd_pid, gfp_mask &amp; GFP_ATOMIC);
+ 	if (err &lt; 0)
+@@ -109,6 +111,24 @@
+ 	return send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev, gfp_mask, tgtd_pid);
+ }
+ 
++int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
++				  struct scsi_lun *scsilun, void *data)
++{
++	struct tgt_event ev;
++
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.tsk_mgmt_req.host_no = host_no;
++	ev.k.tsk_mgmt_req.function = function;
++	ev.k.tsk_mgmt_req.tag = tag;
++	memcpy(ev.k.tsk_mgmt_req.lun, scsilun, sizeof(ev.k.tsk_mgmt_req.lun));
++	ev.k.tsk_mgmt_req.mid = (u64) data;
++
++	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
++		(unsigned long long) ev.k.tsk_mgmt_req.mid);
++
++	return send_event_rsp(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev, GFP_KERNEL, tgtd_pid);
++}
++
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	struct tgt_event *ev = NLMSG_DATA(nlh);
+@@ -130,6 +150,11 @@
+ 					   ev-&gt;u.cmd_rsp.uaddr,
+ 					   ev-&gt;u.cmd_rsp.rw);
+ 		break;
++	case TGT_UEVENT_TSK_MGMT_RSP:
++		err = scsi_tgt_kspace_tsk_mgmt(ev-&gt;u.tsk_mgmt_rsp.host_no,
++					       ev-&gt;u.tsk_mgmt_rsp.mid,
++					       ev-&gt;u.tsk_mgmt_rsp.result);
++		break;
+ 	default:
+ 		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+ 		err = -EINVAL;
+@@ -143,6 +168,7 @@
+ 	int err;
+ 	uint32_t rlen;
+ 	struct nlmsghdr	*nlh;
++	struct tgt_event ev;
+ 
+ 	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+ 		nlh = (struct nlmsghdr *) skb-&gt;data;
+@@ -158,9 +184,11 @@
+ 		 * TODO for passthru commands the lower level should
+ 		 * probably handle the result or we should modify this
+ 		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RSP) {
+-			struct tgt_event ev;
+-
++		switch (nlh-&gt;nlmsg_type) {
++		case TGT_UEVENT_CMD_RSP:
++		case TGT_UEVENT_TSK_MGMT_RSP:
++			break;
++		default:
+ 			memset(&amp;ev, 0, sizeof(ev));
+ 			ev.k.event_rsp.err = err;
+ 			send_event_rsp(TGT_KEVENT_RSP, &amp;ev,
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-03-13 23:12:45 UTC (rev 381)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-03-14 07:11:28 UTC (rev 382)
+@@ -107,7 +107,6 @@
+ 		cmd-&gt;request-&gt;flags &amp;= ~1UL;
+ 
+ 	scsi_unmap_user_pages(tcmd);
+-	scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+ 	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+ 	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+ }
+@@ -270,13 +269,15 @@
+  * @noblock:	set to nonzero if the command should be queued
+  **/
+ void scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+-			    int noblock)
++			    u64 tag)
+ {
+ 	struct request_queue *q = cmd-&gt;request-&gt;q;
+ 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+ 	unsigned long flags;
+ 
+ 	cmd-&gt;request-&gt;end_io_data = scsilun;
++	/* FIXME */
++	*((u64 *) (cmd-&gt;sense_buffer)) = tag;
+ 
+ 	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+ 	list_add_tail(&amp;cmd-&gt;request-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+@@ -296,12 +297,7 @@
+ 
+ 	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+ 
+-	/* don't we have to call this if result is set or not */
+-	if (cmd-&gt;result) {
+-		scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+-		return;
+-	}
+-
++	scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+ 	INIT_WORK(&amp;tcmd-&gt;work, scsi_tgt_cmd_destroy, cmd);
+ 	queue_work(scsi_tgtd, &amp;tcmd-&gt;work);
+ }
+@@ -498,6 +494,18 @@
+ 	return 0;
+ }
+ 
++static int scsi_tgt_abort_cmd(struct Scsi_Host *host, struct scsi_cmnd *cmd)
++{
++	int err;
++
++	err = host-&gt;hostt-&gt;eh_abort_handler(cmd);
++	if (err)
++		eprintk(&quot;fail to abort %p\n&quot;, cmd);
++
++	scsi_tgt_cmd_destroy(cmd);
++	return err;
++}
++
+ static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u32 cid)
+ {
+ 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+@@ -549,6 +557,10 @@
+ 	dprintk(&quot;cmd %p result %d len %d bufflen %u %lu %x\n&quot;, cmd,
+ 		result, len, cmd-&gt;request_bufflen, rq_data_dir(rq), cmd-&gt;cmnd[0]);
+ 
++	if (result == TASK_ABORTED) {
++		scsi_tgt_abort_cmd(shost, cmd);
++		goto done;
++	}
+ 	/*
+ 	 * store the userspace values here, the working values are
+ 	 * in the request_* values
+@@ -588,6 +600,38 @@
+ 	return err;
+ }
+ 
++int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *shost, int function, u64 tag,
++			      struct scsi_lun *scsilun, void *data)
++{
++	int err;
++
++	/* TODO: need to retry if this fails. */
++	err = scsi_tgt_uspace_send_tsk_mgmt(shost-&gt;host_no, function,
++					    tag, scsilun, data);
++	if (err &lt; 0)
++		eprintk(&quot;The task management request lost!\n&quot;);
++	return err;
++}
++EXPORT_SYMBOL_GPL(scsi_tgt_tsk_mgmt_request);
++
++int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result)
++{
++	struct Scsi_Host *shost;
++	int err;
++
++	dprintk(&quot;%d %d %llx\n&quot;, host_no, result, (unsigned long long) mid);
++
++	shost = scsi_host_lookup(host_no);
++	if (IS_ERR(shost)) {
++		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
++		return -EINVAL;
++	}
++	err = shost-&gt;hostt-&gt;tsk_mgmt_response(mid, result);
++	scsi_host_put(shost);
++
++	return err;
++}
++
+ static int __init scsi_tgt_init(void)
+ {
+ 	int err;
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-03-13 23:12:45 UTC (rev 381)
++++ branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-03-14 07:11:28 UTC (rev 382)
+@@ -19,4 +19,6 @@
+ extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+ extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+ 				unsigned long uaddr, u8 rw);
+-
++extern int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
++					 struct scsi_lun *scsilun, void *data);
++extern int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000368.html">[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr
+</A></li>
+	<LI>Next message: <A HREF="000370.html">[Stgt-svn] r383 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#369">[ date ]</a>
+              <a href="thread.html#369">[ thread ]</a>
+              <a href="subject.html#369">[ subject ]</a>
+              <a href="author.html#369">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

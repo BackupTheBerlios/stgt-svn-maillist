@@ -1,0 +1,146 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r47 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r47%20-%20trunk/kernel&In-Reply-To=%3C200509071138.j87Bc4X3002515%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000039.html">
+   <LINK REL="Next"  HREF="000041.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r47 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r47%20-%20trunk/kernel&In-Reply-To=%3C200509071138.j87Bc4X3002515%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r47 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Sep  7 13:38:04 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000039.html">[Stgt-svn] r46 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000041.html">[Stgt-svn] r48 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#40">[ date ]</a>
+              <a href="thread.html#40">[ thread ]</a>
+              <a href="subject.html#40">[ subject ]</a>
+              <a href="author.html#40">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-07 13:38:03 +0200 (Wed, 07 Sep 2005)
+New Revision: 47
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt_target.h
+Log:
+Use a work queue per target instead of keventd.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-06 03:19:42 UTC (rev 46)
++++ trunk/kernel/stgt.c	2005-09-07 11:38:03 UTC (rev 47)
+@@ -134,7 +134,7 @@
+ 	list_add_tail(&amp;work-&gt;list, &amp;target-&gt;work_list);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	schedule_work(&amp;target-&gt;work);
++	queue_work(target-&gt;twq, &amp;target-&gt;work);
+ }
+ 
+ struct target_type_internal {
+@@ -232,6 +232,7 @@
+ 
+ struct stgt_target *stgt_target_create(char *target_type, int queued_cmnds)
+ {
++	char name[16];
+ 	static int target_id;
+ 	struct stgt_target *target;
+ 	struct target_type_internal *tti;
+@@ -263,14 +264,21 @@
+ 	INIT_WORK(&amp;target-&gt;work, stgt_worker, target);
+ 	target-&gt;queued_cmnds = queued_cmnds;
+ 
+-	if (stgt_sysfs_register_target(target))
++	snprintf(name, sizeof(name), &quot;tgtd%d&quot;, target-&gt;tid);
++	target-&gt;twq = create_workqueue(name);
++	if (!target-&gt;twq)
+ 		goto put_template;
+ 
++	if (stgt_sysfs_register_target(target))
++		goto free_workqueue;
++
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+ 	spin_unlock(&amp;all_targets_lock);
+ 	return target;
+ 
++free_workqueue:
++	destroy_workqueue(target-&gt;twq);
+ put_template:
+ 	target_template_put(target-&gt;stt);
+ free_target:
+@@ -287,6 +295,7 @@
+ 	list_del(&amp;target-&gt;tlist);
+ 	spin_unlock(&amp;all_targets_lock);
+ 
++	destroy_workqueue(target-&gt;twq);
+ 	target_template_put(target-&gt;stt);
+ 	stgt_sysfs_unregister_target(target);
+ 
+@@ -370,7 +379,7 @@
+ 	list_add(&amp;ssa-&gt;list, &amp;atomic_sessions);
+ 	spin_unlock_irqrestore(&amp;atomic_sessions_lock, flags);
+ 
+-	schedule_work(&amp;atomic_session_work);
++	queue_work(session-&gt;target-&gt;twq, &amp;atomic_session_work);
+ 
+ 	return 0;
+ }
+
+Modified: trunk/kernel/stgt_target.h
+===================================================================
+--- trunk/kernel/stgt_target.h	2005-09-06 03:19:42 UTC (rev 46)
++++ trunk/kernel/stgt_target.h	2005-09-07 11:38:03 UTC (rev 47)
+@@ -47,6 +47,7 @@
+ 
+ 	struct work_struct work;
+ 	struct list_head work_list;
++	struct workqueue_struct *twq;
+ };
+ 
+ #define cdev_to_stgt_target(cdev) \
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000039.html">[Stgt-svn] r46 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000041.html">[Stgt-svn] r48 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#40">[ date ]</a>
+              <a href="thread.html#40">[ thread ]</a>
+              <a href="subject.html#40">[ subject ]</a>
+              <a href="author.html#40">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

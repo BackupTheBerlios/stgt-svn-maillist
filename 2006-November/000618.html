@@ -1,0 +1,277 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r631 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r631%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611101832.kAAIWqsS020083%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000617.html">
+   <LINK REL="Next"  HREF="000619.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r631 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r631%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611101832.kAAIWqsS020083%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r631 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 10 19:32:52 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000617.html">[Stgt-svn] r630 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000619.html">[Stgt-svn] r632 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#618">[ date ]</a>
+              <a href="thread.html#618">[ thread ]</a>
+              <a href="subject.html#618">[ subject ]</a>
+              <a href="author.html#618">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-10 19:32:51 +0100 (Fri, 10 Nov 2006)
+New Revision: 631
+
+Modified:
+   trunk/usr/iscsi/target.c
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+Log:
+Chage show interface. When you specify target id, you get the details (lld specific).
+
+lily:/home/fujita# ./tgt/usr/tgtadm --op show --lld iscsi
+tid 1: lld name iscsi
+        lun 0: path /dev/hdc1
+
+lily:/home/fujita# ./tgt/usr/tgtadm --op show --lld iscsi --tid 1
+tid: 1 iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+MaxRecvDataSegmentLength=8192
+MaxXmitDataSegmentLength=8192
+HeaderDigest=None
+DataDigest=None
+InitialR2T=Yes
+MaxOutstandingR2T=1
+ImmediateData=Yes
+FirstBurstLength=65536
+MaxBurstLength=262144
+DataPDUInOrder=Yes
+DataSequenceInOrder=Yes
+ErrorRecoveryLevel=0
+IFMarker=No
+OFMarker=No
+DefaultTime2Wait=2
+DefaultTime2Retain=20
+OFMarkInt=Reject
+IFMarkInt=Reject
+MaxConnections=1
+
+
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-10 16:41:58 UTC (rev 630)
++++ trunk/usr/iscsi/target.c	2006-11-10 18:32:51 UTC (rev 631)
+@@ -161,13 +161,39 @@
+ 	return 0;
+ }
+ 
++static int show_iscsi_param(char *buf, struct param *param, int rest)
++{
++	int i, len, total;
++	char value[64];
++	struct iscsi_key *keys = session_keys;
+ 
++	for (i = total = 0; session_keys[i].name; i++) {
++		param_val_to_str(keys, i, param[i].val, value);
++		len = snprintf(buf + total, rest, &quot;%s=%s\n&quot;, keys[i].name, value);
++		total += len;
++		rest -= len;
++		if (!rest)
++			break;
++	}
++
++	return total;
++}
++
+ int iscsi_target_show(int tid, char *buf, int rest)
+ {
+ 	struct target* target;
++	int len;
+ 
+-	if (!(target = target_find_by_id(tid)))
++	target = target_find_by_id(tid);
++	if (!target)
+ 		return 0;
+ 
+-	return snprintf(buf, rest, &quot;: %s\n&quot;, target-&gt;name);
++	len = snprintf(buf, rest, &quot;tid: %d %s\n&quot;, target-&gt;tid, target-&gt;name);
++	rest -= len;
++	if (!rest)
++		goto out;
++
++	len += show_iscsi_param(buf + len, target-&gt;session_param, rest);
++out:
++	return len;
+ }
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-10 16:41:58 UTC (rev 630)
++++ trunk/usr/mgmt.c	2006-11-10 18:32:51 UTC (rev 631)
+@@ -139,9 +139,18 @@
+ 		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
+ 
+ 	if (req-&gt;op == OP_SHOW) {
+-		err = tgt_target_show((char *)res-&gt;data, len - sizeof(*res));
+-		res-&gt;err = 0;
+-		res-&gt;len = len - err;
++		if (req-&gt;tid &gt; 0)
++			err = tgt_target_show(req-&gt;tid, (char *)res-&gt;data,
++					      len - sizeof(*res));
++		else
++			err = tgt_target_show_all((char *)res-&gt;data,
++						  len - sizeof(*res));
++		if (err &lt; 0)
++			res-&gt;err = err;
++		else {
++			res-&gt;err = 0;
++			res-&gt;len = err + sizeof(*res);
++		}
+ 		dprintf(&quot;%d %d\n&quot;, len, err);
+ 		return 0;
+ 	}
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-10 16:41:58 UTC (rev 630)
++++ trunk/usr/target.c	2006-11-10 18:32:51 UTC (rev 631)
+@@ -620,35 +620,42 @@
+ 	return 0;
+ }
+ 
+-int tgt_target_show(char *buf, int rest)
++int tgt_target_show(int tid, char *buf, int rest)
+ {
+-	int i, len;
++	int len = 0;
+ 	struct target *target;
++
++	target  = target_lookup(tid);
++	if (!target)
++		goto out;
++
++	if (tgt_drivers[target-&gt;lid]-&gt;target_show)
++		len = tgt_drivers[target-&gt;lid]-&gt;target_show(target-&gt;tid, buf, rest);
++out:
++	return len;
++}
++
++int tgt_target_show_all(char *buf, int rest)
++{
++	int i, len, total;
++	struct target *target;
+ 	struct tgt_device *device;
+-	int (*show)(int, char *, int);
+ 
+-	for (i = 0; i &lt; ARRAY_SIZE(target_hash_list); i++) {
++	for (i = total = 0; i &lt; ARRAY_SIZE(target_hash_list); i++) {
+ 		list_for_each_entry(target, &amp;target_hash_list[i], t_hlist) {
+-			len = snprintf(buf, rest, &quot;tid %d: lld %s&quot;, target-&gt;tid,
+-				       tgt_drivers[target-&gt;lid]-&gt;name);
++			len = snprintf(buf, rest, &quot;tid %d: lld name %s\n&quot;,
++				       target-&gt;tid, tgt_drivers[target-&gt;lid]-&gt;name);
+ 			buf += len;
++			total += len;
+ 			rest -= len;
+ 			if (!rest)
+ 				goto out;
+ 
+-			if (tgt_drivers[target-&gt;lid]-&gt;target_show) {
+-				show = tgt_drivers[target-&gt;lid]-&gt;target_show;
+-				len = show(target-&gt;tid, buf, rest);
+-				buf += len;
+-				rest -= len;
+-				if (!rest)
+-					goto out;
+-			}
+-
+ 			list_for_each_entry(device, &amp;target-&gt;device_list, d_list) {
+ 				len = snprintf(buf, rest, &quot;\tlun %&quot; PRIu64 &quot;: path %s\n&quot;,
+ 					       device-&gt;lun, device-&gt;path);
+ 				buf += len;
++				total += len;
+ 				rest -= len;
+ 				if (!rest)
+ 					goto out;
+@@ -656,7 +663,7 @@
+ 		}
+ 	}
+ out:
+-	return rest;
++	return total;
+ }
+ 
+ __attribute__((constructor)) static void target_init(void)
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-11-10 16:41:58 UTC (rev 630)
++++ trunk/usr/tgtadm.h	2006-11-10 18:32:51 UTC (rev 631)
+@@ -27,7 +27,7 @@
+ 	enum tgtadm_op op;
+ 	uint32_t len;
+ 
+-	uint32_t tid;
++	int32_t tid;
+ 	uint64_t sid;
+ 	uint32_t cid;
+ 	uint64_t lun;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-11-10 16:41:58 UTC (rev 630)
++++ trunk/usr/tgtd.h	2006-11-10 18:32:51 UTC (rev 631)
+@@ -48,7 +48,8 @@
+ extern int tgt_target_create(int tid);
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+-extern int tgt_target_show(char *buf, int rest);
++extern int tgt_target_show_all(char *buf, int rest);
++extern int tgt_target_show(int tid, char *buf, int rest);
+ 
+ typedef void (event_handler_t)(int fd, int events, void *data);
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000617.html">[Stgt-svn] r630 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000619.html">[Stgt-svn] r632 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#618">[ date ]</a>
+              <a href="thread.html#618">[ thread ]</a>
+              <a href="subject.html#618">[ subject ]</a>
+              <a href="author.html#618">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

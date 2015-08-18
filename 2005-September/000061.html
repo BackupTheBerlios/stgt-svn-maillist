@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r71 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r71%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509120924.j8C9OqS8006273%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000060.html">
+   <LINK REL="Next"  HREF="000062.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r71 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r71%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509120924.j8C9OqS8006273%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r71 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Mon Sep 12 11:24:52 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000060.html">[Stgt-svn] r70 - in trunk: iscsi/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000062.html">[Stgt-svn] r72 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#61">[ date ]</a>
+              <a href="thread.html#61">[ thread ]</a>
+              <a href="subject.html#61">[ subject ]</a>
+              <a href="author.html#61">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-12 11:24:52 +0200 (Mon, 12 Sep 2005)
+New Revision: 71
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+Log:
+Forget to remove unnecessary debug code.
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-12 09:10:48 UTC (rev 70)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-12 09:24:52 UTC (rev 71)
+@@ -1604,8 +1604,6 @@
+ 	if (!iscsi_cmnd_cache)
+ 		goto err;
+ 
+-	eprintk(&quot;%d %Zd\n&quot;, iet_tgt_target_template.priv_data_size, sizeof(struct iscsi_target));
+-
+ 	err = tgt_target_template_register(&amp;iet_tgt_target_template);
+ 	if (err &lt; 0)
+ 		goto err;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000060.html">[Stgt-svn] r70 - in trunk: iscsi/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000062.html">[Stgt-svn] r72 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#61">[ date ]</a>
+              <a href="thread.html#61">[ thread ]</a>
+              <a href="subject.html#61">[ subject ]</a>
+              <a href="author.html#61">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

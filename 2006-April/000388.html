@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r401 - branches/use-scsi-ml/ibmvstgt
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r401%20-%20branches/use-scsi-ml/ibmvstgt&In-Reply-To=%3C200604081118.k38BI1ql014889%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000387.html">
+   <LINK REL="Next"  HREF="000389.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r401 - branches/use-scsi-ml/ibmvstgt</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r401%20-%20branches/use-scsi-ml/ibmvstgt&In-Reply-To=%3C200604081118.k38BI1ql014889%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r401 - branches/use-scsi-ml/ibmvstgt">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr  8 13:18:01 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000387.html">[Stgt-svn] r400 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000389.html">[Stgt-svn] r402 - in branches/use-scsi-ml: . patchset patchset/broken-out
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#388">[ date ]</a>
+              <a href="thread.html#388">[ thread ]</a>
+              <a href="subject.html#388">[ subject ]</a>
+              <a href="author.html#388">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-08 13:17:57 +0200 (Sat, 08 Apr 2006)
+New Revision: 401
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/Makefile
+Log:
+Fix ibmvstgt Makefile.
+
+Modified: branches/use-scsi-ml/ibmvstgt/Makefile
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/Makefile	2006-04-08 11:17:20 UTC (rev 400)
++++ branches/use-scsi-ml/ibmvstgt/Makefile	2006-04-08 11:17:57 UTC (rev 401)
+@@ -4,7 +4,7 @@
+ 	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+ endif
+ 
+-all: mods usr
++all: mods libs
+ 
+ mods:
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel modules
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000387.html">[Stgt-svn] r400 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000389.html">[Stgt-svn] r402 - in branches/use-scsi-ml: . patchset patchset/broken-out
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#388">[ date ]</a>
+              <a href="thread.html#388">[ thread ]</a>
+              <a href="subject.html#388">[ subject ]</a>
+              <a href="author.html#388">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

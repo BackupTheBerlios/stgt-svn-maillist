@@ -1,0 +1,399 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r549 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r549%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608280909.k7S99X9w009977%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000535.html">
+   <LINK REL="Next"  HREF="000537.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r549 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r549%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608280909.k7S99X9w009977%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r549 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Aug 28 11:09:33 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000535.html">[Stgt-svn] r548 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000537.html">[Stgt-svn] r550 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#536">[ date ]</a>
+              <a href="thread.html#536">[ thread ]</a>
+              <a href="subject.html#536">[ subject ]</a>
+              <a href="author.html#536">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-28 11:09:32 +0200 (Mon, 28 Aug 2006)
+New Revision: 549
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/mmapio.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/util.c
+   trunk/usr/util.h
+Log:
+Add mmap open and close operations.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/driver.h	2006-08-28 09:09:32 UTC (rev 549)
+@@ -1,4 +1,4 @@
+-extern struct backedio_operations mmap_bdops;
++extern struct backedio_template mmap_bdt;
+ 
+ struct tgt_driver {
+ 	const char *name;
+@@ -17,7 +17,7 @@
+ 	int enable;
+ 	int pfd_index;
+ 
+-	struct backedio_operations *io_ops;
++	struct backedio_template *bdt;
+ };
+ 
+ extern struct tgt_driver *tgt_drivers[];
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/ibmvio/ibmvio.h	2006-08-28 09:09:32 UTC (rev 549)
+@@ -10,5 +10,5 @@
+ 	.scsi_get_lun		= scsi_lun_to_int,
+ 	.scsi_report_luns	= scsi_report_luns,
+ 	.scsi_inquiry		= scsi_inquiry,
+-	.io_ops			= &amp;mmapio,
++	.bdt			= &amp;mmap_bdt,
+ };
+
+Modified: trunk/usr/mmapio.c
+===================================================================
+--- trunk/usr/mmapio.c	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/mmapio.c	2006-08-28 09:09:32 UTC (rev 549)
+@@ -11,8 +11,30 @@
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ 
+-static void *mmapio_cmd_buffer_alloc(int devio, uint32_t datalen)
++static struct tgt_device *bd_mmap_open(char *path, int *fd, uint64_t *size)
+ {
++	struct tgt_device *dev;
++
++	dev = malloc(sizeof(*dev));
++	if (!dev)
++		return NULL;
++
++	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
++	if (*fd &lt; 0) {
++		free(dev);
++		dev = NULL;
++	}
++
++	return dev;
++}
++
++static void bd_mmap_close(struct tgt_device *dev)
++{
++	free(dev);
++}
++
++static void *bd_mmap_cmd_buffer_alloc(int devio, uint32_t datalen)
++{
+ 	void *data = NULL;
+ 	if (!devio) {
+ 		datalen = ALIGN(datalen, PAGE_SIZE);
+@@ -23,8 +45,8 @@
+ 	return data;
+ }
+ 
+-static int mmapio_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+-			     unsigned long *uaddr, uint64_t offset)
++static int bd_mmap_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
++			      unsigned long *uaddr, uint64_t offset)
+ {
+ 	int fd = dev-&gt;fd;
+ 	void *p;
+@@ -49,7 +71,7 @@
+ 	return err;
+ }
+ 
+-static int mmapio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++static int bd_mmap_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	int err = 0;
+ 
+@@ -67,8 +89,10 @@
+ 	return err;
+ }
+ 
+-struct backedio_operations mmap_bdops = {
+-	.bd_cmd_buffer_alloc	= mmapio_cmd_buffer_alloc,
+-	.bd_cmd_submit		= mmapio_cmd_submit,
+-	.bd_cmd_done		= mmapio_cmd_done,
++struct backedio_template mmap_bdt = {
++	.bd_open		= bd_mmap_open,
++	.bd_close		= bd_mmap_close,
++	.bd_cmd_buffer_alloc	= bd_mmap_cmd_buffer_alloc,
++	.bd_cmd_submit		= bd_mmap_cmd_submit,
++	.bd_cmd_done		= bd_mmap_cmd_done,
+ };
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/scsi.c	2006-08-28 09:09:32 UTC (rev 549)
+@@ -472,8 +472,8 @@
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+ 	*offset = 0;
+-	data = tgt_drivers[lid]-&gt;io_ops-&gt;bd_cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
+-							     datalen);
++	data = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
++							  datalen);
+ 
+ 	if (!dev)
+ 		switch (scb[0]) {
+@@ -528,8 +528,8 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = tgt_drivers[lid]-&gt;io_ops-&gt;bd_cmd_submit(dev, *rw, datalen,
+-								 uaddr, *offset);
++		result = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_submit(dev, *rw, datalen,
++							      uaddr, *offset);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/target.c	2006-08-28 09:09:32 UTC (rev 549)
+@@ -26,11 +26,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/socket.h&gt;
+-#include &lt;sys/stat.h&gt;
+-
+-#include &lt;linux/fs.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ 
+ #include &quot;list.h&quot;
+@@ -139,8 +135,7 @@
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
+-	struct stat64 st;
+-	int err, dev_fd;
++	int dev_fd;
+ 	uint64_t size;
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot; %s\n&quot;, tid, dev_id, path);
+@@ -155,34 +150,9 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	dev_fd = open(path, O_RDWR | O_LARGEFILE);
+-	if (dev_fd &lt; 0) {
+-		eprintf(&quot;Could not open %s, %m\n&quot;, path);
+-		return dev_fd;
+-	}
+-
+-	err = fstat64(dev_fd, &amp;st);
+-	if (err &lt; 0) {
+-		printf(&quot;Cannot get stat %d, %m\n&quot;, dev_fd);
+-		goto close_dev_fd;
+-	}
+-
+-	if (S_ISREG(st.st_mode))
+-		size = st.st_size;
+-	else if(S_ISBLK(st.st_mode)) {
+-		err = ioctl(dev_fd, BLKGETSIZE64, &amp;size);
+-		if (err &lt; 0) {
+-			eprintf(&quot;Cannot get size, %m\n&quot;);
+-			goto close_dev_fd;
+-		}
+-	} else {
+-		eprintf(&quot;Cannot use this mode %x\n&quot;, st.st_mode);
+-		goto close_dev_fd;
+-	}
+-
+-	device = malloc(sizeof(*device));
++	device = tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_open(path, &amp;dev_fd, &amp;size);
+ 	if (!device)
+-		goto close_dev_fd;
++		return -EINVAL;
+ 
+ 	device-&gt;fd = dev_fd;
+ 	device-&gt;addr = 0;
+@@ -199,9 +169,6 @@
+ 		dev_id, tid);
+ 
+ 	return 0;
+-close_dev_fd:
+-	close(dev_fd);
+-	return err;
+ }
+ 
+ int tgt_device_destroy(int tid, uint64_t dev_id)
+@@ -228,7 +195,7 @@
+ 	device_hlist_remove(device);
+ 	device_list_remove(device);
+ 
+-	free(device);
++	tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_close(device);
+ 	return 0;
+ }
+ 
+@@ -419,9 +386,9 @@
+ 		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = tgt_drivers[target-&gt;lid]-&gt;io_ops-&gt;bd_cmd_done(do_munmap,
+-							    !cmd-&gt;mmapped,
+-							    cmd-&gt;uaddr, cmd-&gt;len);
++	err = tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_cmd_done(do_munmap,
++							 !cmd-&gt;mmapped,
++							 cmd-&gt;uaddr, cmd-&gt;len);
+ 
+ 	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len, err);
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/tgtd.h	2006-08-28 09:09:32 UTC (rev 549)
+@@ -22,15 +22,17 @@
+ 	struct list_head d_list;
+ 
+ 	struct tgt_cmd_queue cmd_queue;
++
++	unsigned long bddata[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
+-struct backedio_operations {
++struct backedio_template {
++	struct tgt_device *(*bd_open)(char *path, int *fd, uint64_t *size);
++	void (*bd_close)(struct tgt_device *dev);
+ 	void *(*bd_cmd_buffer_alloc)(int devio, uint32_t datalen);
+ 	int (*bd_cmd_submit)(struct tgt_device *dev, int rw, uint32_t datalen,
+ 			     unsigned long *uaddr, uint64_t offset);
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+-	int (*bd_open)(struct tgt_device *dev);
+-	void (*bd_close)(struct tgt_device *dev);
+ };
+ 
+ extern int kreq_init(int *fd);
+
+Modified: trunk/usr/util.c
+===================================================================
+--- trunk/usr/util.c	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/util.c	2006-08-28 09:09:32 UTC (rev 549)
+@@ -6,6 +6,8 @@
+ #include &lt;string.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
++#include &lt;sys/ioctl.h&gt;
++#include &lt;linux/fs.h&gt;
+ 
+ #include &quot;log.h&quot;
+ 
+@@ -56,3 +58,41 @@
+ 
+ 	return 0;
+ }
++
++int backed_file_open(char *path, int oflag, uint64_t *size)
++{
++	int fd, err;
++	struct stat64 st;
++
++	fd = open(path, oflag);
++	if (fd &lt; 0) {
++		eprintf(&quot;Could not open %s, %m\n&quot;, path);
++		return fd;
++	}
++
++	err = fstat64(fd, &amp;st);
++	if (err &lt; 0) {
++		printf(&quot;Cannot get stat %d, %m\n&quot;, fd);
++		goto close_fd;
++	}
++
++	if (S_ISREG(st.st_mode))
++		*size = st.st_size;
++	else if(S_ISBLK(st.st_mode)) {
++		err = ioctl(fd, BLKGETSIZE64, size);
++		if (err &lt; 0) {
++			eprintf(&quot;Cannot get size, %m\n&quot;);
++			goto close_fd;
++		}
++	} else {
++		eprintf(&quot;Cannot use this mode %x\n&quot;, st.st_mode);
++		err = -EINVAL;
++		goto close_fd;
++	}
++
++	return fd;
++
++close_fd:
++	close(fd);
++	return err;
++}
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-08-28 07:09:38 UTC (rev 548)
++++ trunk/usr/util.h	2006-08-28 09:09:32 UTC (rev 549)
+@@ -35,5 +35,6 @@
+ 	({ type __x = (x); type __y = (y); __x &gt; __y ? __x: __y; })
+ 
+ extern int chrdev_open(char *modname, char *devpath, uint8_t minor, int *fd);
++extern int backed_file_open(char *path, int oflag, uint64_t *size);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000535.html">[Stgt-svn] r548 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000537.html">[Stgt-svn] r550 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#536">[ date ]</a>
+              <a href="thread.html#536">[ thread ]</a>
+              <a href="subject.html#536">[ subject ]</a>
+              <a href="author.html#536">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

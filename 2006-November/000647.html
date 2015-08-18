@@ -1,0 +1,127 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r660 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r660%20-%20trunk/usr&In-Reply-To=%3C200611211658.kALGwMrx010275%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000646.html">
+   <LINK REL="Next"  HREF="000648.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r660 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r660%20-%20trunk/usr&In-Reply-To=%3C200611211658.kALGwMrx010275%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r660 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Nov 21 17:58:22 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000646.html">[Stgt-svn] r659 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000648.html">[Stgt-svn] r661 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#647">[ date ]</a>
+              <a href="thread.html#647">[ thread ]</a>
+              <a href="subject.html#647">[ subject ]</a>
+              <a href="author.html#647">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-21 17:58:22 +0100 (Tue, 21 Nov 2006)
+New Revision: 660
+
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/tgtd.h
+Log:
+Now iscsi driver does not need tgtif. So it can work with EPOLL_WAIT + 2.6.18 kernel.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-11-21 16:56:58 UTC (rev 659)
++++ trunk/usr/Makefile	2006-11-21 16:58:22 UTC (rev 660)
+@@ -1,11 +1,11 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE \
+ 	-I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o sched.o
++TGTD_OBJS = tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o sched.o
+ LIBS += -laio
+ 
+ ifneq ($(IBMVIO),)
+-CFLAGS += -DIBMVIO
++CFLAGS += -DIBMVIO -DUSE_KERNEL
+ TGTD_OBJS += $(addprefix ibmvio/, ibmvio.o)
+ BD_MMAP=1
+ endif
+@@ -20,7 +20,7 @@
+ endif
+ 
+ ifneq ($(BD_MMAP),)
+-TGTD_OBJS += bd_mmap.o
++TGTD_OBJS += bd_mmap.o tgtif.o
+ endif
+ 
+ ifneq ($(BD_AIO),)
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-11-21 16:56:58 UTC (rev 659)
++++ trunk/usr/tgtd.h	2006-11-21 16:58:22 UTC (rev 660)
+@@ -41,13 +41,19 @@
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
++#ifdef USE_KERNEL
+ extern int kreq_init(void);
++#else
++static inline int kreq_init(void)	\
++{					\
++	return 0;			\
++}
++#endif
++
+ extern int kspace_send_tsk_mgmt_res(int host_no, uint64_t mid, int result);
+ extern int kspace_send_cmd_res(int host_no, int len, int result,
+ 			       int rw, uint64_t addr, uint64_t tag);
+-
+ extern int ipc_init(void);
+-
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ extern int tgt_target_create(int tid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000646.html">[Stgt-svn] r659 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000648.html">[Stgt-svn] r661 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#647">[ date ]</a>
+              <a href="thread.html#647">[ thread ]</a>
+              <a href="subject.html#647">[ subject ]</a>
+              <a href="author.html#647">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

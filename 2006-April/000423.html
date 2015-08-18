@@ -1,0 +1,223 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r436 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r436%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291603.k3TG3FQK026453%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000422.html">
+   <LINK REL="Next"  HREF="000424.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r436 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r436%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291603.k3TG3FQK026453%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r436 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 29 18:03:15 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000422.html">[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000424.html">[Stgt-svn] r437 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#423">[ date ]</a>
+              <a href="thread.html#423">[ thread ]</a>
+              <a href="subject.html#423">[ subject ]</a>
+              <a href="author.html#423">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-29 18:03:14 +0200 (Sat, 29 Apr 2006)
+New Revision: 436
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+Log:
+Split iscsi_tcp_hdr_recv().
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-04-29 15:31:54 UTC (rev 435)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-04-29 16:03:14 UTC (rev 436)
+@@ -435,58 +435,14 @@
+ 	return 0;
+ }
+ 
+-static int
+-iscsi_tcp_hdr_recv(struct iscsi_conn *conn)
++static int iscsi_tcp_hdr_recv_post(struct iscsi_conn *conn)
+ {
+-	int rc = 0, opcode, ahslen;
+-	struct iscsi_hdr *hdr;
+ 	struct iscsi_session *session = conn-&gt;session;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	uint32_t cdgst, rdgst = 0, itt;
++	struct iscsi_hdr *hdr = tcp_conn-&gt;in.hdr;
++	int rc, opcode, ahslen = hdr-&gt;hlength &lt;&lt; 2;
++	uint32_t itt;
+ 
+-	hdr = tcp_conn-&gt;in.hdr;
+-
+-	/* verify PDU length */
+-	tcp_conn-&gt;in.datalen = ntoh24(hdr-&gt;dlength);
+-	if (tcp_conn-&gt;in.datalen &gt; conn-&gt;max_recv_dlength) {
+-		printk(KERN_ERR &quot;iscsi_tcp: datalen %d &gt; %d\n&quot;,
+-		       tcp_conn-&gt;in.datalen, conn-&gt;max_recv_dlength);
+-		return ISCSI_ERR_DATALEN;
+-	}
+-	tcp_conn-&gt;data_copied = 0;
+-
+-	/* read AHS */
+-	ahslen = hdr-&gt;hlength &lt;&lt; 2;
+-	tcp_conn-&gt;in.offset += ahslen;
+-	tcp_conn-&gt;in.copy -= ahslen;
+-	if (tcp_conn-&gt;in.copy &lt; 0) {
+-		printk(KERN_ERR &quot;iscsi_tcp: can't handle AHS with length &quot;
+-		       &quot;%d bytes\n&quot;, ahslen);
+-		return ISCSI_ERR_AHSLEN;
+-	}
+-
+-	/* calculate read padding */
+-	tcp_conn-&gt;in.padding = tcp_conn-&gt;in.datalen &amp; (ISCSI_PAD_LEN-1);
+-	if (tcp_conn-&gt;in.padding) {
+-		tcp_conn-&gt;in.padding = ISCSI_PAD_LEN - tcp_conn-&gt;in.padding;
+-		debug_scsi(&quot;read padding %d bytes\n&quot;, tcp_conn-&gt;in.padding);
+-	}
+-
+-	if (conn-&gt;hdrdgst_en) {
+-		struct scatterlist sg;
+-
+-		sg_init_one(&amp;sg, (u8 *)hdr,
+-			    sizeof(struct iscsi_hdr) + ahslen);
+-		crypto_digest_digest(tcp_conn-&gt;rx_tfm, &amp;sg, 1, (u8 *)&amp;cdgst);
+-		rdgst = *(uint32_t*)((char*)hdr + sizeof(struct iscsi_hdr) +
+-				     ahslen);
+-		if (cdgst != rdgst) {
+-			printk(KERN_ERR &quot;iscsi_tcp: hdrdgst error &quot;
+-			       &quot;recv 0x%x calc 0x%x\n&quot;, rdgst, cdgst);
+-			return ISCSI_ERR_HDR_DGST;
+-		}
+-	}
+-
+ 	opcode = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	/* verify itt (itt encoding: age+cid+itt) */
+ 	rc = iscsi_verify_itt(conn, hdr, &amp;itt);
+@@ -563,6 +519,69 @@
+ 	return 0;
+ }
+ 
++int iscsi_tcp_hdr_recv_pre(struct iscsi_conn *conn)
++{
++	int ahslen;
++	struct iscsi_hdr *hdr;
++	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
++	uint32_t cdgst, rdgst = 0;
++
++	hdr = tcp_conn-&gt;in.hdr;
++
++	/* verify PDU length */
++	tcp_conn-&gt;in.datalen = ntoh24(hdr-&gt;dlength);
++	if (tcp_conn-&gt;in.datalen &gt; conn-&gt;max_recv_dlength) {
++		printk(KERN_ERR &quot;iscsi_tcp: datalen %d &gt; %d\n&quot;,
++		       tcp_conn-&gt;in.datalen, conn-&gt;max_recv_dlength);
++		return ISCSI_ERR_DATALEN;
++	}
++	tcp_conn-&gt;data_copied = 0;
++
++	/* read AHS */
++	ahslen = hdr-&gt;hlength &lt;&lt; 2;
++	tcp_conn-&gt;in.offset += ahslen;
++	tcp_conn-&gt;in.copy -= ahslen;
++	if (tcp_conn-&gt;in.copy &lt; 0) {
++		printk(KERN_ERR &quot;iscsi_tcp: can't handle AHS with length &quot;
++		       &quot;%d bytes\n&quot;, ahslen);
++		return ISCSI_ERR_AHSLEN;
++	}
++
++	/* calculate read padding */
++	tcp_conn-&gt;in.padding = tcp_conn-&gt;in.datalen &amp; (ISCSI_PAD_LEN-1);
++	if (tcp_conn-&gt;in.padding) {
++		tcp_conn-&gt;in.padding = ISCSI_PAD_LEN - tcp_conn-&gt;in.padding;
++		debug_scsi(&quot;read padding %d bytes\n&quot;, tcp_conn-&gt;in.padding);
++	}
++
++	if (conn-&gt;hdrdgst_en) {
++		struct scatterlist sg;
++
++		sg_init_one(&amp;sg, (u8 *)hdr,
++			    sizeof(struct iscsi_hdr) + ahslen);
++		crypto_digest_digest(tcp_conn-&gt;rx_tfm, &amp;sg, 1, (u8 *)&amp;cdgst);
++		rdgst = *(uint32_t*)((char*)hdr + sizeof(struct iscsi_hdr) +
++				     ahslen);
++		if (cdgst != rdgst) {
++			printk(KERN_ERR &quot;iscsi_tcp: hdrdgst error &quot;
++			       &quot;recv 0x%x calc 0x%x\n&quot;, rdgst, cdgst);
++			return ISCSI_ERR_HDR_DGST;
++		}
++	}
++
++	return 0;
++}
++
++static int iscsi_tcp_hdr_recv(struct iscsi_conn *conn)
++{
++	int rc;
++
++	rc = iscsi_tcp_hdr_recv_pre(conn);
++	if (rc)
++		return rc;
++	return iscsi_tcp_hdr_recv_post(conn);
++}
++
+ /**
+  * iscsi_ctask_copy - copy skb bits to the destanation cmd task
+  * @conn: iscsi tcp connection
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 15:31:54 UTC (rev 435)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 16:03:14 UTC (rev 436)
+@@ -21,5 +21,7 @@
+ extern int iscsi_scsi_data_in(struct iscsi_conn *conn);
+ extern inline int iscsi_tcp_copy(struct iscsi_tcp_conn *tcp_conn);
+ 
++extern int iscsi_tcp_hdr_recv_pre(struct iscsi_conn *conn);
++
+ extern int iscsi_tcp_init(void);
+ extern void iscsi_tcp_exit(void);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000422.html">[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000424.html">[Stgt-svn] r437 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#423">[ date ]</a>
+              <a href="thread.html#423">[ thread ]</a>
+              <a href="subject.html#423">[ subject ]</a>
+              <a href="author.html#423">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

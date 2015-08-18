@@ -1,0 +1,376 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r276 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r276%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602062141.k16LfqIi005168%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000262.html">
+   <LINK REL="Next"  HREF="000264.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r276 - branches/use-scsi-ml/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r276%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602062141.k16LfqIi005168%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r276 - branches/use-scsi-ml/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Mon Feb  6 22:41:52 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000262.html">[Stgt-svn] r275 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000264.html">[Stgt-svn] r277 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#263">[ date ]</a>
+              <a href="thread.html#263">[ thread ]</a>
+              <a href="subject.html#263">[ subject ]</a>
+              <a href="author.html#263">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-02-06 22:41:51 +0100 (Mon, 06 Feb 2006)
+New Revision: 276
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+   branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+   branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+Log:
+we cannot do cmd-&gt;device because we have not device in the kernel. Instead we go through cmd-&gt;request-&gt;q-&gt;hostdata to get to the host
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-06 07:23:41 UTC (rev 275)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-06 21:41:51 UTC (rev 276)
+@@ -27,6 +27,7 @@
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ #include &lt;scsi/scsi_device.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
++#include &lt;scsi/scsi_tgt.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+ #include &quot;scsi_tgt_priv.h&quot;
+@@ -62,15 +63,15 @@
+ 
+ int scsi_tgt_uspace_send(struct scsi_cmnd *cmd)
+ {
++	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	struct sock *sk;
+ 	struct tpacket_hdr *h;
+ 	struct tgt_event *ev;
+ 	struct tgt_cmd *tcmd;
+ 
+-	sk = scsi_tgt_get_sock(cmd-&gt;device-&gt;host);
++	sk = scsi_tgt_get_sock(shost);
+ 	if (!sk) {
+-		printk(KERN_INFO &quot;Host%d not connected\n&quot;,
+-		       cmd-&gt;device-&gt;host-&gt;host_no);
++		printk(KERN_INFO &quot;Host%d not connected\n&quot;, shost-&gt;host_no);
+ 		return -ENOTCONN;
+ 	}
+ 
+@@ -82,7 +83,7 @@
+ 
+ 	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+ 	ev-&gt;type = TGT_KEVENT_CMD_REQ;
+-	ev-&gt;k.cmd_req.host_no = cmd-&gt;device-&gt;host-&gt;host_no;
++	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+ 
+@@ -102,14 +103,15 @@
+ 
+ int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+ {
++	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	struct sock *sk;
+ 	struct tgt_event *ev;
+ 	struct tpacket_hdr *h;
+ 
+-	sk = scsi_tgt_get_sock(cmd-&gt;device-&gt;host);
++	sk = scsi_tgt_get_sock(shost);
+ 	if (!sk) {
+ 		printk(KERN_INFO &quot;Host%d not connected\n&quot;,
+-		       cmd-&gt;device-&gt;host-&gt;host_no);
++		       shost-&gt;host_no);
+ 		return -ENOTCONN;
+ 	}
+ 
+@@ -121,7 +123,7 @@
+ 
+ 	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+ 	ev-&gt;type = TGT_KEVENT_CMD_DONE;
+-	ev-&gt;k.cmd_done.host_no = cmd-&gt;device-&gt;host-&gt;host_no;
++	ev-&gt;k.cmd_done.host_no = shost-&gt;host_no;
+ 	ev-&gt;k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+ 	ev-&gt;k.cmd_done.result = cmd-&gt;result;
+ 
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-06 07:23:41 UTC (rev 275)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-06 21:41:51 UTC (rev 276)
+@@ -88,6 +88,7 @@
+ 		err = -ENOMEM;
+ 		goto cleanup_queue;
+ 	}
++	queuedata-&gt;shost = shost;
+ 	q-&gt;queuedata = queuedata;
+ 
+ 	elevator_exit(q-&gt;elevator);
+@@ -119,6 +120,13 @@
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_alloc_queue);
+ 
++struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd)
++{
++	struct scsi_tgt_queuedata *queue = cmd-&gt;request-&gt;q-&gt;queuedata;
++	return queue-&gt;shost;
++}
++EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
++
+ /**
+  * scsi_tgt_queue_command - queue command for userspace processing
+  * @cmd:	scsi command
+@@ -135,8 +143,7 @@
+ 	 * REQ_MSG_DONT_UNPLUG_IMMED_BECUASE_WE_WILL_HANDLE_IT
+ 	 */
+ 	cmd-&gt;request-&gt;end_io_data = scsilun;
+-	elv_add_request(cmd-&gt;device-&gt;host-&gt;uspace_req_q, cmd-&gt;request,
+-			ELEVATOR_INSERT_BACK, 1);
++	elv_add_request(cmd-&gt;request-&gt;q, cmd-&gt;request, ELEVATOR_INSERT_BACK, 1);
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+ 
+@@ -164,7 +171,7 @@
+ 
+ 	scsi_unmap_user_pages(cmd);
+ 	scsi_tgt_uspace_send_status(cmd, GFP_KERNEL);
+-	scsi_host_put_command(cmd);
++	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+ }
+ 
+ /*
+@@ -186,7 +193,7 @@
+ 
+ static int __scsi_tgt_transfer_response(struct scsi_cmnd *cmd)
+ {
+-	struct Scsi_Host *shost = cmd-&gt;device-&gt;host;
++	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	int err;
+ 
+ 	dprintk(&quot;cmd %p\n&quot;, cmd);
+@@ -242,7 +249,7 @@
+ /* TODO: test this crap and replace bio_map_user with new interface maybe */
+ static int scsi_map_user_pages(struct scsi_cmnd *cmd, int rw)
+ {
+-	struct request_queue *q = cmd-&gt;device-&gt;host-&gt;uspace_req_q;
++	struct request_queue *q = cmd-&gt;request-&gt;q;
+ 	struct request *rq = cmd-&gt;request;
+ 	void *uaddr = cmd-&gt;buffer;
+ 	unsigned int len = cmd-&gt;bufflen;
+@@ -339,7 +346,7 @@
+ 	bio = bio_list_pop(&amp;cmd-&gt;xfer_list);
+ 	BUG_ON(!bio);
+ 
+-	blk_rq_bio_prep(cmd-&gt;device-&gt;host-&gt;uspace_req_q, cmd-&gt;request, bio);
++	blk_rq_bio_prep(cmd-&gt;request-&gt;q, cmd-&gt;request, bio);
+ 	err = scsi_tgt_init_cmd(cmd, GFP_ATOMIC);
+ 	if (err) {
+ 		cmd-&gt;result = DID_ERROR &lt;&lt; 16;
+@@ -355,7 +362,7 @@
+ static int scsi_tgt_transfer_data(struct scsi_cmnd *cmd)
+ {
+ 	int err;
+-	struct Scsi_Host *host = cmd-&gt;device-&gt;host;
++	struct Scsi_Host *host = scsi_tgt_cmd_to_host(cmd);
+ 
+ 	err = host-&gt;hostt-&gt;transfer_data(cmd, scsi_tgt_data_transfer_done);
+ 	switch (err) {
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-06 07:23:41 UTC (rev 275)
++++ branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-06 21:41:51 UTC (rev 276)
+@@ -1,4 +1,5 @@
+ struct scsi_cmnd;
++struct Scsi_Host;
+ struct task_struct;
+ 
+ /* tmp - will replace with SCSI logging stuff */
+@@ -12,6 +13,7 @@
+ struct scsi_tgt_queuedata {
+ 	struct task_struct *task;
+ 	struct socket *sock;
++	struct Scsi_Host *shost;
+ };
+ 
+ extern void scsi_tgt_if_exit(void);
+
+Modified: branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-02-06 07:23:41 UTC (rev 275)
++++ branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-02-06 21:41:51 UTC (rev 276)
+@@ -186,7 +186,7 @@
+  #include &lt;linux/raid/bitmap.h&gt;
+  
+ diff --git a/drivers/scsi/hosts.c b/drivers/scsi/hosts.c
+-index 5881079..64e687a 100644
++index ef57f25..a122624 100644
+ --- a/drivers/scsi/hosts.c
+ +++ b/drivers/scsi/hosts.c
+ @@ -264,6 +264,11 @@ static void scsi_host_dev_release(struct
+@@ -202,10 +202,10 @@
+  	kfree(shost-&gt;shost_data);
+  
+ diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
+-index 245ca99..fbb71e7 100644
++index d182bad..701973e 100644
+ --- a/drivers/scsi/scsi.c
+ +++ b/drivers/scsi/scsi.c
+-@@ -236,6 +236,58 @@ static struct scsi_cmnd *__scsi_get_comm
++@@ -234,6 +234,58 @@ static struct scsi_cmnd *__scsi_get_comm
+  }
+  
+  /*
+@@ -264,7 +264,7 @@
+   * Function:	scsi_get_command()
+   *
+   * Purpose:	Allocate and setup a scsi command block
+-@@ -274,6 +326,45 @@ struct scsi_cmnd *scsi_get_command(struc
++@@ -272,6 +324,45 @@ struct scsi_cmnd *scsi_get_command(struc
+  EXPORT_SYMBOL(scsi_get_command);
+  
+  /*
+@@ -272,15 +272,15 @@
+ + *
+ + * Purpose:	Free a scsi command block
+ + *
+-+ * Arguments:	cmd	- command block to free
+++ * Arguments:	shost	- scsi host
+++ * 		cmd	- command block to free
+ + *
+ + * Returns:	Nothing.
+ + *
+ + * Notes:	The command must not belong to any lists.
+ + */
+-+void scsi_host_put_command(struct scsi_cmnd *cmd)
+++void scsi_host_put_command(struct Scsi_Host *shost, struct scsi_cmnd *cmd)
+ +{
+-+	struct Scsi_Host *shost = cmd-&gt;device-&gt;host;
+ +	struct request_queue *q = shost-&gt;uspace_req_q;
+ +	struct request *rq = cmd-&gt;request;
+ +	unsigned long flags;
+@@ -311,10 +311,10 @@
+   *
+   * Purpose:	Free a scsi command block
+ diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
+-index 4a60285..cbd16d6 100644
++index 5ac8749..2dcc500 100644
+ --- a/drivers/scsi/scsi_lib.c
+ +++ b/drivers/scsi/scsi_lib.c
+-@@ -803,7 +803,7 @@ static struct scsi_cmnd *scsi_end_reques
++@@ -802,7 +802,7 @@ static struct scsi_cmnd *scsi_end_reques
+  	return NULL;
+  }
+  
+@@ -323,7 +323,7 @@
+  {
+  	struct scsi_host_sg_pool *sgp;
+  	struct scatterlist *sgl;
+-@@ -844,7 +844,9 @@ static struct scatterlist *scsi_alloc_sg
++@@ -843,7 +843,9 @@ static struct scatterlist *scsi_alloc_sg
+  	return sgl;
+  }
+  
+@@ -334,7 +334,7 @@
+  {
+  	struct scsi_host_sg_pool *sgp;
+  
+-@@ -854,6 +856,8 @@ static void scsi_free_sgtable(struct sca
++@@ -853,6 +855,8 @@ static void scsi_free_sgtable(struct sca
+  	mempool_free(sgl, sgp-&gt;pool);
+  }
+  
+@@ -343,7 +343,7 @@
+  /*
+   * Function:    scsi_release_buffers()
+   *
+-@@ -1686,29 +1690,40 @@ u64 scsi_calculate_bounce_limit(struct S
++@@ -1685,29 +1689,40 @@ u64 scsi_calculate_bounce_limit(struct S
+  }
+  EXPORT_SYMBOL(scsi_calculate_bounce_limit);
+  
+@@ -580,7 +580,7 @@
+ +
+ +#endif
+ diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
+-index 7529f43..6d92a83 100644
++index 1ace1b9..aaa8740 100644
+ --- a/include/scsi/scsi_cmnd.h
+ +++ b/include/scsi/scsi_cmnd.h
+ @@ -5,9 +5,11 @@
+@@ -626,7 +626,7 @@
+ +extern struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *,
+ +					       enum dma_data_direction, gfp_t);
+  extern struct scsi_cmnd *scsi_get_command(struct scsi_device *, gfp_t);
+-+extern void scsi_host_put_command(struct scsi_cmnd *);
+++extern void scsi_host_put_command(struct Scsi_Host *, struct scsi_cmnd *);
+  extern void scsi_put_command(struct scsi_cmnd *);
+  extern void scsi_io_completion(struct scsi_cmnd *, unsigned int, unsigned int);
+  extern void scsi_finish_command(struct scsi_cmnd *cmd);
+@@ -708,10 +708,10 @@
+   * which will connect to the host adapter itself rather than any
+ diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
+ new file mode 100644
+-index 0000000..c1dc0d2
++index 0000000..91ad6bc
+ --- /dev/null
+ +++ b/include/scsi/scsi_tgt.h
+-@@ -0,0 +1,10 @@
++@@ -0,0 +1,11 @@
+ +/*
+ + * SCSI target definitions
+ + */
+@@ -720,6 +720,7 @@
+ +struct scsi_cmnd;
+ +struct scsi_lun;
+ +
+++extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd);
+ +extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+ +extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, int);
+ diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000262.html">[Stgt-svn] r275 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000264.html">[Stgt-svn] r277 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#263">[ date ]</a>
+              <a href="thread.html#263">[ thread ]</a>
+              <a href="subject.html#263">[ subject ]</a>
+              <a href="author.html#263">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

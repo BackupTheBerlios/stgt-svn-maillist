@@ -1,0 +1,214 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r121 - in trunk: kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r121%20-%20in%20trunk%3A%20kernel%20usr&In-Reply-To=%3C200510270832.j9R8Wxs0009476%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000114.html">
+   <LINK REL="Next"  HREF="000116.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r121 - in trunk: kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r121%20-%20in%20trunk%3A%20kernel%20usr&In-Reply-To=%3C200510270832.j9R8Wxs0009476%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r121 - in trunk: kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Oct 27 10:32:59 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000114.html">[Stgt-svn] r120 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000116.html">[Stgt-svn] r122 - in trunk: . kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#115">[ date ]</a>
+              <a href="thread.html#115">[ thread ]</a>
+              <a href="subject.html#115">[ subject ]</a>
+              <a href="author.html#115">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-27 10:32:56 +0200 (Thu, 27 Oct 2005)
+New Revision: 121
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/usr/netlink.c
+Log:
+Clean up send_event_res() and tgt_msg_send().
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-26 08:44:03 UTC (rev 120)
++++ trunk/kernel/tgt.c	2005-10-27 08:32:56 UTC (rev 121)
+@@ -838,31 +838,40 @@
+ 	return cmd;
+ }
+ 
+-int tgt_msg_send(struct tgt_target *target, void *data, int data_len,
+-		 unsigned int gfp_flags)
++static int send_event_res(uint16_t type, struct tgt_event *p,
++			  void *data, int dlen, gfp_t flags)
+ {
+ 	struct tgt_event *ev;
+-	struct sk_buff *skb;
+ 	struct nlmsghdr *nlh;
+-	int len;
++	struct sk_buff *skb;
++	uint32_t len;
+ 
+-	len = NLMSG_SPACE(sizeof(*ev) + data_len);
+-	skb = alloc_skb(len, gfp_flags);
++	len = NLMSG_SPACE(sizeof(*ev) + dlen);
++	skb = alloc_skb(len, flags);
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+-	dprintk(&quot;%d %Zd %d\n&quot;, len, sizeof(*ev), data_len);
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_TARGET_PASSTHRU,
+-			 len - sizeof(*nlh), 0);
++	nlh = __nlmsg_put(skb, tgtd_pid, 0, type, len - sizeof(*nlh), 0);
++
+ 	ev = NLMSG_DATA(nlh);
+-	memset(ev, 0, sizeof(*ev));
++	memcpy(ev, p, sizeof(*ev));
++	if (dlen)
++		memcpy(ev-&gt;data, data, dlen);
+ 
+-	memcpy(ev-&gt;data, data, data_len);
+-	ev-&gt;k.tgt_passthru.tid = target-&gt;tid;
+-	ev-&gt;k.tgt_passthru.len = data_len;
+-
+ 	return netlink_unicast(nls, skb, tgtd_pid, 0);
+ }
++
++int tgt_msg_send(struct tgt_target *target, void *data, int dlen, gfp_t flags)
++{
++	struct tgt_event ev;
++
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.tgt_passthru.tid = target-&gt;tid;
++	ev.k.tgt_passthru.len = dlen;
++
++	return send_event_res(TGT_KEVENT_TARGET_PASSTHRU,
++			      &amp;ev, data, dlen, flags);
++}
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+@@ -937,31 +946,16 @@
+ 	return err;
+ }
+ 
+-static int send_event_res(uint32_t pid, uint16_t type, void *data, uint32_t size)
+-{
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len = NLMSG_SPACE(size);
+-
+-	skb = alloc_skb(len, GFP_KERNEL | __GFP_NOFAIL);
+-	nlh = __nlmsg_put(skb, pid, 0, type, size, 0);
+-	memcpy(NLMSG_DATA(nlh), data, size);
+-
+-	return netlink_unicast(nls, skb, pid, 0);
+-}
+-
+ static int event_recv_skb(struct sk_buff *skb)
+ {
+ 	int err;
+ 	uint32_t rlen;
+ 	struct nlmsghdr	*nlh;
+-	struct tgt_event *ev;
+ 
+ 	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+ 		nlh = (struct nlmsghdr *) skb-&gt;data;
+ 		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+ 			return 0;
+-		ev = NLMSG_DATA(nlh);
+ 		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+ 		if (rlen &gt; skb-&gt;len)
+ 			rlen = skb-&gt;len;
+@@ -974,10 +968,12 @@
+ 		 */
+ 		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
+ 		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
+-			ev-&gt;k.event_res.err = err;
+-			send_event_res(NETLINK_CREDS(skb)-&gt;pid,
+-				       TGT_KEVENT_RESPONSE,
+-				       ev, sizeof(*ev));
++			struct tgt_event ev;
++
++			memset(&amp;ev, 0, sizeof(ev));
++			ev.k.event_res.err = err;
++			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
++				       GFP_KERNEL | __GFP_NOFAIL);
+ 		}
+ 		skb_pull(skb, rlen);
+ 	}
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-10-26 08:44:03 UTC (rev 120)
++++ trunk/kernel/tgt.h	2005-10-27 08:32:56 UTC (rev 121)
+@@ -69,8 +69,8 @@
+ 		   void (*done)(void *, struct tgt_session *), void *arg);
+ extern int tgt_session_destroy(struct tgt_session *session);
+ 
+-extern int tgt_msg_send(struct tgt_target *target, void *data, int data_len,
+-			unsigned int gfp_flags);
++extern int tgt_msg_send(struct tgt_target *target, void *data, int dlen,
++			gfp_t flags);
+ extern int tgt_uspace_cmd_send(struct tgt_cmd *cmd);
+ extern struct tgt_cmd *tgt_cmd_create(struct tgt_session *session, void *priv);
+ extern void tgt_cmd_destroy(struct tgt_cmd *cmd);
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-10-26 08:44:03 UTC (rev 120)
++++ trunk/usr/netlink.c	2005-10-27 08:32:56 UTC (rev 121)
+@@ -124,8 +124,8 @@
+ 	 * protocol module
+ 	 */
+ 	result = scsi_cmd_process(ev_req-&gt;k.cmd_req.tid,
+-				   ev_req-&gt;k.cmd_req.dev_id, scb,
+-				   (uint8_t *) ev_res-&gt;data, &amp;len);
++				  ev_req-&gt;k.cmd_req.dev_id, scb,
++				  (uint8_t *) ev_res-&gt;data, &amp;len);
+ 
+ 	memset(ev_res, 0, sizeof(*ev_res));
+ 	ev_res-&gt;u.cmd_res.cid = cid;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000114.html">[Stgt-svn] r120 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000116.html">[Stgt-svn] r122 - in trunk: . kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#115">[ date ]</a>
+              <a href="thread.html#115">[ thread ]</a>
+              <a href="subject.html#115">[ subject ]</a>
+              <a href="author.html#115">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

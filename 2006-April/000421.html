@@ -1,0 +1,874 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r434 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r434%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291525.k3TFPtq4023454%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000420.html">
+   <LINK REL="Next"  HREF="000422.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r434 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r434%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291525.k3TFPtq4023454%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r434 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 29 17:25:55 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000420.html">[Stgt-svn] r433 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000422.html">[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#421">[ date ]</a>
+              <a href="thread.html#421">[ thread ]</a>
+              <a href="subject.html#421">[ subject ]</a>
+              <a href="author.html#421">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-29 17:25:55 +0200 (Sat, 29 Apr 2006)
+New Revision: 434
+
+Added:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Kill duplicated code in iscsi_tcp_tgt.c by using iscsi_tcp like library.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-04-29 14:17:38 UTC (rev 433)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-04-29 15:25:55 UTC (rev 434)
+@@ -124,7 +124,7 @@
+ 	buf-&gt;sg.length += sizeof(uint32_t);
+ }
+ 
+-static inline int
++inline int
+ iscsi_hdr_extract(struct iscsi_tcp_conn *tcp_conn)
+ {
+ 	struct sk_buff *skb = tcp_conn-&gt;in.skb;
+@@ -640,7 +640,7 @@
+  *	The function calls skb_copy_bits() and updates per-connection
+  *	byte counters.
+  **/
+-static inline int
++inline int
+ iscsi_tcp_copy(struct iscsi_tcp_conn *tcp_conn)
+ {
+ 	void *buf = tcp_conn-&gt;data;
+@@ -689,7 +689,7 @@
+ 	crypto_digest_update(tcp_conn-&gt;data_rx_tfm, &amp;tmp, 1);
+ }
+ 
+-static int iscsi_scsi_data_in(struct iscsi_conn *conn)
++int iscsi_scsi_data_in(struct iscsi_conn *conn)
+ {
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct iscsi_cmd_task *ctask = tcp_conn-&gt;in.ctask;
+@@ -1894,7 +1894,7 @@
+ 	return rc;
+ }
+ 
+-static struct iscsi_cls_conn *
++struct iscsi_cls_conn *
+ iscsi_tcp_conn_create(struct iscsi_cls_session *cls_session, uint32_t conn_idx)
+ {
+ 	struct iscsi_conn *conn;
+@@ -1940,7 +1940,7 @@
+ 	return NULL;
+ }
+ 
+-static void
++void
+ iscsi_tcp_conn_destroy(struct iscsi_cls_conn *cls_conn)
+ {
+ 	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
+@@ -1973,7 +1973,7 @@
+ 	kfree(tcp_conn);
+ }
+ 
+-static int
++int
+ iscsi_tcp_conn_bind(struct iscsi_cls_session *cls_session,
+ 		    struct iscsi_cls_conn *cls_conn, uint64_t transport_eph,
+ 		    int is_leading)
+@@ -2052,7 +2052,7 @@
+ 	write_unlock_bh(&amp;sk-&gt;sk_callback_lock);
+ }
+ 
+-static void
++void
+ iscsi_tcp_terminate_conn(struct iscsi_conn *conn)
+ {
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+@@ -2457,7 +2457,7 @@
+ 	stats-&gt;custom[2].value = conn-&gt;eh_abort_cnt;
+ }
+ 
+-static struct iscsi_cls_session *
++struct iscsi_cls_session *
+ iscsi_tcp_session_create(struct iscsi_transport *iscsit,
+ 			 struct scsi_transport_template *scsit,
+ 			 uint32_t initial_cmdsn, uint32_t *hostno)
+@@ -2500,7 +2500,7 @@
+ 	return NULL;
+ }
+ 
+-static void iscsi_tcp_session_destroy(struct iscsi_cls_session *cls_session)
++void iscsi_tcp_session_destroy(struct iscsi_cls_session *cls_session)
+ {
+ 	struct iscsi_session *session = class_to_transport_session(cls_session);
+ 	struct iscsi_data_task *dtask, *n;
+
+Added: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 14:17:38 UTC (rev 433)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 15:25:55 UTC (rev 434)
+@@ -0,0 +1,22 @@
++/*
++ * makeshift to use iscsi_tcp.c like library
++ */
++
++extern struct iscsi_cls_conn *
++iscsi_tcp_conn_create(struct iscsi_cls_session *cls_session, uint32_t conn_idx);
++extern static void
++iscsi_tcp_conn_destroy(struct iscsi_cls_conn *cls_conn);
++extern int iscsi_tcp_conn_bind(struct iscsi_cls_session *cls_session,
++			       struct iscsi_cls_conn *cls_conn, uint64_t transport_eph,
++			       int is_leading);
++extern void iscsi_tcp_terminate_conn(struct iscsi_conn *conn);
++
++extern struct iscsi_cls_session *
++iscsi_tcp_session_create(struct iscsi_transport *iscsit,
++			 struct scsi_transport_template *scsit,
++			 uint32_t initial_cmdsn, uint32_t *hostno);
++extern void iscsi_tcp_session_destroy(struct iscsi_cls_session *cls_session);
++
++extern inline int iscsi_hdr_extract(struct iscsi_tcp_conn *tcp_conn);
++extern int iscsi_scsi_data_in(struct iscsi_conn *conn);
++extern inline int iscsi_tcp_copy(struct iscsi_tcp_conn *tcp_conn);
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 14:17:38 UTC (rev 433)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 15:25:55 UTC (rev 434)
+@@ -42,6 +42,7 @@
+ #include &lt;scsi/scsi_tgt.h&gt;
+ #include &lt;scsi/scsi_tcq.h&gt;
+ #include &quot;scsi_transport_iscsi.h&quot;
++#include &quot;iscsi_tcp_priv.h&quot;
+ 
+ /* tmp - will replace with SCSI logging stuff */
+ #define eprintk(fmt, args...)					\
+@@ -412,158 +413,6 @@
+ 	return rc;
+ }
+ 
+-static inline int
+-iscsi_tcp_copy(struct iscsi_tcp_conn *tcp_conn)
+-{
+-	void *buf = tcp_conn-&gt;data;
+-	int buf_size = tcp_conn-&gt;in.datalen;
+-	int buf_left = buf_size - tcp_conn-&gt;data_copied;
+-	int size = min(tcp_conn-&gt;in.copy, buf_left);
+-	int rc;
+-
+-	dprintk(&quot;tcp_copy %d bytes at offset %d copied %d\n&quot;,
+-		size, tcp_conn-&gt;in.offset, tcp_conn-&gt;data_copied);
+-	BUG_ON(size &lt;= 0);
+-
+-	rc = skb_copy_bits(tcp_conn-&gt;in.skb, tcp_conn-&gt;in.offset,
+-			   (char*)buf + tcp_conn-&gt;data_copied, size);
+-	BUG_ON(rc);
+-
+-	tcp_conn-&gt;in.offset += size;
+-	tcp_conn-&gt;in.copy -= size;
+-	tcp_conn-&gt;in.copied += size;
+-	tcp_conn-&gt;data_copied += size;
+-
+-	if (buf_size != tcp_conn-&gt;data_copied)
+-		return -EAGAIN;
+-
+-	return 0;
+-}
+-
+-static inline void
+-partial_sg_digest_update(struct iscsi_tcp_conn *tcp_conn,
+-			 struct scatterlist *sg, int offset, int length)
+-{
+-	struct scatterlist temp;
+-
+-	memcpy(&amp;temp, sg, sizeof(struct scatterlist));
+-	temp.offset = offset;
+-	temp.length = length;
+-	crypto_digest_update(tcp_conn-&gt;data_rx_tfm, &amp;temp, 1);
+-}
+-
+-static inline int
+-iscsi_ctask_copy(struct iscsi_tcp_conn *tcp_conn, struct iscsi_cmd_task *ctask,
+-		 void *buf, int buf_size, int offset)
+-{
+-	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-	int buf_left = buf_size - (tcp_conn-&gt;data_copied + offset);
+-	int size = min(tcp_conn-&gt;in.copy, buf_left);
+-	int rc;
+-
+-	size = min(size, ctask-&gt;data_count);
+-
+-	dprintk(&quot;ctask_copy %d bytes at offset %d copied %d\n&quot;,
+-		size, tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copied);
+-
+-	BUG_ON(size &lt;= 0);
+-	BUG_ON(tcp_ctask-&gt;sent + size &gt; ctask-&gt;total_length);
+-
+-	rc = skb_copy_bits(tcp_conn-&gt;in.skb, tcp_conn-&gt;in.offset,
+-			   (char*)buf + (offset + tcp_conn-&gt;data_copied), size);
+-	/* must fit into skb-&gt;len */
+-	BUG_ON(rc);
+-
+-	tcp_conn-&gt;in.offset += size;
+-	tcp_conn-&gt;in.copy -= size;
+-	tcp_conn-&gt;in.copied += size;
+-	tcp_conn-&gt;data_copied += size;
+-	tcp_ctask-&gt;sent += size;
+-	ctask-&gt;data_count -= size;
+-
+-	BUG_ON(tcp_conn-&gt;in.copy &lt; 0);
+-	BUG_ON(ctask-&gt;data_count &lt; 0);
+-
+-	if (buf_size != (tcp_conn-&gt;data_copied + offset)) {
+-		if (!ctask-&gt;data_count) {
+-			BUG_ON(buf_size - tcp_conn-&gt;data_copied &lt; 0);
+-			/* done with this PDU */
+-			return buf_size - tcp_conn-&gt;data_copied;
+-		}
+-		return -EAGAIN;
+-	}
+-
+-	/* done with this buffer or with both - PDU and buffer */
+-	tcp_conn-&gt;data_copied = 0;
+-	return 0;
+-}
+-
+-static int iscsi_scsi_data_in(struct iscsi_conn *conn)
+-{
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	struct iscsi_cmd_task *ctask = tcp_conn-&gt;in.ctask;
+-	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-	struct scsi_cmnd *sc = ctask-&gt;sc;
+-	struct scatterlist *sg;
+-	int i, offset, rc = 0;
+-
+-	BUG_ON((void*)ctask != sc-&gt;SCp.ptr);
+-
+-	offset = tcp_ctask-&gt;data_offset;
+-	sg = sc-&gt;request_buffer;
+-
+-	if (tcp_ctask-&gt;data_offset)
+-		for (i = 0; i &lt; tcp_ctask-&gt;sg_count; i++)
+-			offset -= sg[i].length;
+-	/* we've passed through partial sg*/
+-	if (offset &lt; 0)
+-		offset = 0;
+-
+-	for (i = tcp_ctask-&gt;sg_count; i &lt; sc-&gt;use_sg; i++) {
+-		char *dest;
+-
+-		dest = kmap_atomic(sg[i].page, KM_SOFTIRQ0);
+-		rc = iscsi_ctask_copy(tcp_conn, ctask, dest + sg[i].offset,
+-				      sg[i].length, offset);
+-		kunmap_atomic(dest, KM_SOFTIRQ0);
+-		if (rc == -EAGAIN)
+-			/* continue with the next SKB/PDU */
+-			return rc;
+-		if (!rc) {
+-			if (conn-&gt;datadgst_en) {
+-				if (!offset)
+-					crypto_digest_update(
+-							tcp_conn-&gt;data_rx_tfm,
+-							&amp;sg[i], 1);
+-				else
+-					partial_sg_digest_update(tcp_conn,
+-							&amp;sg[i],
+-							sg[i].offset + offset,
+-							sg[i].length - offset);
+-			}
+-			offset = 0;
+-			tcp_ctask-&gt;sg_count++;
+-		}
+-
+-		if (!ctask-&gt;data_count) {
+-			if (rc &amp;&amp; conn-&gt;datadgst_en)
+-				/*
+-				 * data-in is complete, but buffer not...
+-				 */
+-				partial_sg_digest_update(tcp_conn, &amp;sg[i],
+-						sg[i].offset, sg[i].length-rc);
+-			rc = 0;
+-			break;
+-		}
+-
+-		if (!tcp_conn-&gt;in.copy)
+-			return -EAGAIN;
+-	}
+-	BUG_ON(ctask-&gt;data_count);
+-
+-	return rc;
+-}
+-
+ static int
+ iscsi_data_recv(struct iscsi_conn *conn)
+ {
+@@ -602,72 +451,6 @@
+ 	return rc;
+ }
+ 
+-static inline int
+-iscsi_hdr_extract(struct iscsi_tcp_conn *tcp_conn)
+-{
+-	struct sk_buff *skb = tcp_conn-&gt;in.skb;
+-
+-	tcp_conn-&gt;in.zero_copy_hdr = 0;
+-
+-	if (tcp_conn-&gt;in.copy &gt;= tcp_conn-&gt;hdr_size &amp;&amp;
+-	    tcp_conn-&gt;in_progress == IN_PROGRESS_WAIT_HEADER) {
+-		/*
+-		 * Zero-copy PDU Header: using connection context
+-		 * to store header pointer.
+-		 */
+-		if (skb_shinfo(skb)-&gt;frag_list == NULL &amp;&amp;
+-		    !skb_shinfo(skb)-&gt;nr_frags) {
+-			tcp_conn-&gt;in.hdr = (struct iscsi_hdr *)
+-				((char*)skb-&gt;data + tcp_conn-&gt;in.offset);
+-			tcp_conn-&gt;in.zero_copy_hdr = 1;
+-		} else {
+-			/* ignoring return code since we checked
+-			 * in.copy before */
+-			skb_copy_bits(skb, tcp_conn-&gt;in.offset,
+-				&amp;tcp_conn-&gt;hdr, tcp_conn-&gt;hdr_size);
+-			tcp_conn-&gt;in.hdr = &amp;tcp_conn-&gt;hdr;
+-		}
+-		tcp_conn-&gt;in.offset += tcp_conn-&gt;hdr_size;
+-		tcp_conn-&gt;in.copy -= tcp_conn-&gt;hdr_size;
+-	} else {
+-		int hdr_remains;
+-		int copylen;
+-
+-		/*
+-		 * PDU header scattered across SKB's,
+-		 * copying it... This'll happen quite rarely.
+-		 */
+-
+-		if (tcp_conn-&gt;in_progress == IN_PROGRESS_WAIT_HEADER)
+-			tcp_conn-&gt;in.hdr_offset = 0;
+-
+-		hdr_remains = tcp_conn-&gt;hdr_size - tcp_conn-&gt;in.hdr_offset;
+-		BUG_ON(hdr_remains &lt;= 0);
+-
+-		copylen = min(tcp_conn-&gt;in.copy, hdr_remains);
+-		skb_copy_bits(skb, tcp_conn-&gt;in.offset,
+-			(char*)&amp;tcp_conn-&gt;hdr + tcp_conn-&gt;in.hdr_offset,
+-			copylen);
+-
+-		dprintk(&quot;PDU gather offset %d bytes %d in.offset %d &quot;
+-			&quot;in.copy %d\n&quot;, tcp_conn-&gt;in.hdr_offset, copylen,
+-			tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy);
+-
+-		tcp_conn-&gt;in.offset += copylen;
+-		tcp_conn-&gt;in.copy -= copylen;
+-		if (copylen &lt; hdr_remains)  {
+-			tcp_conn-&gt;in_progress = IN_PROGRESS_HEADER_GATHER;
+-			tcp_conn-&gt;in.hdr_offset += copylen;
+-		        return -EAGAIN;
+-		}
+-		tcp_conn-&gt;in.hdr = &amp;tcp_conn-&gt;hdr;
+-		tcp_conn-&gt;discontiguous_hdr_cnt++;
+-	        tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-	}
+-
+-	return 0;
+-}
+-
+ static int
+ iscsi_tcp_data_recv(read_descriptor_t *rd_desc, struct sk_buff *skb,
+ 		unsigned int offset, size_t len)
+@@ -824,7 +607,7 @@
+ }
+ 
+ static void
+-iscsi_tcp_data_ready(struct sock *sk, int flag)
++istgt_tcp_data_ready(struct sock *sk, int flag)
+ {
+ 	struct iscsi_conn *conn = sk-&gt;sk_user_data;
+ 	read_descriptor_t rd_desc;
+@@ -839,192 +622,34 @@
+ 	read_unlock(&amp;sk-&gt;sk_callback_lock);
+ }
+ 
+-static void
+-iscsi_tcp_state_change(struct sock *sk)
+-{
+-	struct iscsi_tcp_conn *tcp_conn;
+-	struct iscsi_conn *conn;
+-	struct iscsi_session *session;
+-	void (*old_state_change)(struct sock *);
+-
+-	read_lock(&amp;sk-&gt;sk_callback_lock);
+-
+-	conn = (struct iscsi_conn*)sk-&gt;sk_user_data;
+-	session = conn-&gt;session;
+-
+-	if ((sk-&gt;sk_state == TCP_CLOSE_WAIT ||
+-	     sk-&gt;sk_state == TCP_CLOSE) &amp;&amp;
+-	    !atomic_read(&amp;sk-&gt;sk_rmem_alloc)) {
+-		dprintk(&quot;iscsi_tcp_state_change: TCP_CLOSE|TCP_CLOSE_WAIT\n&quot;);
+-		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+-	}
+-
+-	tcp_conn = conn-&gt;dd_data;
+-	old_state_change = tcp_conn-&gt;old_state_change;
+-
+-	read_unlock(&amp;sk-&gt;sk_callback_lock);
+-
+-	old_state_change(sk);
+-}
+-
+-static void
+-iscsi_write_space(struct sock *sk)
+-{
+-	struct iscsi_conn *conn = (struct iscsi_conn*)sk-&gt;sk_user_data;
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-
+-	tcp_conn-&gt;old_write_space(sk);
+-	clear_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-	scsi_queue_work(conn-&gt;session-&gt;host, &amp;conn-&gt;xmitwork);
+-}
+-
+-static void
+-iscsi_conn_set_callbacks(struct iscsi_conn *conn)
+-{
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	struct sock *sk = tcp_conn-&gt;sock-&gt;sk;
+-
+-	/* assign new callbacks */
+-	write_lock_bh(&amp;sk-&gt;sk_callback_lock);
+-	sk-&gt;sk_user_data = conn;
+-	tcp_conn-&gt;old_data_ready = sk-&gt;sk_data_ready;
+-	tcp_conn-&gt;old_state_change = sk-&gt;sk_state_change;
+-	tcp_conn-&gt;old_write_space = sk-&gt;sk_write_space;
+-	sk-&gt;sk_data_ready = iscsi_tcp_data_ready;
+-	sk-&gt;sk_state_change = iscsi_tcp_state_change;
+-	sk-&gt;sk_write_space = iscsi_write_space;
+-	write_unlock_bh(&amp;sk-&gt;sk_callback_lock);
+-}
+-
+-static void
+-iscsi_conn_restore_callbacks(struct iscsi_conn *conn)
+-{
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	struct sock *sk = tcp_conn-&gt;sock-&gt;sk;
+-
+-	/* restore socket callbacks, see also: iscsi_conn_set_callbacks() */
+-	write_lock_bh(&amp;sk-&gt;sk_callback_lock);
+-	sk-&gt;sk_user_data    = NULL;
+-	sk-&gt;sk_data_ready   = tcp_conn-&gt;old_data_ready;
+-	sk-&gt;sk_state_change = tcp_conn-&gt;old_state_change;
+-	sk-&gt;sk_write_space  = tcp_conn-&gt;old_write_space;
+-	sk-&gt;sk_no_check	 = 0;
+-	write_unlock_bh(&amp;sk-&gt;sk_callback_lock);
+-}
+-
+-static void
+-iscsi_tcp_terminate_conn(struct iscsi_conn *conn)
+-{
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-
+-	if (!tcp_conn-&gt;sock)
+-		return;
+-
+-	sock_hold(tcp_conn-&gt;sock-&gt;sk);
+-	iscsi_conn_restore_callbacks(conn);
+-	sock_put(tcp_conn-&gt;sock-&gt;sk);
+-
+-	sock_release(tcp_conn-&gt;sock);
+-	tcp_conn-&gt;sock = NULL;
+-	conn-&gt;recv_lock = NULL;
+-}
+-
+ static int
+-iscsi_r2tpool_alloc(struct iscsi_session *session)
++istgt_tcp_conn_bind(struct iscsi_cls_session *cls_session,
++		    struct iscsi_cls_conn *cls_conn, uint64_t transport_eph,
++		    int is_leading)
+ {
+-	int i;
+-	int cmd_i;
++	struct socket *sock;
++	int err;
+ 
+-	/*
+-	 * initialize per-task: R2T pool and xmit queue
+-	 */
+-	for (cmd_i = 0; cmd_i &lt; session-&gt;cmds_max; cmd_i++) {
+-	        struct iscsi_cmd_task *ctask = session-&gt;cmds[cmd_i];
+-		struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-
+-		/*
+-		 * pre-allocated x4 as much r2ts to handle race when
+-		 * target acks DataOut faster than we data_xmit() queues
+-		 * could replenish r2tqueue.
+-		 */
+-
+-		/* R2T pool */
+-		if (iscsi_pool_init(&amp;tcp_ctask-&gt;r2tpool, session-&gt;max_r2t * 4,
+-				    (void***)&amp;tcp_ctask-&gt;r2ts,
+-				    sizeof(struct iscsi_r2t_info))) {
+-			goto r2t_alloc_fail;
+-		}
+-
+-		/* R2T xmit queue */
+-		tcp_ctask-&gt;r2tqueue = kfifo_alloc(
+-		      session-&gt;max_r2t * 4 * sizeof(void*), GFP_KERNEL, NULL);
+-		if (tcp_ctask-&gt;r2tqueue == ERR_PTR(-ENOMEM)) {
+-			iscsi_pool_free(&amp;tcp_ctask-&gt;r2tpool,
+-					(void**)tcp_ctask-&gt;r2ts);
+-			goto r2t_alloc_fail;
+-		}
+-
+-		/*
+-		 * number of
+-		 * Data-Out PDU's within R2T-sequence can be quite big;
+-		 * using mempool
+-		 */
+-		tcp_ctask-&gt;datapool = mempool_create(ISCSI_DTASK_DEFAULT_MAX,
+-						     mempool_alloc_slab,
+-						     mempool_free_slab,
+-						     taskcache);
+-		if (tcp_ctask-&gt;datapool == NULL) {
+-			kfifo_free(tcp_ctask-&gt;r2tqueue);
+-			iscsi_pool_free(&amp;tcp_ctask-&gt;r2tpool,
+-					(void**)tcp_ctask-&gt;r2ts);
+-			goto r2t_alloc_fail;
+-		}
+-		INIT_LIST_HEAD(&amp;tcp_ctask-&gt;dataqueue);
++	sock = sockfd_lookup((int)transport_eph, &amp;err);
++	if (!sock) {
++		printk(KERN_ERR &quot;iscsi_tcp: sockfd_lookup failed %d\n&quot;, err);
++		return -EEXIST;
+ 	}
+ 
+-	return 0;
++	err = iscsi_tcp_conn_bind(cls_session, cls_conn, transport_eph, is_leading);
++	if (err)
++		goto out;
+ 
+-r2t_alloc_fail:
+-	for (i = 0; i &lt; cmd_i; i++) {
+-		struct iscsi_cmd_task *ctask = session-&gt;cmds[i];
+-		struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
++	write_lock_bh(&amp;sock-&gt;sk-&gt;sk_callback_lock);
+ 
+-		mempool_destroy(tcp_ctask-&gt;datapool);
+-		kfifo_free(tcp_ctask-&gt;r2tqueue);
+-		iscsi_pool_free(&amp;tcp_ctask-&gt;r2tpool,
+-				(void**)tcp_ctask-&gt;r2ts);
+-	}
+-	return -ENOMEM;
+-}
++	sk-&gt;sk_data_ready = istgt_tcp_data_ready;
+ 
+-static void
+-iscsi_r2tpool_free(struct iscsi_session *session)
+-{
+-	int i;
+-
+-	for (i = 0; i &lt; session-&gt;cmds_max; i++) {
+-		struct iscsi_cmd_task *ctask = session-&gt;cmds[i];
+-		struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-
+-		mempool_destroy(tcp_ctask-&gt;datapool);
+-		kfifo_free(tcp_ctask-&gt;r2tqueue);
+-		iscsi_pool_free(&amp;tcp_ctask-&gt;r2tpool,
+-				(void**)tcp_ctask-&gt;r2ts);
+-	}
++	write_unlock_bh(&amp;sock-&gt;sk-&gt;sk_callback_lock);
++out:
++	sock_release(sock);
++	return err;
+ }
+ 
+-void istgt_session_init(struct iscsi_cls_session *cls_session)
+-{
+-	struct istgt_session *istgt_session =
+-		(struct istgt_session *) cls_session-&gt;dd_data;
+-
+-	INIT_LIST_HEAD(&amp;istgt_session-&gt;recvlist);
+-	INIT_LIST_HEAD(&amp;istgt_session-&gt;cmd_hash);
+-	spin_lock_init(&amp;istgt_session-&gt;slock);
+-
+-	INIT_WORK(&amp;istgt_session-&gt;recvwork, istgt_recvworker, cls_session);
+-}
+-
+ static struct iscsi_cls_session *
+ istgt_tcp_session_create(struct iscsi_transport *iscsit,
+ 			 struct scsi_transport_template *scsit,
+@@ -1033,45 +658,32 @@
+ 	struct Scsi_Host *shost;
+ 	struct iscsi_cls_session *cls_session;
+ 	struct iscsi_session *session;
+-	uint32_t hn;
+-	int err, i;
+-	int cmd_task_size;
++	struct istgt_session *istgt_session;
++	int i, err;
+ 
+-	cmd_task_size = sizeof(struct iscsi_tcp_cmd_task) +
+-		sizeof(struct istgt_task);
+-
+-	cls_session = iscsi_session_setup(iscsit, scsit,
+-					  cmd_task_size,
+-					  sizeof(struct iscsi_tcp_mgmt_task),
+-					  initial_cmdsn, &amp;hn);
++	cls_session = iscsi_tcp_session_create(iscsit, scsit, initial_cmdsn,
++					       hostno);
+ 	if (!cls_session)
+ 		return NULL;
+ 	shost = iscsi_session_to_shost(cls_session);
+ 	err = scsi_tgt_alloc_queue(shost);
+ 	if (err)
+ 		goto session_free;
+-	*hostno = hn;
+ 
+ 	session = class_to_transport_session(cls_session);
+ 	for (i = 0; i &lt; initial_cmdsn; i++) {
+ 		struct iscsi_cmd_task *ctask = session-&gt;cmds[i];
+-		struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-
+-		ctask-&gt;hdr = &amp;tcp_ctask-&gt;hdr;
+-
+ 		INIT_LIST_HEAD(&amp;ctask_to_ttask(ctask)-&gt;hash);
+ 		INIT_LIST_HEAD(&amp;ctask_to_ttask(ctask)-&gt;tlist);
+ 	}
+ 
+-	for (i = 0; i &lt; session-&gt;mgmtpool_max; i++) {
+-		struct iscsi_mgmt_task *mtask = session-&gt;mgmt_cmds[i];
+-		struct iscsi_tcp_mgmt_task *tcp_mtask = mtask-&gt;dd_data;
++	istgt_session =	(struct istgt_session *) cls_session-&gt;dd_data;
+ 
+-		mtask-&gt;hdr = &amp;tcp_mtask-&gt;hdr;
+-	}
++	INIT_LIST_HEAD(&amp;istgt_session-&gt;recvlist);
++	INIT_LIST_HEAD(&amp;istgt_session-&gt;cmd_hash);
++	spin_lock_init(&amp;istgt_session-&gt;slock);
+ 
+-	if (iscsi_r2tpool_alloc(class_to_transport_session(cls_session)))
+-		goto session_free;
++	INIT_WORK(&amp;istgt_session-&gt;recvwork, istgt_recvworker, cls_session);
+ 
+ 	return cls_session;
+ session_free:
+@@ -1079,156 +691,6 @@
+ 	return NULL;
+ }
+ 
+-static void iscsi_tcp_session_destroy(struct iscsi_cls_session *cls_session)
+-{
+-	struct iscsi_session *session = class_to_transport_session(cls_session);
+-	struct iscsi_data_task *dtask, *n;
+-	int cmd_i;
+-
+-	for (cmd_i = 0; cmd_i &lt; session-&gt;cmds_max; cmd_i++) {
+-		struct iscsi_cmd_task *ctask = session-&gt;cmds[cmd_i];
+-		struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-
+-		list_for_each_entry_safe(dtask, n, &amp;tcp_ctask-&gt;dataqueue,
+-					 item) {
+-			list_del(&amp;dtask-&gt;item);
+-			mempool_free(dtask, tcp_ctask-&gt;datapool);
+-		}
+-	}
+-
+-	iscsi_r2tpool_free(class_to_transport_session(cls_session));
+-	iscsi_session_teardown(cls_session);
+-}
+-
+-static struct iscsi_cls_conn *
+-iscsi_tcp_conn_create(struct iscsi_cls_session *cls_session, uint32_t conn_idx)
+-{
+-	struct iscsi_conn *conn;
+-	struct iscsi_cls_conn *cls_conn;
+-	struct iscsi_tcp_conn *tcp_conn;
+-
+-	cls_conn = iscsi_conn_setup(cls_session, conn_idx);
+-	if (!cls_conn)
+-		return NULL;
+-	conn = cls_conn-&gt;dd_data;
+-	/*
+-	 * due to strange issues with iser these are not set
+-	 * in iscsi_conn_setup
+-	 */
+-	conn-&gt;max_recv_dlength = DEFAULT_MAX_RECV_DATA_SEGMENT_LENGTH;
+-
+-	tcp_conn = kzalloc(sizeof(*tcp_conn), GFP_KERNEL);
+-	if (!tcp_conn)
+-		goto tcp_conn_alloc_fail;
+-
+-	conn-&gt;dd_data = tcp_conn;
+-	tcp_conn-&gt;iscsi_conn = conn;
+-	tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-	/* initial operational parameters */
+-	tcp_conn-&gt;hdr_size = sizeof(struct iscsi_hdr);
+-	tcp_conn-&gt;data_size = DEFAULT_MAX_RECV_DATA_SEGMENT_LENGTH;
+-
+-	/* allocate initial PDU receive place holder */
+-	if (tcp_conn-&gt;data_size &lt;= PAGE_SIZE)
+-		tcp_conn-&gt;data = kmalloc(tcp_conn-&gt;data_size, GFP_KERNEL);
+-	else
+-		tcp_conn-&gt;data = (void*)__get_free_pages(GFP_KERNEL,
+-					get_order(tcp_conn-&gt;data_size));
+-	if (!tcp_conn-&gt;data)
+-		goto max_recv_dlenght_alloc_fail;
+-
+-	return cls_conn;
+-
+-max_recv_dlenght_alloc_fail:
+-	kfree(tcp_conn);
+-tcp_conn_alloc_fail:
+-	iscsi_conn_teardown(cls_conn);
+-	return NULL;
+-}
+-
+-static void
+-iscsi_tcp_conn_destroy(struct iscsi_cls_conn *cls_conn)
+-{
+-	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	int digest = 0;
+-
+-	if (conn-&gt;hdrdgst_en || conn-&gt;datadgst_en)
+-		digest = 1;
+-
+-	iscsi_conn_teardown(cls_conn);
+-
+-	/* now free tcp_conn */
+-	if (digest) {
+-		if (tcp_conn-&gt;tx_tfm)
+-			crypto_free_tfm(tcp_conn-&gt;tx_tfm);
+-		if (tcp_conn-&gt;rx_tfm)
+-			crypto_free_tfm(tcp_conn-&gt;rx_tfm);
+-		if (tcp_conn-&gt;data_tx_tfm)
+-			crypto_free_tfm(tcp_conn-&gt;data_tx_tfm);
+-		if (tcp_conn-&gt;data_rx_tfm)
+-			crypto_free_tfm(tcp_conn-&gt;data_rx_tfm);
+-	}
+-
+-	/* free conn-&gt;data, size = MaxRecvDataSegmentLength */
+-	if (tcp_conn-&gt;data_size &lt;= PAGE_SIZE)
+-		kfree(tcp_conn-&gt;data);
+-	else
+-		free_pages((unsigned long)tcp_conn-&gt;data,
+-			   get_order(tcp_conn-&gt;data_size));
+-	kfree(tcp_conn);
+-}
+-
+-static int
+-iscsi_tcp_conn_bind(struct iscsi_cls_session *cls_session,
+-		    struct iscsi_cls_conn *cls_conn, uint64_t transport_eph,
+-		    int is_leading)
+-{
+-	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	struct sock *sk;
+-	struct socket *sock;
+-	int err;
+-
+-	/* lookup for existing socket */
+-	sock = sockfd_lookup((int)transport_eph, &amp;err);
+-	if (!sock) {
+-		printk(KERN_ERR &quot;iscsi_tcp: sockfd_lookup failed %d\n&quot;, err);
+-		return -EEXIST;
+-	}
+-
+-	err = iscsi_conn_bind(cls_session, cls_conn, is_leading);
+-	if (err)
+-		return err;
+-
+-	if (conn-&gt;stop_stage != STOP_CONN_SUSPEND) {
+-		/* bind iSCSI connection and socket */
+-		tcp_conn-&gt;sock = sock;
+-
+-		/* setup Socket parameters */
+-		sk = sock-&gt;sk;
+-		sk-&gt;sk_reuse = 1;
+-		sk-&gt;sk_sndtimeo = 15 * HZ; /* FIXME: make it configurable */
+-		sk-&gt;sk_allocation = GFP_ATOMIC;
+-
+-		/* FIXME: disable Nagle's algorithm */
+-
+-		/*
+-		 * Intercept TCP callbacks for sendfile like receive
+-		 * processing.
+-		 */
+-		conn-&gt;recv_lock = &amp;sk-&gt;sk_callback_lock;
+-		iscsi_conn_set_callbacks(conn);
+-		tcp_conn-&gt;sendpage = tcp_conn-&gt;sock-&gt;ops-&gt;sendpage;
+-		/*
+-		 * set receive state machine into initial state
+-		 */
+-		tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-	}
+-
+-	return 0;
+-}
+-
+ static int istgt_transfer_response(struct scsi_cmnd *scmd,
+ 				   void (*done)(struct scsi_cmnd *))
+ {
+@@ -1300,7 +762,7 @@
+ 	.destroy_session	= iscsi_tcp_session_destroy,
+ 	.create_conn		= iscsi_tcp_conn_create,
+ 	.destroy_conn		= iscsi_tcp_conn_destroy,
+-	.bind_conn		= iscsi_tcp_conn_bind,
++	.bind_conn		= istgt_tcp_conn_bind,
+ 	.start_conn		= iscsi_conn_start,
+ 	.terminate_conn		= iscsi_tcp_terminate_conn,
+ 	.xmit_cmd_task		= istgt_tcp_ctask_xmit,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000420.html">[Stgt-svn] r433 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000422.html">[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#421">[ date ]</a>
+              <a href="thread.html#421">[ thread ]</a>
+              <a href="subject.html#421">[ subject ]</a>
+              <a href="author.html#421">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

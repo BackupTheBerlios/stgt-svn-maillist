@@ -1,0 +1,106 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r441 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r441%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291636.k3TGav99000088%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000427.html">
+   <LINK REL="Next"  HREF="000429.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r441 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r441%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291636.k3TGav99000088%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r441 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 29 18:36:57 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000427.html">[Stgt-svn] r440 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000429.html">[Stgt-svn] r442 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#428">[ date ]</a>
+              <a href="thread.html#428">[ thread ]</a>
+              <a href="subject.html#428">[ subject ]</a>
+              <a href="author.html#428">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-29 18:36:56 +0200 (Sat, 29 Apr 2006)
+New Revision: 441
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Just cleanup.
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 16:34:32 UTC (rev 440)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 16:36:56 UTC (rev 441)
+@@ -1,10 +1,6 @@
+ /*
+  * iSCSI Target over TCP/IP
+  *
+- * Copyright (C) 2004 Dmitry Yusupov
+- * Copyright (C) 2004 Alex Aizman
+- * Copyright (C) 2005 - 2006 Mike Christie
+- * Copyright (C) 2006 Red Hat, Inc.  All rights reserved.
+  * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+  *
+  * This program is free software; you can redistribute it and/or modify
+@@ -21,18 +17,11 @@
+  */
+ 
+ /*
+- * Most part is taken from iscsi_tcp. Integrating with iscsi_tcp would
+- * be nice...
++ * This needs to be integrated with iscsi_tcp.
+  */
+-#include &lt;linux/types.h&gt;
+ #include &lt;linux/list.h&gt;
+ #include &lt;linux/inet.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/crypto.h&gt;
+-#include &lt;linux/delay.h&gt;
+ #include &lt;linux/kfifo.h&gt;
+-#include &lt;linux/scatterlist.h&gt;
+-#include &lt;linux/mutex.h&gt;
+ #include &lt;net/tcp.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000427.html">[Stgt-svn] r440 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000429.html">[Stgt-svn] r442 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#428">[ date ]</a>
+              <a href="thread.html#428">[ thread ]</a>
+              <a href="subject.html#428">[ subject ]</a>
+              <a href="author.html#428">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

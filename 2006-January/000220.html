@@ -1,0 +1,776 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r233 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r233%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272212.k0RMCiCB000349%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000219.html">
+   <LINK REL="Next"  HREF="000221.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r233 - branches/use-scsi-ml/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r233%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601272212.k0RMCiCB000349%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r233 - branches/use-scsi-ml/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Fri Jan 27 23:12:44 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000219.html">[Stgt-svn] r232 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000221.html">[Stgt-svn] r234 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#220">[ date ]</a>
+              <a href="thread.html#220">[ thread ]</a>
+              <a href="subject.html#220">[ subject ]</a>
+              <a href="author.html#220">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-27 23:12:44 +0100 (Fri, 27 Jan 2006)
+New Revision: 233
+
+Added:
+   branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+Log:
+this patch needs to be applied to your kernel. it is the scsi-ml, block layer etc changes
+
+Added: branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-01-27 22:09:50 UTC (rev 232)
++++ branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-01-27 22:12:44 UTC (rev 233)
+@@ -0,0 +1,700 @@
++diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
++index 8e27d0a..9e7375f 100644
++--- a/block/ll_rw_blk.c
+++++ b/block/ll_rw_blk.c
++@@ -2291,7 +2291,7 @@ int blk_rq_map_user(request_queue_t *q, 
++ 	 */
++ 	uaddr = (unsigned long) ubuf;
++ 	if (!(uaddr &amp; queue_dma_alignment(q)) &amp;&amp; !(len &amp; queue_dma_alignment(q)))
++-		bio = bio_map_user(q, NULL, uaddr, len, reading);
+++		bio = bio_map_user(q, NULL, uaddr, len, reading, 0);
++ 	else
++ 		bio = bio_copy_user(q, uaddr, len, reading);
++ 
++@@ -2343,7 +2343,8 @@ int blk_rq_map_user_iov(request_queue_t 
++ 	/* we don't allow misaligned data like bio_map_user() does.  If the
++ 	 * user is using sg, they're expected to know the alignment constraints
++ 	 * and respect them accordingly */
++-	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ);
+++	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ,
+++				0);
++ 	if (IS_ERR(bio))
++ 		return PTR_ERR(bio);
++ 
++diff --git a/drivers/md/dm-bio-list.h b/drivers/md/dm-bio-list.h
++deleted file mode 100644
++index bbf4615..0000000
++--- a/drivers/md/dm-bio-list.h
+++++ /dev/null
++@@ -1,71 +0,0 @@
++-/*
++- * Copyright (C) 2004 Red Hat UK Ltd.
++- *
++- * This file is released under the GPL.
++- */
++-
++-#ifndef DM_BIO_LIST_H
++-#define DM_BIO_LIST_H
++-
++-#include &lt;linux/bio.h&gt;
++-
++-struct bio_list {
++-	struct bio *head;
++-	struct bio *tail;
++-};
++-
++-static inline void bio_list_init(struct bio_list *bl)
++-{
++-	bl-&gt;head = bl-&gt;tail = NULL;
++-}
++-
++-static inline void bio_list_add(struct bio_list *bl, struct bio *bio)
++-{
++-	bio-&gt;bi_next = NULL;
++-
++-	if (bl-&gt;tail)
++-		bl-&gt;tail-&gt;bi_next = bio;
++-	else
++-		bl-&gt;head = bio;
++-
++-	bl-&gt;tail = bio;
++-}
++-
++-static inline void bio_list_merge(struct bio_list *bl, struct bio_list *bl2)
++-{
++-	if (!bl2-&gt;head)
++-		return;
++-
++-	if (bl-&gt;tail)
++-		bl-&gt;tail-&gt;bi_next = bl2-&gt;head;
++-	else
++-		bl-&gt;head = bl2-&gt;head;
++-
++-	bl-&gt;tail = bl2-&gt;tail;
++-}
++-
++-static inline struct bio *bio_list_pop(struct bio_list *bl)
++-{
++-	struct bio *bio = bl-&gt;head;
++-
++-	if (bio) {
++-		bl-&gt;head = bl-&gt;head-&gt;bi_next;
++-		if (!bl-&gt;head)
++-			bl-&gt;tail = NULL;
++-
++-		bio-&gt;bi_next = NULL;
++-	}
++-
++-	return bio;
++-}
++-
++-static inline struct bio *bio_list_get(struct bio_list *bl)
++-{
++-	struct bio *bio = bl-&gt;head;
++-
++-	bl-&gt;head = bl-&gt;tail = NULL;
++-
++-	return bio;
++-}
++-
++-#endif
++diff --git a/drivers/md/dm-mpath.c b/drivers/md/dm-mpath.c
++index f72a82f..c6e206f 100644
++--- a/drivers/md/dm-mpath.c
+++++ b/drivers/md/dm-mpath.c
++@@ -8,9 +8,9 @@
++ #include &quot;dm.h&quot;
++ #include &quot;dm-path-selector.h&quot;
++ #include &quot;dm-hw-handler.h&quot;
++-#include &quot;dm-bio-list.h&quot;
++ #include &quot;dm-bio-record.h&quot;
++ 
+++#include &lt;linux/bio-list.h&gt;
++ #include &lt;linux/ctype.h&gt;
++ #include &lt;linux/init.h&gt;
++ #include &lt;linux/mempool.h&gt;
++diff --git a/drivers/md/dm-raid1.c b/drivers/md/dm-raid1.c
++index 6cfa8d4..53f589b 100644
++--- a/drivers/md/dm-raid1.c
+++++ b/drivers/md/dm-raid1.c
++@@ -5,11 +5,11 @@
++  */
++ 
++ #include &quot;dm.h&quot;
++-#include &quot;dm-bio-list.h&quot;
++ #include &quot;dm-io.h&quot;
++ #include &quot;dm-log.h&quot;
++ #include &quot;kcopyd.h&quot;
++ 
+++#include &lt;linux/bio-list.h&gt;
++ #include &lt;linux/ctype.h&gt;
++ #include &lt;linux/init.h&gt;
++ #include &lt;linux/mempool.h&gt;
++diff --git a/drivers/md/dm-snap.c b/drivers/md/dm-snap.c
++index 4b9dd8f..f6d44e9 100644
++--- a/drivers/md/dm-snap.c
+++++ b/drivers/md/dm-snap.c
++@@ -18,9 +18,9 @@
++ #include &lt;linux/module.h&gt;
++ #include &lt;linux/slab.h&gt;
++ #include &lt;linux/vmalloc.h&gt;
+++#include &lt;linux/bio-list.h&gt;
++ 
++ #include &quot;dm-snap.h&quot;
++-#include &quot;dm-bio-list.h&quot;
++ #include &quot;kcopyd.h&quot;
++ 
++ /*
++diff --git a/drivers/md/dm.c b/drivers/md/dm.c
++index 097d1e5..f51568a 100644
++--- a/drivers/md/dm.c
+++++ b/drivers/md/dm.c
++@@ -6,8 +6,8 @@
++  */
++ 
++ #include &quot;dm.h&quot;
++-#include &quot;dm-bio-list.h&quot;
++ 
+++#include &lt;linux/bio-list.h&gt;
++ #include &lt;linux/init.h&gt;
++ #include &lt;linux/module.h&gt;
++ #include &lt;linux/moduleparam.h&gt;
++diff --git a/drivers/md/raid1.c b/drivers/md/raid1.c
++index a06ff91..76798dc 100644
++--- a/drivers/md/raid1.c
+++++ b/drivers/md/raid1.c
++@@ -31,7 +31,7 @@
++  * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++  */
++ 
++-#include &quot;dm-bio-list.h&quot;
+++#include &lt;linux/bio-list.h&gt;
++ #include &lt;linux/raid/raid1.h&gt;
++ #include &lt;linux/raid/bitmap.h&gt;
++ 
++diff --git a/drivers/md/raid10.c b/drivers/md/raid10.c
++index 9e658e5..c480fe6 100644
++--- a/drivers/md/raid10.c
+++++ b/drivers/md/raid10.c
++@@ -18,7 +18,7 @@
++  * Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++  */
++ 
++-#include &quot;dm-bio-list.h&quot;
+++#include &lt;linux/bio-list.h&gt;
++ #include &lt;linux/raid/raid10.h&gt;
++ #include &lt;linux/raid/bitmap.h&gt;
++ 
++diff --git a/drivers/scsi/hosts.c b/drivers/scsi/hosts.c
++index 5881079..64e687a 100644
++--- a/drivers/scsi/hosts.c
+++++ b/drivers/scsi/hosts.c
++@@ -264,6 +264,11 @@ static void scsi_host_dev_release(struct
++ 	if (shost-&gt;work_q)
++ 		destroy_workqueue(shost-&gt;work_q);
++ 
+++	if (shost-&gt;uspace_req_q) {
+++		kfree(shost-&gt;uspace_req_q-&gt;queuedata);
+++		scsi_free_queue(shost-&gt;uspace_req_q);
+++	}
+++
++ 	scsi_destroy_command_freelist(shost);
++ 	kfree(shost-&gt;shost_data);
++ 
++diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
++index 245ca99..48cfdf2 100644
++--- a/drivers/scsi/scsi.c
+++++ b/drivers/scsi/scsi.c
++@@ -236,6 +236,59 @@ static struct scsi_cmnd *__scsi_get_comm
++ }
++ 
++ /*
+++ * Function:	scsi_host_get_command()
+++ *
+++ * Purpose:	Allocate and setup a scsi command block and blk request
+++ *
+++ * Arguments:	shost	- scsi host
+++ *		data_dir - dma data dir
+++ *		gfp_mask- allocator flags
+++ *
+++ * Returns:	The allocated scsi command structure.
+++ *
+++ * This should be called by target LLDs to get a command.
+++ */
+++struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *shost,
+++					enum dma_data_direction data_dir,
+++					gfp_t gfp_mask)
+++{
+++	int write = (data_dir == DMA_TO_DEVICE);
+++	struct request *rq;
+++	struct scsi_cmnd *cmd;
+++
+++	rq = blk_get_request(shost-&gt;uspace_req_q, write, gfp_mask);
+++	if (!rq)
+++		return NULL;
+++
+++	/* Bail if we can't get a reference to the device */
+++	if (!get_device(&amp;shost-&gt;shost_gendev))
+++		goto release_rq;
+++
+++	cmd = __scsi_get_command(shost, gfp_mask);
+++	if (!cmd)
+++		goto put_dev;
+++
+++	memset(cmd, 0, sizeof(*cmd));
+++	cmd-&gt;sc_data_direction = data_dir;
+++	cmd-&gt;jiffies_at_alloc = jiffies;
+++	cmd-&gt;shost = shost;
+++	cmd-&gt;request = rq;
+++
+++	rq-&gt;special = cmd;
+++	rq-&gt;flags |= REQ_SPECIAL | REQ_BLOCK_PC;
+++
+++	return cmd;
+++
+++put_dev:
+++	put_device(&amp;shost-&gt;shost_gendev);
+++release_rq:
+++	blk_put_request(rq);
+++	return NULL;
+++
+++}				
+++EXPORT_SYMBOL_GPL(scsi_host_get_command);
+++
+++/*
++  * Function:	scsi_get_command()
++  *
++  * Purpose:	Allocate and setup a scsi command block
++@@ -274,6 +327,45 @@ struct scsi_cmnd *scsi_get_command(struc
++ EXPORT_SYMBOL(scsi_get_command);
++ 
++ /*
+++ * Function:	scsi_host_put_command()
+++ *
+++ * Purpose:	Free a scsi command block
+++ *
+++ * Arguments:	cmd	- command block to free
+++ *
+++ * Returns:	Nothing.
+++ *
+++ * Notes:	The command must not belong to any lists.
+++ */
+++void scsi_host_put_command(struct scsi_cmnd *cmd)
+++{
+++	struct Scsi_Host *shost = cmd-&gt;shost;
+++	struct request_queue *q = cmd-&gt;shost-&gt;uspace_req_q;
+++	struct request *rq = cmd-&gt;request;
+++	unsigned long flags;
+++	
+++	/* changing locks here, don't need to restore the irq state */
+++	spin_lock_irqsave(&amp;shost-&gt;free_list_lock, flags);
+++	if (unlikely(list_empty(&amp;shost-&gt;free_list))) {
+++		list_add(&amp;cmd-&gt;list, &amp;shost-&gt;free_list);
+++		cmd = NULL;
+++	}
+++	spin_unlock(&amp;shost-&gt;free_list_lock);
+++
+++	spin_lock(q-&gt;queue_lock);
+++	if (blk_rq_tagged(rq))
+++		blk_queue_end_tag(q, rq);
+++	__blk_put_request(q, rq);
+++	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+++
+++	if (likely(cmd != NULL))
+++		kmem_cache_free(shost-&gt;cmd_pool-&gt;slab, cmd);
+++
+++	put_device(&amp;shost-&gt;shost_gendev);
+++}
+++EXPORT_SYMBOL_GPL(scsi_host_put_command);
+++
+++/*
++  * Function:	scsi_put_command()
++  *
++  * Purpose:	Free a scsi command block
++diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
++index 3574ba9..ab66ca4 100644
++--- a/drivers/scsi/scsi_lib.c
+++++ b/drivers/scsi/scsi_lib.c
++@@ -802,7 +802,7 @@ static struct scsi_cmnd *scsi_end_reques
++ 	return NULL;
++ }
++ 
++-static struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+++struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
++ {
++ 	struct scsi_host_sg_pool *sgp;
++ 	struct scatterlist *sgl;
++@@ -843,7 +843,9 @@ static struct scatterlist *scsi_alloc_sg
++ 	return sgl;
++ }
++ 
++-static void scsi_free_sgtable(struct scatterlist *sgl, int index)
+++EXPORT_SYMBOL(scsi_alloc_sgtable);
+++
+++void scsi_free_sgtable(struct scatterlist *sgl, int index)
++ {
++ 	struct scsi_host_sg_pool *sgp;
++ 
++@@ -853,6 +855,8 @@ static void scsi_free_sgtable(struct sca
++ 	mempool_free(sgl, sgp-&gt;pool);
++ }
++ 
+++EXPORT_SYMBOL(scsi_free_sgtable);
+++
++ /*
++  * Function:    scsi_release_buffers()
++  *
++@@ -1685,29 +1689,40 @@ u64 scsi_calculate_bounce_limit(struct S
++ }
++ EXPORT_SYMBOL(scsi_calculate_bounce_limit);
++ 
++-struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+++struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+++					 request_fn_proc *request_fn)
++ {
++-	struct Scsi_Host *shost = sdev-&gt;host;
++ 	struct request_queue *q;
++ 
++-	q = blk_init_queue(scsi_request_fn, NULL);
+++	q = blk_init_queue(request_fn, NULL);
++ 	if (!q)
++ 		return NULL;
++ 
++-	blk_queue_prep_rq(q, scsi_prep_fn);
++-
++ 	blk_queue_max_hw_segments(q, shost-&gt;sg_tablesize);
++ 	blk_queue_max_phys_segments(q, SCSI_MAX_PHYS_SEGMENTS);
++ 	blk_queue_max_sectors(q, shost-&gt;max_sectors);
++ 	blk_queue_bounce_limit(q, scsi_calculate_bounce_limit(shost));
++ 	blk_queue_segment_boundary(q, shost-&gt;dma_boundary);
++-	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
++-	blk_queue_softirq_done(q, scsi_softirq_done);
++ 
++ 	if (!shost-&gt;use_clustering)
++ 		clear_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags);
++ 	return q;
++ }
+++EXPORT_SYMBOL(__scsi_alloc_queue);
+++
+++struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+++{
+++	struct request_queue *q;
+++
+++	q = __scsi_alloc_queue(sdev-&gt;host, scsi_request_fn);
+++	if (!q)
+++		return NULL;
+++
+++	blk_queue_prep_rq(q, scsi_prep_fn);
+++	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+++	blk_queue_softirq_done(q, scsi_softirq_done);
+++	return q;
+++}
++ 
++ void scsi_free_queue(struct request_queue *q)
++ {
++diff --git a/drivers/scsi/scsi_scan.c b/drivers/scsi/scsi_scan.c
++index 752fb5d..0fdd11a 100644
++--- a/drivers/scsi/scsi_scan.c
+++++ b/drivers/scsi/scsi_scan.c
++@@ -1013,7 +1013,7 @@ static void scsi_sequential_lun_scan(str
++  *     Given a struct scsi_lun of: 0a 04 0b 03 00 00 00 00, this function returns
++  *     the integer: 0x0b030a04
++  **/
++-static int scsilun_to_int(struct scsi_lun *scsilun)
+++int scsilun_to_int(struct scsi_lun *scsilun)
++ {
++ 	int i;
++ 	unsigned int lun;
++@@ -1024,6 +1024,7 @@ static int scsilun_to_int(struct scsi_lu
++ 			      scsilun-&gt;scsi_lun[i + 1]) &lt;&lt; (i * 8));
++ 	return lun;
++ }
+++EXPORT_SYMBOL(scsilun_to_int);
++ 
++ /**
++  * int_to_scsilun: reverts an int into a scsi_lun
++diff --git a/fs/bio.c b/fs/bio.c
++index 7b30695..aba3ce9 100644
++--- a/fs/bio.c
+++++ b/fs/bio.c
++@@ -718,19 +718,21 @@ static struct bio *__bio_map_user_iov(re
++  *	@uaddr: start of user address
++  *	@len: length in bytes
++  *	@write_to_vm: bool indicating writing to pages or not
+++ *	@support_partial: support partial mappings
++  *
++  *	Map the user space address into a bio suitable for io to a block
++  *	device. Returns an error pointer in case of error.
++  */
++ struct bio *bio_map_user(request_queue_t *q, struct block_device *bdev,
++-			 unsigned long uaddr, unsigned int len, int write_to_vm)
+++			 unsigned long uaddr, unsigned int len, int write_to_vm,
+++			 int support_partial)
++ {
++ 	struct sg_iovec iov;
++ 
++ 	iov.iov_base = (void __user *)uaddr;
++ 	iov.iov_len = len;
++ 
++-	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm);
+++	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm, support_partial);
++ }
++ 
++ /**
++@@ -740,13 +742,14 @@ struct bio *bio_map_user(request_queue_t
++  *	@iov:	the iovec.
++  *	@iov_count: number of elements in the iovec
++  *	@write_to_vm: bool indicating writing to pages or not
+++ *	@support_partial: support partial mappings
++  *
++  *	Map the user space address into a bio suitable for io to a block
++  *	device. Returns an error pointer in case of error.
++  */
++ struct bio *bio_map_user_iov(request_queue_t *q, struct block_device *bdev,
++ 			     struct sg_iovec *iov, int iov_count,
++-			     int write_to_vm)
+++			     int write_to_vm, int support_partial)
++ {
++ 	struct bio *bio;
++ 	int len = 0, i;
++@@ -767,7 +770,7 @@ struct bio *bio_map_user_iov(request_que
++ 	for (i = 0; i &lt; iov_count; i++)
++ 		len += iov[i].iov_len;
++ 
++-	if (bio-&gt;bi_size == len)
+++	if (bio-&gt;bi_size == len || support_partial)
++ 		return bio;
++ 
++ 	/*
++diff --git a/include/linux/bio-list.h b/include/linux/bio-list.h
++new file mode 100644
++index 0000000..4653516
++--- /dev/null
+++++ b/include/linux/bio-list.h
++@@ -0,0 +1,71 @@
+++/*
+++ * Copyright (C) 2004 Red Hat UK Ltd.
+++ *
+++ * This file is released under the GPL.
+++ */
+++
+++#ifndef _BIO_LIST_H
+++#define _BIO_LIST_H
+++
+++#include &lt;linux/bio.h&gt;
+++
+++struct bio_list {
+++	struct bio *head;
+++	struct bio *tail;
+++};
+++
+++static inline void bio_list_init(struct bio_list *bl)
+++{
+++	bl-&gt;head = bl-&gt;tail = NULL;
+++}
+++
+++static inline void bio_list_add(struct bio_list *bl, struct bio *bio)
+++{
+++	bio-&gt;bi_next = NULL;
+++
+++	if (bl-&gt;tail)
+++		bl-&gt;tail-&gt;bi_next = bio;
+++	else
+++		bl-&gt;head = bio;
+++
+++	bl-&gt;tail = bio;
+++}
+++
+++static inline void bio_list_merge(struct bio_list *bl, struct bio_list *bl2)
+++{
+++	if (!bl2-&gt;head)
+++		return;
+++
+++	if (bl-&gt;tail)
+++		bl-&gt;tail-&gt;bi_next = bl2-&gt;head;
+++	else
+++		bl-&gt;head = bl2-&gt;head;
+++
+++	bl-&gt;tail = bl2-&gt;tail;
+++}
+++
+++static inline struct bio *bio_list_pop(struct bio_list *bl)
+++{
+++	struct bio *bio = bl-&gt;head;
+++
+++	if (bio) {
+++		bl-&gt;head = bl-&gt;head-&gt;bi_next;
+++		if (!bl-&gt;head)
+++			bl-&gt;tail = NULL;
+++
+++		bio-&gt;bi_next = NULL;
+++	}
+++
+++	return bio;
+++}
+++
+++static inline struct bio *bio_list_get(struct bio_list *bl)
+++{
+++	struct bio *bio = bl-&gt;head;
+++
+++	bl-&gt;head = bl-&gt;tail = NULL;
+++
+++	return bio;
+++}
+++
+++#endif
++diff --git a/include/linux/bio.h b/include/linux/bio.h
++index b60ffe3..fc0906c 100644
++--- a/include/linux/bio.h
+++++ b/include/linux/bio.h
++@@ -295,12 +295,13 @@ extern int bio_add_page(struct bio *, st
++ extern int bio_add_pc_page(struct request_queue *, struct bio *, struct page *,
++ 			   unsigned int, unsigned int);
++ extern int bio_get_nr_vecs(struct block_device *);
+++extern int __bio_get_nr_vecs(struct request_queue *);
++ extern struct bio *bio_map_user(struct request_queue *, struct block_device *,
++-				unsigned long, unsigned int, int);
+++				unsigned long, unsigned int, int, int);
++ struct sg_iovec;
++ extern struct bio *bio_map_user_iov(struct request_queue *,
++ 				    struct block_device *,
++-				    struct sg_iovec *, int, int);
+++				    struct sg_iovec *, int, int, int);
++ extern void bio_unmap_user(struct bio *);
++ extern struct bio *bio_map_kern(struct request_queue *, void *, unsigned int,
++ 				gfp_t);
++diff --git a/include/linux/netlink.h b/include/linux/netlink.h
++index 6a2ccf7..580fb42 100644
++--- a/include/linux/netlink.h
+++++ b/include/linux/netlink.h
++@@ -21,6 +21,7 @@
++ #define NETLINK_DNRTMSG		14	/* DECnet routing messages */
++ #define NETLINK_KOBJECT_UEVENT	15	/* Kernel messages to userspace */
++ #define NETLINK_GENERIC		16
+++#define NETLINK_TGT		17	/* SCSI target */
++ 
++ #define MAX_LINKS 32		
++ 
++diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
++index 7529f43..452d652 100644
++--- a/include/scsi/scsi_cmnd.h
+++++ b/include/scsi/scsi_cmnd.h
++@@ -5,9 +5,11 @@
++ #include &lt;linux/list.h&gt;
++ #include &lt;linux/types.h&gt;
++ #include &lt;linux/timer.h&gt;
+++#include &lt;linux/bio-list.h&gt;
++ 
++ struct request;
++ struct scatterlist;
+++struct Scsi_Host;
++ struct scsi_device;
++ struct scsi_request;
++ 
++@@ -31,6 +33,7 @@ struct scsi_pointer {
++ struct scsi_cmnd {
++ 	int     sc_magic;
++ 
+++	struct Scsi_Host *shost;
++ 	struct scsi_device *device;
++ 	struct scsi_request *sc_request;
++ 
++@@ -131,6 +134,14 @@ struct scsi_cmnd {
++ 
++ 	unsigned char tag;	/* SCSI-II queued command tag */
++ 	unsigned long pid;	/* Process ID, starts at 0. Unique per host. */
+++	/*
+++	 * Work struct to process completion of scsi commands in process
+++	 * context. (this should be ifdefd since the work struct is large)
+++	 */
+++	struct work_struct work;
+++	/* list of bios to be unmapped in work struct */
+++	struct bio_list xfer_done_list;
+++	struct bio_list xfer_list;
++ };
++ 
++ /*
++@@ -147,9 +158,14 @@ struct scsi_cmnd {
++ #define SCSI_STATE_MLQUEUE         0x100b
++ 
++ 
+++extern struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *,
+++					       enum dma_data_direction, gfp_t);
++ extern struct scsi_cmnd *scsi_get_command(struct scsi_device *, gfp_t);
+++extern void scsi_host_put_command(struct scsi_cmnd *);
++ extern void scsi_put_command(struct scsi_cmnd *);
++ extern void scsi_io_completion(struct scsi_cmnd *, unsigned int, unsigned int);
++ extern void scsi_finish_command(struct scsi_cmnd *cmd);
+++extern struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *, gfp_t);
+++extern void scsi_free_sgtable(struct scatterlist *, int);
++ 
++ #endif /* _SCSI_SCSI_CMND_H */
++diff --git a/include/scsi/scsi_device.h b/include/scsi/scsi_device.h
++index e94ca4d..1b09f4f 100644
++--- a/include/scsi/scsi_device.h
+++++ b/include/scsi/scsi_device.h
++@@ -264,6 +264,7 @@ extern void scsi_target_block(struct dev
++ extern void scsi_target_unblock(struct device *);
++ extern void scsi_remove_target(struct device *);
++ extern void int_to_scsilun(unsigned int, struct scsi_lun *);
+++extern int scsilun_to_int(struct scsi_lun *);
++ extern const char *scsi_device_state_name(enum scsi_device_state);
++ extern int scsi_is_sdev_device(const struct device *);
++ extern int scsi_is_target_device(const struct device *);
++diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
++index 467274a..fbab68c 100644
++--- a/include/scsi/scsi_host.h
+++++ b/include/scsi/scsi_host.h
++@@ -7,6 +7,7 @@
++ #include &lt;linux/workqueue.h&gt;
++ #include &lt;linux/mutex.h&gt;
++ 
+++struct request_queue;
++ struct block_device;
++ struct completion;
++ struct module;
++@@ -123,6 +124,21 @@ struct scsi_host_template {
++ 			     void (*done)(struct scsi_cmnd *));
++ 
++ 	/*
+++	 * The transfer functions are used to queue a scsi command to
+++	 * the LLD. When the driver is finished processing the command
+++	 * the done callback is invoked.
+++	 *
+++	 * return values: see queuecommand
+++	 *
+++	 * STATUS: REQUIRED FOR TARGET DRIVERS
+++	 */
+++	/* TODO: rename */
+++	int (* transfer_response)(struct scsi_cmnd *,
+++				  void (*done)(struct scsi_cmnd *));
+++	int (* transfer_data)(struct scsi_cmnd *,
+++			      void (*done)(struct scsi_cmnd *));
+++
+++	/*
++ 	 * This is an error handling strategy routine.  You don't need to
++ 	 * define one of these if you don't want to - there is a default
++ 	 * routine that is present that should work in most cases.  For those
++@@ -573,6 +589,12 @@ struct Scsi_Host {
++ 	 */
++ 	unsigned int max_host_blocked;
++ 
+++	/*
+++	 * q used for scsi_tgt msgs, async events or any other requests that
+++	 * need to be processed in userspace
+++ 	 */
+++	struct request_queue *uspace_req_q;
+++
++ 	/* legacy crap */
++ 	unsigned long base;
++ 	unsigned long io_port;
++@@ -675,6 +697,9 @@ extern void scsi_unblock_requests(struct
++ extern void scsi_block_requests(struct Scsi_Host *);
++ 
++ struct class_container;
+++
+++extern struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+++					     void (*) (struct request_queue *));
++ /*
++  * These two functions are used to allocate and free a pseudo device
++  * which will connect to the host adapter itself rather than any
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000219.html">[Stgt-svn] r232 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000221.html">[Stgt-svn] r234 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#220">[ date ]</a>
+              <a href="thread.html#220">[ thread ]</a>
+              <a href="subject.html#220">[ subject ]</a>
+              <a href="author.html#220">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

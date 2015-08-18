@@ -1,0 +1,135 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r819 - in trunk: . doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r819%20-%20in%20trunk%3A%20.%20doc&In-Reply-To=%3C200703101232.l2ACWne5003259%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000805.html">
+   <LINK REL="Next"  HREF="000807.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r819 - in trunk: . doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r819%20-%20in%20trunk%3A%20.%20doc&In-Reply-To=%3C200703101232.l2ACWne5003259%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r819 - in trunk: . doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 10 13:32:49 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000805.html">[Stgt-svn] r818 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000807.html">[Stgt-svn] r820 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#806">[ date ]</a>
+              <a href="thread.html#806">[ thread ]</a>
+              <a href="subject.html#806">[ subject ]</a>
+              <a href="author.html#806">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-10 13:32:47 +0100 (Sat, 10 Mar 2007)
+New Revision: 819
+
+Modified:
+   trunk/README
+   trunk/doc/README.passthrough
+   trunk/doc/TODO
+Log:
+Update documents.
+
+
+Modified: trunk/README
+===================================================================
+--- trunk/README	2007-03-10 10:07:30 UTC (rev 818)
++++ trunk/README	2007-03-10 12:32:47 UTC (rev 819)
+@@ -19,21 +19,14 @@
+ 
+ Preparation
+ -------------
+-
+-Get kernel version 2.6.20, rebuild the kernel, and reboot with the new
+-kernel. Note you need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS
+-kernel options in order to use the IBM VIO target driver.
+-
+-Note that if you are interested in only the iSCSI target driver, you
+-don't need 2.6.20.  It works with any recent kernel versions (the
++The iSCSI target driver can works with any recent kernel versions (the
+ oldest version that I confirmed is 2.6.18).
+ 
+-Now you are ready to build target drivers. If you like to use the
+-iSCSI target driver:
+-
+ host:~/tgt/usr$ make KERNELSRC=&lt;kernel-src-directory&gt; ISCSI=1
+ 
+-Or if you like to use the IBM VIO target driver:
++If you want IBM VIO target driver, get kernel version 2.6.20, rebuild
++the kernel, and reboot with the new kernel. Note you need to enable
++SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS kernel options.
+ 
+ host:~/tgt/usr$ make KERNELSRC=&lt;kernel-src-directory&gt; IBMVIO=1
+ 
+
+Modified: trunk/doc/README.passthrough
+===================================================================
+--- trunk/doc/README.passthrough	2007-03-10 10:07:30 UTC (rev 818)
++++ trunk/doc/README.passthrough	2007-03-10 12:32:47 UTC (rev 819)
+@@ -38,13 +38,10 @@
+ Third, compile the code with RAW option enabled like the following
+ example (for the case you use iSCSI the target driver):
+ 
+-host:~/tgt/usr$ make KERNELSRC=&lt;kernel-src-directory&gt; ISCSI=1 RAW=1
++host:~/tgt/usr$ make KERNELSRC=&lt;kernel-src-directory&gt; ISCSI=1 SGV4=1
+ 
+ The following example is to export /dev/sdb via the iscsi driver:
+ 
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode target --tid 1 --backing-store-type raw -T iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode target --tid 1 --target-type pt -T iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 0 -b /dev/sdb
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode target --tid 1 --name state --value running
+-
+-If you want to export a cdrom drive, use /dev/sr0 instead of /dev/sdb
+-in the above example.
+
+Modified: trunk/doc/TODO
+===================================================================
+--- trunk/doc/TODO	2007-03-10 10:07:30 UTC (rev 818)
++++ trunk/doc/TODO	2007-03-10 12:32:47 UTC (rev 819)
+@@ -57,4 +57,3 @@
+ asynchrnously). This workaround will be removed when upstream kernels
+ have a unified event notification interface (there are some candidates
+ under development). It should improve the tgt AIO performance too.
+-
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000805.html">[Stgt-svn] r818 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000807.html">[Stgt-svn] r820 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#806">[ date ]</a>
+              <a href="thread.html#806">[ thread ]</a>
+              <a href="subject.html#806">[ subject ]</a>
+              <a href="author.html#806">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

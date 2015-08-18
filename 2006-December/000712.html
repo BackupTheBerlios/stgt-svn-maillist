@@ -1,0 +1,351 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r725 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r725%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200612290655.kBT6tbZu025625%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000711.html">
+   <LINK REL="Next"  HREF="000713.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r725 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r725%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200612290655.kBT6tbZu025625%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r725 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Dec 29 07:55:37 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000711.html">[Stgt-svn] r724 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000713.html">[Stgt-svn] r726 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#712">[ date ]</a>
+              <a href="thread.html#712">[ thread ]</a>
+              <a href="subject.html#712">[ subject ]</a>
+              <a href="author.html#712">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-29 07:55:36 +0100 (Fri, 29 Dec 2006)
+New Revision: 725
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/target.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+Log:
+Add IP base ACL to iscsi.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-12-29 05:34:44 UTC (rev 724)
++++ trunk/usr/iscsi/iscsid.c	2006-12-29 06:55:36 UTC (rev 725)
+@@ -360,9 +360,6 @@
+ 			return;
+ 		}
+ 
+-/* 		if (target_find_by_name(target_name, &amp;conn-&gt;tid) &lt; 0 || */
+-/* 		    cops-&gt;initiator_access(conn-&gt;tid, conn-&gt;fd) &lt; 0) { */
+-
+ 		target = target_find_by_name(target_name);
+ 		if (!target) {
+ 			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
+@@ -379,6 +376,13 @@
+ 			return;
+ 		}
+ 
++		if (ip_acl(conn-&gt;tid, conn-&gt;fd)) {
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
++			conn-&gt;state = STATE_EXIT;
++			return;
++		}
++
+ /* 		if (conn-&gt;target-&gt;max_sessions &amp;&amp; */
+ /* 		    (++conn-&gt;target-&gt;session_cnt &gt; conn-&gt;target-&gt;max_sessions)) { */
+ /* 			conn-&gt;target-&gt;session_cnt--; */
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-12-29 05:34:44 UTC (rev 724)
++++ trunk/usr/iscsi/iscsid.h	2006-12-29 06:55:36 UTC (rev 725)
+@@ -267,6 +267,7 @@
+ struct iscsi_target * target_find_by_name(const char *name);
+ struct iscsi_target * target_find_by_id(int tid);
+ extern void target_list_build(struct iscsi_connection *, char *, char *);
++extern int ip_acl(int tid, int fd);
+ 
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-12-29 05:34:44 UTC (rev 724)
++++ trunk/usr/iscsi/target.c	2006-12-29 06:55:36 UTC (rev 725)
+@@ -11,16 +11,173 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;netdb.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/un.h&gt;
+ #include &lt;linux/netlink.h&gt;
++#include &lt;netinet/in.h&gt;
+ #include &lt;sys/socket.h&gt;
++#include &lt;netinet/in.h&gt;
++#include &lt;netinet/tcp.h&gt;
++#include &lt;netinet/ip.h&gt;
++#include &lt;arpa/inet.h&gt;
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+ #include &quot;tgtd.h&quot;
+ 
+ static LIST_HEAD(targets_list);
+ 
++static int netmask_match_v6(struct sockaddr *sa1, struct sockaddr *sa2, uint32_t mbit)
++{
++	uint16_t mask, a1[8], a2[8];
++	int i;
++
++	for (i = 0; i &lt; 8; i++) {
++		a1[i] = ntohs(((struct sockaddr_in6 *) sa1)-&gt;sin6_addr.s6_addr16[i]);
++		a2[i] = ntohs(((struct sockaddr_in6 *) sa2)-&gt;sin6_addr.s6_addr16[i]);
++	}
++
++	for (i = 0; i &lt; mbit / 16; i++)
++		if (a1[i] ^ a2[i])
++			return 0;
++
++	if (mbit % 16) {
++		mask = ~((1 &lt;&lt; (16 - (mbit % 16))) - 1);
++		if ((mask &amp; a1[mbit / 16]) ^ (mask &amp; a2[mbit / 16]))
++			return 0;
++	}
++
++	return 1;
++}
++
++static int netmask_match_v4(struct sockaddr *sa1, struct sockaddr *sa2, uint32_t mbit)
++{
++	uint32_t s1, s2, mask = ~((1 &lt;&lt; (32 - mbit)) - 1);
++
++	s1 = htonl(((struct sockaddr_in *) sa1)-&gt;sin_addr.s_addr);
++	s2 = htonl(((struct sockaddr_in *) sa2)-&gt;sin_addr.s_addr);
++
++	if (~mask &amp; s1)
++		return 0;
++
++	if (!((mask &amp; s2) ^ (mask &amp; s1)))
++		return 1;
++
++	return 0;
++}
++
++static int netmask_match(struct sockaddr *sa1, struct sockaddr *sa2, char *buf)
++{
++	uint32_t mbit;
++	uint8_t family = sa1-&gt;sa_family;
++
++	mbit = strtoul(buf, NULL, 0);
++	if (mbit &lt; 0 ||
++	    (family == AF_INET &amp;&amp; mbit &gt; 31) ||
++	    (family == AF_INET6 &amp;&amp; mbit &gt; 127))
++		return 0;
++
++	if (family == AF_INET)
++		return netmask_match_v4(sa1, sa2, mbit);
++
++	return netmask_match_v6(sa1, sa2, mbit);
++}
++
++static int address_match(struct sockaddr *sa1, struct sockaddr *sa2)
++{
++	if (sa1-&gt;sa_family == AF_INET)
++		return ((struct sockaddr_in *) sa1)-&gt;sin_addr.s_addr ==
++			((struct sockaddr_in *) sa2)-&gt;sin_addr.s_addr;
++	else {
++		struct in6_addr *a1, *a2;
++
++		a1 = &amp;((struct sockaddr_in6 *) sa1)-&gt;sin6_addr;
++		a2 = &amp;((struct sockaddr_in6 *) sa2)-&gt;sin6_addr;
++
++		return (a1-&gt;s6_addr32[0] == a2-&gt;s6_addr32[0] &amp;&amp;
++			a1-&gt;s6_addr32[1] == a2-&gt;s6_addr32[1] &amp;&amp;
++			a1-&gt;s6_addr32[2] == a2-&gt;s6_addr32[2] &amp;&amp;
++			a1-&gt;s6_addr32[3] == a2-&gt;s6_addr32[3]);
++	}
++
++	return 0;
++}
++
++static int ip_match(int fd, char *address)
++{
++	struct sockaddr_storage from;
++	struct addrinfo hints, *res;
++	socklen_t len;
++	char *str, *p, *q;
++	int err;
++
++	len = sizeof(from);
++	err = getpeername(fd, (struct sockaddr *) &amp;from, &amp;len);
++	if (err &lt; 0)
++		return -EPERM;
++
++	str = p = strdup(address);
++	if (!p)
++		return -EPERM;
++
++	if (!strcmp(p, &quot;ALL&quot;)) {
++		err = 0;
++		goto out;
++	}
++
++	if (*p == '[') {
++		p++;
++		if (!(q = strchr(p, ']'))) {
++			err = -EPERM;
++			goto out;
++		}
++		*(q++) = '\0';
++	} else
++		q = p;
++
++	if ((q = strchr(q, '/')))
++		*(q++) = '\0';
++
++	memset(&amp;hints, 0, sizeof(hints));
++	hints.ai_socktype = SOCK_STREAM;
++	hints.ai_flags = AI_NUMERICHOST;
++
++	err = getaddrinfo(p, NULL, &amp;hints, &amp;res);
++	if (err &lt; 0) {
++		err = -EPERM;
++		goto out;
++	}
++
++	if (q)
++		err = netmask_match(res-&gt;ai_addr, (struct sockaddr *) &amp;from, q);
++	else
++		err = address_match(res-&gt;ai_addr, (struct sockaddr *) &amp;from);
++
++	err = !err;
++
++	freeaddrinfo(res);
++out:
++	free(str);
++	return err;
++}
++
++int ip_acl(int tid, int fd)
++{
++	int idx, err;
++	char *addr;
++
++	for (idx = 0;; idx++) {
++		addr = acl_get(tid, idx);
++		if (!addr)
++			break;
++
++		err = ip_match(fd, addr);
++		if (!err)
++			return 0;
++	}
++	return -EPERM;
++}
++
+ void target_list_build(struct iscsi_connection *conn, char *addr, char *name)
+ {
+ 	struct iscsi_target *target;
+@@ -28,9 +185,10 @@
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+ 		if (name &amp;&amp; strcmp(tgt_targetname(target-&gt;tid), name))
+ 			continue;
+-/* 		if (cops-&gt;initiator_access(target-&gt;tid, conn-&gt;fd) &lt; 0) */
+-/* 			continue; */
+ 
++		if (ip_acl(target-&gt;tid, conn-&gt;fd))
++			continue;
++
+ 		text_key_add(conn, &quot;TargetName&quot;, tgt_targetname(target-&gt;tid));
+ 		text_key_add(conn, &quot;TargetAddress&quot;, addr);
+ 	}
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-12-29 05:34:44 UTC (rev 724)
++++ trunk/usr/target.c	2006-12-29 06:55:36 UTC (rev 725)
+@@ -679,6 +679,24 @@
+ 	}
+ }
+ 
++char *acl_get(int tid, int idx)
++{
++	int i = 0;
++	struct target *target;
++	struct acl_entry *acl;
++
++	target = target_lookup(tid);
++	if (!target)
++		return NULL;
++
++	list_for_each_entry(acl, &amp;target-&gt;acl_list, aclent_list) {
++		if (idx == i++)
++			return acl-&gt;address;
++	}
++
++	return NULL;
++}
++
+ int tgt_target_bind(int tid, int host_no, int lid)
+ {
+ 	struct target *target;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-12-29 05:34:44 UTC (rev 724)
++++ trunk/usr/tgtd.h	2006-12-29 06:55:36 UTC (rev 725)
+@@ -108,5 +108,6 @@
+ 
+ extern int acl_add(int tid, char *address);
+ extern void acl_del(int tid, char *address);
++extern char *acl_get(int tid, int idx);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000711.html">[Stgt-svn] r724 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000713.html">[Stgt-svn] r726 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#712">[ date ]</a>
+              <a href="thread.html#712">[ thread ]</a>
+              <a href="subject.html#712">[ subject ]</a>
+              <a href="author.html#712">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

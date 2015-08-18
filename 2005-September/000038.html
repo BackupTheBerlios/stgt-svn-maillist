@@ -1,0 +1,101 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r45 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r45%20-%20trunk/usr&In-Reply-To=%3C200509060152.j861qBBs011333%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000037.html">
+   <LINK REL="Next"  HREF="000039.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r45 - trunk/usr</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r45%20-%20trunk/usr&In-Reply-To=%3C200509060152.j861qBBs011333%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r45 - trunk/usr">mnc at berlios.de
+       </A><BR>
+    <I>Tue Sep  6 03:52:11 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000037.html">[Stgt-svn] r44 - in trunk: include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000039.html">[Stgt-svn] r46 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#38">[ date ]</a>
+              <a href="thread.html#38">[ thread ]</a>
+              <a href="subject.html#38">[ subject ]</a>
+              <a href="author.html#38">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-06 03:52:09 +0200 (Tue, 06 Sep 2005)
+New Revision: 45
+
+Modified:
+   trunk/usr/scsi.c
+Log:
+just use two buffers when mapping LUN to device\n
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-09-06 01:49:21 UTC (rev 44)
++++ trunk/usr/scsi.c	2005-09-06 01:52:09 UTC (rev 45)
+@@ -395,8 +395,7 @@
+ 		      int *len)
+ {
+ 	int fd, err;
+-	/* yuck! - i need to learn which function to call to avoid this crap */
+-	char path[PATH_MAX], buf[PATH_MAX], dev[PATH_MAX];
++	char path[PATH_MAX], buf[PATH_MAX];
+ 
+ 	sprintf(path, &quot;/sys/class/stgt_device/device%d:%llu/path&quot;, tid, lun);
+ 
+@@ -414,9 +413,13 @@
+ 		err = EIO;
+ 		goto eio;
+ 	}
+-	sscanf(buf, &quot;%s\n&quot;, dev);
++	/*
++	 * yuck! wtf should I be using
++	 */
++	memset(path, 0, PATH_MAX);
++	sscanf(buf, &quot;%s\n&quot;, path);
+ 
+-	fd = open(dev, O_RDWR);
++	fd = open(path, O_RDWR);
+ 	if (fd &lt; 0) {
+ 		perror(&quot;scsi sync_cache could not open device&quot;);
+ 		err = EIO;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000037.html">[Stgt-svn] r44 - in trunk: include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000039.html">[Stgt-svn] r46 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#38">[ date ]</a>
+              <a href="thread.html#38">[ thread ]</a>
+              <a href="subject.html#38">[ subject ]</a>
+              <a href="author.html#38">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

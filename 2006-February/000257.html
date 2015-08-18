@@ -1,0 +1,186 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r270 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r270%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602060134.k161YkiY013744%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000256.html">
+   <LINK REL="Next"  HREF="000258.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r270 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r270%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602060134.k161YkiY013744%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r270 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb  6 02:34:46 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000256.html">[Stgt-svn] r269 - in trunk: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000258.html">[Stgt-svn] r271 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#257">[ date ]</a>
+              <a href="thread.html#257">[ thread ]</a>
+              <a href="subject.html#257">[ subject ]</a>
+              <a href="author.html#257">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-06 02:34:25 +0100 (Mon, 06 Feb 2006)
+New Revision: 270
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+Kill shost in scsi_cmnd (use device-&gt;host).
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-05 16:30:14 UTC (rev 269)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-06 01:34:25 UTC (rev 270)
+@@ -13,6 +13,7 @@
+ #include &lt;net/tcp.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
++#include &lt;scsi/scsi_device.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+@@ -49,10 +50,10 @@
+ 	struct tgt_event *ev;
+ 	struct tgt_cmd *tcmd;
+ 
+-	sk = scsi_tgt_get_sock(cmd-&gt;shost);
++	sk = scsi_tgt_get_sock(cmd-&gt;device-&gt;host);
+ 	if (!sk) {
+ 		printk(KERN_INFO &quot;Host%d not connected\n&quot;,
+-		       cmd-&gt;shost-&gt;host_no);
++		       cmd-&gt;device-&gt;host-&gt;host_no);
+ 		return -ENOTCONN;
+ 	}
+ 
+@@ -64,7 +65,7 @@
+ 
+ 	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+ 
+-	ev-&gt;k.cmd_req.host_no = cmd-&gt;shost-&gt;host_no;
++	ev-&gt;k.cmd_req.host_no = cmd-&gt;device-&gt;host-&gt;host_no;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+ 
+@@ -127,12 +128,12 @@
+ 	char dummy[MAX_COMMAND_SIZE + sizeof(struct scsi_lun)];
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.cmd_done.host_no = cmd-&gt;shost-&gt;host_no;
++	ev.k.cmd_done.host_no = cmd-&gt;device-&gt;host-&gt;host_no;
+ 	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+ 	ev.k.cmd_done.result = cmd-&gt;result;
+ 
+ 	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
+-			      gfp_mask, scsi_tgt_get_pid(cmd-&gt;shost));
++			      gfp_mask, scsi_tgt_get_pid(cmd-&gt;device-&gt;host));
+ }
+ 
+ /* TODO: unbind to call fput. */
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-05 16:30:14 UTC (rev 269)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-06 01:34:25 UTC (rev 270)
+@@ -19,10 +19,10 @@
+  * the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
+  */
+ #include &lt;linux/module.h&gt;
+-#include &lt;linux/pagemap.h&gt;
++#include &lt;linux/bio-list.h&gt;
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/elevator.h&gt;
+-#include &lt;linux/bio-list.h&gt;
++#include &lt;linux/pagemap.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ #include &lt;scsi/scsi_device.h&gt;
+@@ -135,7 +135,7 @@
+ 	 * REQ_MSG_DONT_UNPLUG_IMMED_BECUASE_WE_WILL_HANDLE_IT
+ 	 */
+ 	cmd-&gt;request-&gt;end_io_data = scsilun;
+-	elv_add_request(cmd-&gt;shost-&gt;uspace_req_q, cmd-&gt;request,
++	elv_add_request(cmd-&gt;device-&gt;host-&gt;uspace_req_q, cmd-&gt;request,
+ 			ELEVATOR_INSERT_BACK, 1);
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+@@ -186,7 +186,7 @@
+ 
+ static int __scsi_tgt_transfer_response(struct scsi_cmnd *cmd)
+ {
+-	struct Scsi_Host *shost = cmd-&gt;shost;
++	struct Scsi_Host *shost = cmd-&gt;device-&gt;host;
+ 	int err;
+ 
+ 	dprintk(&quot;cmd %p\n&quot;, cmd);
+@@ -242,7 +242,7 @@
+ /* TODO: test this crap and replace bio_map_user with new interface maybe */
+ static int scsi_map_user_pages(struct scsi_cmnd *cmd, int rw)
+ {
+-	struct request_queue *q = cmd-&gt;shost-&gt;uspace_req_q;
++	struct request_queue *q = cmd-&gt;device-&gt;host-&gt;uspace_req_q;
+ 	struct request *rq = cmd-&gt;request;
+ 	void *uaddr = cmd-&gt;buffer;
+ 	unsigned int len = cmd-&gt;bufflen;
+@@ -339,7 +339,7 @@
+ 	bio = bio_list_pop(&amp;cmd-&gt;xfer_list);
+ 	BUG_ON(!bio);
+ 
+-	blk_rq_bio_prep(cmd-&gt;shost-&gt;uspace_req_q, cmd-&gt;request, bio);
++	blk_rq_bio_prep(cmd-&gt;device-&gt;host-&gt;uspace_req_q, cmd-&gt;request, bio);
+ 	err = scsi_tgt_init_cmd(cmd, GFP_ATOMIC);
+ 	if (err) {
+ 		cmd-&gt;result = DID_ERROR &lt;&lt; 16;
+@@ -355,8 +355,9 @@
+ static int scsi_tgt_transfer_data(struct scsi_cmnd *cmd)
+ {
+ 	int err;
++	struct Scsi_Host *host = cmd-&gt;device-&gt;host;
+ 
+-	err = cmd-&gt;shost-&gt;hostt-&gt;transfer_data(cmd, scsi_tgt_data_transfer_done);
++	err = host-&gt;hostt-&gt;transfer_data(cmd, scsi_tgt_data_transfer_done);
+ 	switch (err) {
+ 		case SCSI_MLQUEUE_HOST_BUSY:
+ 		case SCSI_MLQUEUE_DEVICE_BUSY:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000256.html">[Stgt-svn] r269 - in trunk: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000258.html">[Stgt-svn] r271 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#257">[ date ]</a>
+              <a href="thread.html#257">[ thread ]</a>
+              <a href="subject.html#257">[ subject ]</a>
+              <a href="author.html#257">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

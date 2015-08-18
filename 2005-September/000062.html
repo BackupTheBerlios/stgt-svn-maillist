@@ -1,0 +1,127 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r72 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r72%20-%20trunk/kernel&In-Reply-To=%3C200509130154.j8D1s0oP001775%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000061.html">
+   <LINK REL="Next"  HREF="000063.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r72 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r72%20-%20trunk/kernel&In-Reply-To=%3C200509130154.j8D1s0oP001775%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r72 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Sep 13 03:54:00 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000061.html">[Stgt-svn] r71 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000063.html">[Stgt-svn] r73 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#62">[ date ]</a>
+              <a href="thread.html#62">[ thread ]</a>
+              <a href="subject.html#62">[ subject ]</a>
+              <a href="author.html#62">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-13 03:53:58 +0200 (Tue, 13 Sep 2005)
+New Revision: 72
+
+Modified:
+   trunk/kernel/tgt.c
+Log:
+Replace assert with BUG_ON.
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-12 09:24:52 UTC (rev 71)
++++ trunk/kernel/tgt.c	2005-09-13 01:53:58 UTC (rev 72)
+@@ -36,15 +36,6 @@
+ #define dprintk(fmt, args...)
+ #endif
+ 
+-#define assert(p) do {						\
+-	if (!(p)) {						\
+-		printk(KERN_CRIT &quot;BUG at %s:%d assert(%s)\n&quot;,	\
+-		       __FILE__, __LINE__, #p);			\
+-		dump_stack();					\
+-		BUG();						\
+-	}							\
+-} while (0)
+-
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
+ static spinlock_t all_targets_lock;
+@@ -657,7 +648,7 @@
+ 		return NULL;
+ 
+ 	cmnd = mempool_alloc(session-&gt;cmnd_pool, GFP_ATOMIC);
+-	assert(cmnd);
++	BUG_ON(!cmnd);
+ 	memset(cmnd, 0, sizeof(*cmnd));
+ 	cmnd-&gt;tgt_protocol_private = pcmnd_data;
+ 	cmnd-&gt;session = session;
+@@ -739,7 +730,7 @@
+ {
+ 	struct tgt_protocol *proto = cmnd-&gt;session-&gt;target-&gt;proto;
+ 
+-	assert(list_empty(&amp;cmnd-&gt;clist));
++	BUG_ON(!list_empty(&amp;cmnd-&gt;clist));
+ 
+ 	proto-&gt;init_cmnd_buffer(cmnd);
+ 
+@@ -804,7 +795,7 @@
+ 			     int result, uint32_t len)
+ {
+ 	int i;
+-	assert(cmnd-&gt;done);
++	BUG_ON(!cmnd-&gt;done);
+ 
+ 	if (len) {
+ 		cmnd-&gt;bufflen = len;
+@@ -857,7 +848,7 @@
+ 	struct tgt_work *work;
+ 	struct tgt_session *session = cmnd-&gt;session;
+ 
+-	assert(!cmnd-&gt;done);
++	BUG_ON(cmnd-&gt;done);
+ 	cmnd-&gt;done = done;
+ 	if (!done) {
+ 		eprintk(&quot;%s\n&quot;, &quot;Null done function!&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000061.html">[Stgt-svn] r71 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000063.html">[Stgt-svn] r73 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#62">[ date ]</a>
+              <a href="thread.html#62">[ thread ]</a>
+              <a href="subject.html#62">[ subject ]</a>
+              <a href="author.html#62">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

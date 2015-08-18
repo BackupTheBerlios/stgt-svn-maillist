@@ -1,0 +1,696 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r655 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r655%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611170242.kAH2grbr018868%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000641.html">
+   <LINK REL="Next"  HREF="000643.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r655 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r655%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611170242.kAH2grbr018868%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r655 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 17 03:42:53 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000641.html">[Stgt-svn] r654 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000643.html">[Stgt-svn] r656 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#642">[ date ]</a>
+              <a href="thread.html#642">[ thread ]</a>
+              <a href="subject.html#642">[ subject ]</a>
+              <a href="author.html#642">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-17 03:42:53 +0100 (Fri, 17 Nov 2006)
+New Revision: 655
+
+Modified:
+   trunk/usr/iscsi/chap.c
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsi_tcp.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+Log:
+Rename struct connection iscsi_connection
+
+
+Modified: trunk/usr/iscsi/chap.c
+===================================================================
+--- trunk/usr/iscsi/chap.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/chap.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -319,7 +319,7 @@
+ 	SHA1_Final(digest, &amp;ctx);
+ }
+ 
+-static int chap_initiator_auth_create_challenge(struct connection *conn)
++static int chap_initiator_auth_create_challenge(struct iscsi_connection *conn)
+ {
+ 	char *value, *p;
+ 	char text[CHAP_CHALLENGE_MAX * 2 + 8];
+@@ -372,7 +372,7 @@
+ 	return 0;
+ }
+ 
+-static int chap_initiator_auth_check_response(struct connection *conn)
++static int chap_initiator_auth_check_response(struct iscsi_connection *conn)
+ {
+ 	char *value;
+ 	uint8_t *his_digest = NULL, *our_digest = NULL;
+@@ -473,7 +473,7 @@
+ 	return retval;
+ }
+ 
+-static int chap_target_auth_create_response(struct connection *conn)
++static int chap_target_auth_create_response(struct iscsi_connection *conn)
+ {
+ 	char chap_id, *value, *response = NULL;
+ 	uint8_t *challenge = NULL, *digest = NULL;
+@@ -603,7 +603,7 @@
+ 	return retval;
+ }
+ 
+-int cmnd_exec_auth_chap(struct connection *conn)
++int cmnd_exec_auth_chap(struct iscsi_connection *conn)
+ {
+ 	int res;
+ 
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/conn.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -16,7 +16,7 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;util.h&quot;
+ 
+-void conn_add_to_session(struct connection *conn, struct iscsi_session *session)
++void conn_add_to_session(struct iscsi_connection *conn, struct iscsi_session *session)
+ {
+ 	if (!list_empty(&amp;conn-&gt;clist)) {
+ 		eprintf(&quot;%&quot; PRIx64 &quot; %u\n&quot;,
+@@ -30,9 +30,9 @@
+ 	list_add(&amp;conn-&gt;clist, &amp;session-&gt;conn_list);
+ }
+ 
+-struct connection *conn_alloc(void)
++struct iscsi_connection *conn_alloc(void)
+ {
+-	struct connection *conn;
++	struct iscsi_connection *conn;
+ 
+ 	conn = zalloc(sizeof(*conn));
+ 	if (!conn)
+@@ -60,7 +60,7 @@
+ 	return conn;
+ }
+ 
+-static void conn_free(struct connection *conn)
++static void conn_free(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_session *session = conn-&gt;session;
+ 
+@@ -75,7 +75,7 @@
+ 		session_put(session);
+ }
+ 
+-void conn_close(struct connection *conn, int fd)
++void conn_close(struct iscsi_connection *conn, int fd)
+ {
+ 	struct iscsi_task *task, *tmp;
+ 
+@@ -128,23 +128,23 @@
+ 	conn_put(conn);
+ }
+ 
+-void conn_put(struct connection *conn)
++void conn_put(struct iscsi_connection *conn)
+ {
+ 	conn-&gt;refcount--;
+ 	if (conn-&gt;refcount == 0)
+ 		conn_free(conn);
+ }
+ 
+-int conn_get(struct connection *conn)
++int conn_get(struct iscsi_connection *conn)
+ {
+ 	/* TODO: check state */
+ 	conn-&gt;refcount++;
+ 	return 0;
+ }
+ 
+-struct connection *conn_find(struct iscsi_session *session, uint32_t cid)
++struct iscsi_connection *conn_find(struct iscsi_session *session, uint32_t cid)
+ {
+-	struct connection *conn;
++	struct iscsi_connection *conn;
+ 
+ 	list_for_each_entry(conn, &amp;session-&gt;conn_list, clist) {
+ 		if (conn-&gt;cid == cid)
+@@ -154,7 +154,7 @@
+ 	return NULL;
+ }
+ 
+-int conn_take_fd(struct connection *conn, int fd)
++int conn_take_fd(struct iscsi_connection *conn, int fd)
+ {
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
+ 
+@@ -167,14 +167,14 @@
+ 	return tgt_target_bind(conn-&gt;session-&gt;target-&gt;tid, conn-&gt;tsih, 0);
+ }
+ 
+-void conn_read_pdu(struct connection *conn)
++void conn_read_pdu(struct iscsi_connection *conn)
+ {
+ 	conn-&gt;rx_iostate = IOSTATE_READ_BHS;
+ 	conn-&gt;rx_buffer = (void *)&amp;conn-&gt;req.bhs;
+ 	conn-&gt;rx_size = BHS_SIZE;
+ }
+ 
+-void conn_write_pdu(struct connection *conn)
++void conn_write_pdu(struct iscsi_connection *conn)
+ {
+ 	conn-&gt;tx_iostate = IOSTATE_WRITE_BHS;
+ 	memset(&amp;conn-&gt;rsp, 0, sizeof(conn-&gt;rsp));
+
+Modified: trunk/usr/iscsi/iscsi_tcp.c
+===================================================================
+--- trunk/usr/iscsi/iscsi_tcp.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/iscsi_tcp.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -58,7 +58,7 @@
+ {
+ 	struct sockaddr_storage from;
+ 	socklen_t namesize;
+-	struct connection *conn;
++	struct iscsi_connection *conn;
+ 	int fd, err;
+ 
+ 	eprintf(&quot;%d\n&quot;, afd);
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/iscsid.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -34,7 +34,7 @@
+ 	{NULL, 0, 0, 0, NULL},
+ };
+ 
+-char *text_key_find(struct connection *conn, char *searchKey)
++char *text_key_find(struct iscsi_connection *conn, char *searchKey)
+ {
+ 	char *data, *key, *value;
+ 	int keylen, datasize;
+@@ -91,7 +91,7 @@
+ 	return key;
+ }
+ 
+-void text_key_add(struct connection *conn, char *key, char *value)
++void text_key_add(struct iscsi_connection *conn, char *key, char *value)
+ {
+ 	int keylen = strlen(key);
+ 	int valuelen = strlen(value);
+@@ -116,12 +116,12 @@
+ 	strcpy(buffer, value);
+ }
+ 
+-static void text_key_add_reject(struct connection *conn, char *key)
++static void text_key_add_reject(struct iscsi_connection *conn, char *key)
+ {
+ 	text_key_add(conn, key, &quot;Reject&quot;);
+ }
+ 
+-static void text_scan_security(struct connection *conn)
++static void text_scan_security(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	char *key, *value, *data, *nextValue;
+@@ -166,7 +166,7 @@
+ 	}
+ }
+ 
+-static void login_security_done(struct connection *conn)
++static void login_security_done(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *) &amp;conn-&gt;rsp.bhs;
+@@ -208,7 +208,7 @@
+ 	}
+ }
+ 
+-static void text_scan_login(struct connection *conn)
++static void text_scan_login(struct iscsi_connection *conn)
+ {
+ 	char *key, *value, *data;
+ 	int datasize, idx;
+@@ -280,7 +280,7 @@
+ 	return;
+ }
+ 
+-static int text_check_param(struct connection *conn)
++static int text_check_param(struct iscsi_connection *conn)
+ {
+ 	struct param *p = conn-&gt;session_param;
+ 	char buf[32];
+@@ -308,7 +308,7 @@
+ 	return cnt;
+ }
+ 
+-static void login_start(struct connection *conn)
++static void login_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+@@ -397,7 +397,7 @@
+ 	text_key_add(conn, &quot;TargetPortalGroupTag&quot;, &quot;1&quot;);
+ }
+ 
+-static void login_finish(struct connection *conn)
++static void login_finish(struct iscsi_connection *conn)
+ {
+ 	switch (conn-&gt;session_type) {
+ 	case SESSION_NORMAL:
+@@ -413,7 +413,7 @@
+ 	}
+ }
+ 
+-static int cmnd_exec_auth(struct connection *conn)
++static int cmnd_exec_auth(struct iscsi_connection *conn)
+ {
+        int res;
+ 
+@@ -432,7 +432,7 @@
+         return res;
+ }
+ 
+-static void cmnd_exec_login(struct connection *conn)
++static void cmnd_exec_login(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+@@ -595,7 +595,7 @@
+ 	return;
+ }
+ 
+-static void text_scan_text(struct connection *conn)
++static void text_scan_text(struct iscsi_connection *conn)
+ {
+ 	char *key, *value, *data;
+ 	int datasize;
+@@ -639,7 +639,7 @@
+ 	}
+ }
+ 
+-static void cmnd_exec_text(struct connection *conn)
++static void cmnd_exec_text(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_text *req = (struct iscsi_text *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_text_rsp *rsp = (struct iscsi_text_rsp *)&amp;conn-&gt;rsp.bhs;
+@@ -668,7 +668,7 @@
+ 	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ }
+ 
+-static void cmnd_exec_logout(struct connection *conn)
++static void cmnd_exec_logout(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_logout *req = (struct iscsi_logout *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_logout_rsp *rsp = (struct iscsi_logout_rsp *)&amp;conn-&gt;rsp.bhs;
+@@ -686,7 +686,7 @@
+ 	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ }
+ 
+-static int cmnd_execute(struct connection *conn)
++static int cmnd_execute(struct iscsi_connection *conn)
+ {
+ 	int res = 0;
+ 
+@@ -715,7 +715,7 @@
+ 	return res;
+ }
+ 
+-static void cmnd_finish(struct connection *conn)
++static void cmnd_finish(struct iscsi_connection *conn)
+ {
+ 	switch (conn-&gt;state) {
+ 	case STATE_EXIT:
+@@ -737,7 +737,7 @@
+ 
+ static int iscsi_cmd_rsp_build(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+@@ -755,7 +755,7 @@
+ 
+ static int iscsi_data_rsp_build(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 	int residual, datalen, exp_datalen = ntohl(req-&gt;data_length);
+@@ -807,7 +807,7 @@
+ 
+ static int iscsi_r2t_build(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_r2t_rsp *rsp = (struct iscsi_r2t_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	int length, max_burst = conn-&gt;session_param[ISCSI_PARAM_MAX_XMIT_DLENGTH].val;
+ 
+@@ -828,7 +828,7 @@
+ }
+ 
+ static inline struct iscsi_task *
+-iscsi_alloc_task(struct connection *conn)
++iscsi_alloc_task(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+@@ -848,7 +848,7 @@
+ 
+ void iscsi_free_task(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 
+ 	if (task-&gt;c_buffer)
+ 		free(task-&gt;c_buffer);
+@@ -860,7 +860,7 @@
+ 
+ static void iscsi_free_cmd_task(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 
+ 	target_cmd_done(conn-&gt;session-&gt;tsih, task-&gt;tag);
+ 	list_del(&amp;task-&gt;c_hlist);
+@@ -937,7 +937,7 @@
+ 
+ static int iscsi_scsi_cmd_execute(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 	unsigned long uaddr = (unsigned long) task-&gt;c_buffer;
+ 	int err = 0;
+@@ -992,7 +992,7 @@
+ 
+ static int iscsi_tm_execute(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_tm *req = (struct iscsi_tm *) &amp;task-&gt;req;
+ 	int fn, err = 0;
+ 
+@@ -1085,7 +1085,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_data_out_rx_start(struct connection *conn)
++static int iscsi_data_out_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_task *task;
+ 	struct iscsi_data *req = (struct iscsi_data *) &amp;conn-&gt;req.bhs;
+@@ -1166,7 +1166,7 @@
+ 	return 0;
+ }
+ 
+-static struct iscsi_task *__iscsi_task_rx_start(struct connection *conn)
++static struct iscsi_task *__iscsi_task_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_task *task;
+ 
+@@ -1177,7 +1177,7 @@
+ 	return task;
+ }
+ 
+-static int iscsi_scsi_cmd_rx_start(struct connection *conn)
++static int iscsi_scsi_cmd_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+@@ -1217,7 +1217,7 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_noop_out_rx_start(struct connection *conn)
++static int iscsi_noop_out_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+@@ -1264,7 +1264,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_task_rx_done(struct connection *conn)
++static int iscsi_task_rx_done(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task = conn-&gt;rx_task;
+@@ -1293,7 +1293,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_task_rx_start(struct connection *conn)
++static int iscsi_task_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	uint8_t op;
+@@ -1356,7 +1356,7 @@
+ 
+ static int iscsi_logout_tx_start(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_logout_rsp *rsp =
+ 		(struct iscsi_logout_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
+@@ -1372,7 +1372,7 @@
+ 
+ static int iscsi_noop_out_tx_start(struct iscsi_task *task, int *is_rsp)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
+ 	if (task-&gt;req.itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+@@ -1401,7 +1401,7 @@
+ 
+ static int iscsi_tm_tx_start(struct iscsi_task *task)
+ {
+-	struct connection *conn = task-&gt;conn;
++	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_tm_rsp *rsp = (struct iscsi_tm_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+@@ -1417,7 +1417,7 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_scsi_cmd_tx_done(struct connection *conn)
++static int iscsi_scsi_cmd_tx_done(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_task *task = conn-&gt;tx_task;
+@@ -1441,7 +1441,7 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_task_tx_done(struct connection *conn)
++static int iscsi_task_tx_done(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_task *task = conn-&gt;tx_task;
+ 	int err;
+@@ -1460,7 +1460,7 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_task_tx_start(struct connection *conn)
++static int iscsi_task_tx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_task *task;
+ 	int is_rsp, err = 0;
+@@ -1504,7 +1504,7 @@
+ 	return -EAGAIN;
+ }
+ 
+-static void iscsi_rx_handler(int fd, struct connection *conn)
++static void iscsi_rx_handler(int fd, struct iscsi_connection *conn)
+ {
+ 	int res;
+ 
+@@ -1576,7 +1576,7 @@
+ 	}
+ }
+ 
+-static void iscsi_tx_handler(int fd, struct connection *conn)
++static void iscsi_tx_handler(int fd, struct iscsi_connection *conn)
+ {
+ 	int res;
+ 
+@@ -1670,7 +1670,7 @@
+ 
+ void iscsi_event_handler(int fd, int events, void *data)
+ {
+-	struct connection *conn = (struct connection *) data;
++	struct iscsi_connection *conn = (struct iscsi_connection *) data;
+ 
+ 	if (events &amp; EPOLLIN)
+ 		iscsi_rx_handler(fd, conn);
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/iscsid.h	2006-11-17 02:42:53 UTC (rev 655)
+@@ -88,7 +88,7 @@
+ 	struct iscsi_hdr rsp;
+ 
+ 	uint64_t tag;
+-	struct connection *conn;
++	struct iscsi_connection *conn;
+ 
+ 	/* linked to session-&gt;cmd_list */
+ 	struct list_head c_hlist;
+@@ -113,7 +113,7 @@
+ 	void *c_buffer;
+ };
+ 
+-struct connection {
++struct iscsi_connection {
+ 	int state;
+ 	int rx_iostate;
+ 	int tx_iostate;
+@@ -234,30 +234,30 @@
+ #define task_pending(t)		((t)-&gt;flags &amp; (1 &lt;&lt; TASK_pending))
+ 
+ /* chap.c */
+-extern int cmnd_exec_auth_chap(struct connection *conn);
++extern int cmnd_exec_auth_chap(struct iscsi_connection *conn);
+ 
+ /* conn.c */
+-extern struct connection *conn_alloc(void);
+-extern void conn_close(struct connection *conn, int fd);
+-extern void conn_put(struct connection *conn);
+-extern int conn_get(struct connection *conn);
+-extern struct connection * conn_find(struct iscsi_session *session, uint32_t cid);
+-extern int conn_take_fd(struct connection *conn, int fd);
+-extern void conn_read_pdu(struct connection *conn);
+-extern void conn_write_pdu(struct connection *conn);
+-extern void conn_add_to_session(struct connection *conn, struct iscsi_session *session);
++extern struct iscsi_connection *conn_alloc(void);
++extern void conn_close(struct iscsi_connection *conn, int fd);
++extern void conn_put(struct iscsi_connection *conn);
++extern int conn_get(struct iscsi_connection *conn);
++extern struct iscsi_connection * conn_find(struct iscsi_session *session, uint32_t cid);
++extern int conn_take_fd(struct iscsi_connection *conn, int fd);
++extern void conn_read_pdu(struct iscsi_connection *conn);
++extern void conn_write_pdu(struct iscsi_connection *conn);
++extern void conn_add_to_session(struct iscsi_connection *conn, struct iscsi_session *session);
+ 
+ /* iscsid.c */
+ extern void iscsi_event_handler(int fd, int events, void *data);
+-extern char *text_key_find(struct connection *conn, char *searchKey);
+-extern void text_key_add(struct connection *conn, char *key, char *value);
++extern char *text_key_find(struct iscsi_connection *conn, char *searchKey);
++extern void text_key_add(struct iscsi_connection *conn, char *key, char *value);
+ 
+ /* iscsid.c iscsi_task */
+ extern void iscsi_free_task(struct iscsi_task *task);
+ 
+ /* session.c */
+ extern struct iscsi_session *session_find_name(int tid, const char *iname, uint8_t *isid);
+-extern int session_create(struct connection *conn);
++extern int session_create(struct iscsi_connection *conn);
+ extern void session_destroy(struct iscsi_session *session);
+ extern struct iscsi_session *session_lookup(uint16_t tsih);
+ extern void session_get(struct iscsi_session *session);
+@@ -266,7 +266,7 @@
+ /* target.c */
+ struct iscsi_target * target_find_by_name(const char *name);
+ struct iscsi_target * target_find_by_id(int tid);
+-extern void target_list_build(struct connection *, char *, char *);
++extern void target_list_build(struct iscsi_connection *, char *, char *);
+ 
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/session.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -48,7 +48,7 @@
+ 	return NULL;
+ }
+ 
+-int session_create(struct connection *conn)
++int session_create(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_session *session = NULL;
+ 	static uint16_t tsih, last_tsih = 0;
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-17 02:34:15 UTC (rev 654)
++++ trunk/usr/iscsi/target.c	2006-11-17 02:42:53 UTC (rev 655)
+@@ -20,7 +20,7 @@
+ 
+ static LIST_HEAD(targets_list);
+ 
+-void target_list_build(struct connection *conn, char *addr, char *name)
++void target_list_build(struct iscsi_connection *conn, char *addr, char *name)
+ {
+ 	struct iscsi_target *target;
+ 
+@@ -181,7 +181,7 @@
+ {
+ 	int len, total = 0;
+ 	struct iscsi_session *session;
+-	struct connection *conn;
++	struct iscsi_connection *conn;
+ 
+ 	session = session_lookup(sid_to_tsih(sid));
+ 	if (!session)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000641.html">[Stgt-svn] r654 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000643.html">[Stgt-svn] r656 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#642">[ date ]</a>
+              <a href="thread.html#642">[ thread ]</a>
+              <a href="subject.html#642">[ subject ]</a>
+              <a href="author.html#642">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

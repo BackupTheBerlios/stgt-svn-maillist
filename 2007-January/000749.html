@@ -1,0 +1,258 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r762 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r762%20-%20trunk/doc&In-Reply-To=%3C200701061217.l06CH8if010252%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000748.html">
+   <LINK REL="Next"  HREF="000750.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r762 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r762%20-%20trunk/doc&In-Reply-To=%3C200701061217.l06CH8if010252%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r762 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 13:17:08 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000748.html">[Stgt-svn] r761 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000750.html">[Stgt-svn] r763 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#749">[ date ]</a>
+              <a href="thread.html#749">[ thread ]</a>
+              <a href="subject.html#749">[ subject ]</a>
+              <a href="author.html#749">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 13:17:08 +0100 (Sat, 06 Jan 2007)
+New Revision: 762
+
+Modified:
+   trunk/doc/README.iscsi
+Log:
+Fix README.iscsi about show operation
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2007-01-06 12:14:53 UTC (rev 761)
++++ trunk/doc/README.iscsi	2007-01-06 12:17:08 UTC (rev 762)
+@@ -36,8 +36,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-    ACL information:
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -45,6 +43,8 @@
+             Size: 55G
+             Backing store: /dev/hdc1
+             Backing store type: file
++    Account information:
++    ACL information:
+ 
+ 
+ If you don't need to configure this target any more, enable the target
+@@ -57,9 +57,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-    ACL information:
+-        ALL
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -67,6 +64,9 @@
+             Size: 55G
+             Backing store: /dev/hdc1
+             Backing store type: file
++    Account information:
++    ACL information:
++        ALL
+ 
+ 
+ Note &quot;ACL information&quot; section. &quot;ALL&quot; means that this target accepts
+@@ -82,8 +82,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-    ACL information:
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -91,6 +89,8 @@
+             Size: 55G
+             Backing store: /dev/hdc1
+             Backing store type: file
++    Account information:
++    ACL information:
+ 
+ 
+ Here are some examples:
+@@ -103,10 +103,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-    ACL information:
+-        192.168.2.29
+-        192.168.11.0/24
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -114,6 +110,10 @@
+             Size: 55G
+             Backing store: /dev/hdc1
+             Backing store type: file
++    Account information:
++    ACL information:
++        192.168.2.29
++        192.168.11.0/24
+ 
+ 
+ You can add lots of logical units:
+@@ -124,8 +124,6 @@
+     System information:
+         Driver: iscsi
+         Status: suspended
+-    I_T nexus information:
+-    Account information:
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -139,6 +137,8 @@
+             Size: 20G
+             Backing store: /dev/hdd1
+             Backing store type: file
++    I_T nexus information:
++    Account information:
+ 
+ 
+ You can get iSCSI parameters of the target:
+@@ -212,10 +212,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-        fujita
+-    ACL information:
+-        ALL
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -223,6 +219,10 @@
+             Size: 1G
+             Backing store: /var/tmp/image
+             Backing store type: file
++    Account information:
++        fujita
++    ACL information:
++        ALL
+ 
+ 
+ You can set up an outgoing account. First, you need to create a new
+@@ -240,11 +240,6 @@
+         Driver: iscsi
+         Status: running
+     I_T nexus information:
+-    Account information:
+-        fujita
+-        hoge (outgoing)
+-    ACL information:
+-        ALL
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -252,6 +247,11 @@
+             Size: 1G
+             Backing store: /var/tmp/image
+             Backing store type: file
++    Account information:
++        fujita
++        hoge (outgoing)
++    ACL information:
++        ALL
+ 
+ 
+ Initiator Information
+@@ -269,9 +269,6 @@
+             Initiator: iqn.1987-05.com.cisco:01.4438aca09387
+             Connection: 0
+                 IP Address: 192.168.11.5
+-    Account information:
+-    ACL information:
+-        ALL
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -279,6 +276,9 @@
+             Size: 1G
+             Backing store: /var/tmp/image
+             Backing store type: file
++    Account information:
++    ACL information:
++        ALL
+ 
+ 
+ One initiator (192.168.11.5) logs in now. Let's try again:
+@@ -297,9 +297,6 @@
+             Initiator: iqn.1991-05.com.microsoft:kernel
+             Connection: 1
+                 IP Address: 192.168.11.133
+-     Account information:
+-    ACL information:
+-        ALL
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -307,6 +304,9 @@
+             Size: 1G
+             Backing store: /var/tmp/image
+             Backing store type: file
++    Account information:
++    ACL information:
++        ALL
+ 
+ 
+ Now we have two initiators. You can see the parameters that the target
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000748.html">[Stgt-svn] r761 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000750.html">[Stgt-svn] r763 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#749">[ date ]</a>
+              <a href="thread.html#749">[ thread ]</a>
+              <a href="subject.html#749">[ subject ]</a>
+              <a href="author.html#749">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

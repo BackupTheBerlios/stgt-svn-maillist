@@ -1,0 +1,103 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r670 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r670%20-%20trunk&In-Reply-To=%3C200611230950.kAN9opPJ026187%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000656.html">
+   <LINK REL="Next"  HREF="000658.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r670 - trunk</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r670%20-%20trunk&In-Reply-To=%3C200611230950.kAN9opPJ026187%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r670 - trunk">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Nov 23 10:50:51 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000656.html">[Stgt-svn] r669 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000658.html">[Stgt-svn] r671 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#657">[ date ]</a>
+              <a href="thread.html#657">[ thread ]</a>
+              <a href="subject.html#657">[ subject ]</a>
+              <a href="author.html#657">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-23 10:50:51 +0100 (Thu, 23 Nov 2006)
+New Revision: 670
+
+Removed:
+   trunk/ibmvio
+   trunk/iscsi
+Log:
+Remove old scripts to avoid confusion.
+
+
+Deleted: trunk/ibmvio
+===================================================================
+--- trunk/ibmvio	2006-11-23 09:29:28 UTC (rev 669)
++++ trunk/ibmvio	2006-11-23 09:50:51 UTC (rev 670)
+@@ -1,10 +0,0 @@
+-#!/bin/bash
+-#
+-# Temporary script to start ibmvstgt
+-#
+-
+-PATH=/sbin:/bin:/usr/sbin:/usr/bin
+-
+-${PWD}/usr/tgtadm --lld ibmvio --op new --tid 1
+-${PWD}/usr/tgtadm --lld ibmvio --op new --tid 1 --lun 0 --params Path=/dev/sdb1
+-${PWD}/usr/tgtadm --lld ibmvio --op bind --tid 1 --host 1
+
+Deleted: trunk/iscsi
+===================================================================
+--- trunk/iscsi	2006-11-23 09:29:28 UTC (rev 669)
++++ trunk/iscsi	2006-11-23 09:50:51 UTC (rev 670)
+@@ -1,9 +0,0 @@
+-#!/bin/bash
+-#
+-# Temporary script to start istgt
+-#
+-
+-PATH=/sbin:/bin:/usr/sbin:/usr/bin
+-
+-${PWD}/usr/tgtadm --lld iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-${PWD}/usr/tgtadm --lld iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000656.html">[Stgt-svn] r669 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000658.html">[Stgt-svn] r671 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#657">[ date ]</a>
+              <a href="thread.html#657">[ thread ]</a>
+              <a href="subject.html#657">[ subject ]</a>
+              <a href="author.html#657">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

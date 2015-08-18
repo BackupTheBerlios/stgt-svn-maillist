@@ -1,0 +1,127 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r709 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r709%20-%20trunk/usr&In-Reply-To=%3C200612250441.kBP4fv24010964%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000695.html">
+   <LINK REL="Next"  HREF="000697.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r709 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r709%20-%20trunk/usr&In-Reply-To=%3C200612250441.kBP4fv24010964%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r709 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Dec 25 05:41:57 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000695.html">[Stgt-svn] r708 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000697.html">[Stgt-svn] r710 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#696">[ date ]</a>
+              <a href="thread.html#696">[ thread ]</a>
+              <a href="subject.html#696">[ subject ]</a>
+              <a href="author.html#696">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-25 05:41:57 +0100 (Mon, 25 Dec 2006)
+New Revision: 709
+
+Modified:
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Just add error messages.
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-25 04:18:37 UTC (rev 708)
++++ trunk/usr/tgtadm.c	2006-12-25 04:41:57 UTC (rev 709)
+@@ -60,6 +60,22 @@
+ static char program_name[] = &quot;tgtadm&quot;;
+ static int debug;
+ 
++static char *tgtadm_error_msg[] = {
++	&quot;&quot;,
++	&quot;unknown error&quot;,
++	&quot;out of memory&quot;
++	&quot;can't find the driver&quot;
++	&quot;can't find the target&quot;
++
++	&quot;can't find the logical unit&quot;,
++	&quot;can't find the session&quot;,
++	&quot;can't find the connection&quot;,
++	&quot;the target already exists&quot;,
++	&quot;the logical unit already exists&quot;,
++
++	&quot;unknown parameter&quot;,
++};
++
+ static struct option const long_options[] =
+ {
+ 	{&quot;lld&quot;, required_argument, NULL, 'l'},
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-25 04:18:37 UTC (rev 708)
++++ trunk/usr/tgtadm.h	2006-12-25 04:41:57 UTC (rev 709)
+@@ -4,6 +4,22 @@
+ #define TGT_IPC_NAMESPACE	&quot;TGT_IPC_ABSTRACT_NAMESPACE&quot;
+ #define TGT_LLD_NAME_LEN	64
+ 
++enum tgtadm_errno {
++	TGTADM_SUCCESS,
++	TGTADM_UNKNOWN_ERR,
++	TGTADM_OOM,
++	TGTADM_NO_DRIVER,
++	TGTADM_NO_TARGET,
++
++	TGTADM_NO_LUN,
++	TGTADM_NO_SESSION,
++	TGTADM_NO_CONNECTION,
++	TGTADM_TARGET_EXIST,
++	TGTADM_LUN_EXIST,
++
++	TGTADM_UNKNOWN_PARAM,
++};
++
+ enum tgtadm_op {
+ 	OP_NEW,
+ 	OP_DELETE,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000695.html">[Stgt-svn] r708 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000697.html">[Stgt-svn] r710 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#696">[ date ]</a>
+              <a href="thread.html#696">[ thread ]</a>
+              <a href="subject.html#696">[ subject ]</a>
+              <a href="author.html#696">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

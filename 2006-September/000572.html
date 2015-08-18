@@ -1,0 +1,565 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r585 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r585%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609030556.k835uLZE013242%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000571.html">
+   <LINK REL="Next"  HREF="000573.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r585 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r585%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609030556.k835uLZE013242%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r585 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Sep  3 07:56:21 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000571.html">[Stgt-svn] r584 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000573.html">[Stgt-svn] r586 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#572">[ date ]</a>
+              <a href="thread.html#572">[ thread ]</a>
+              <a href="subject.html#572">[ subject ]</a>
+              <a href="author.html#572">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-03 07:56:19 +0200 (Sun, 03 Sep 2006)
+New Revision: 585
+
+Modified:
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+Log:
+Add noop support.
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-09-01 17:25:35 UTC (rev 584)
++++ trunk/usr/iscsi/iscsi.h	2006-09-03 05:56:19 UTC (rev 585)
+@@ -1,14 +1,14 @@
+ extern int iscsi_init(void);
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
+-extern int iscsi_cmd_done(int host_no, int len, int result, int rw,
+-			  uint64_t addr, uint64_t tag);
++extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
++			       uint64_t addr, uint64_t tag);
+ 
+ struct tgt_driver iscsi = {
+ 	.name		= &quot;iscsi&quot;,
+ 	.init		= iscsi_init,
+ 	.target_create	= iscsi_target_create,
+ 	.target_destroy	= iscsi_target_destroy,
+-	.cmd_end_notify	= iscsi_cmd_done,
++	.cmd_end_notify	= iscsi_scsi_cmd_done,
+ 	.bdt		= &amp;aio_bdt,
+ };
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-01 17:25:35 UTC (rev 584)
++++ trunk/usr/iscsi/iscsid.c	2006-09-03 05:56:19 UTC (rev 585)
+@@ -826,8 +826,8 @@
+ 	return 0;
+ }
+ 
+-int iscsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
+-		   uint64_t tag)
++int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
++			uint64_t tag)
+ {
+ 	struct session *session;
+ 	struct iscsi_task *task;
+@@ -915,7 +915,8 @@
+ 
+ 	switch (op) {
+ 	case ISCSI_OP_NOOP_OUT:
+-/* 		noop_out_exec(cmnd); */
++		list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
++		tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 		break;
+ 	case ISCSI_OP_SCSI_CMD:
+ 		err = iscsi_scsi_cmd_execute(task);
+@@ -936,6 +937,56 @@
+ 	return 0;
+ }
+ 
++static int iscsi_data_out_rx_done(struct iscsi_task *task)
++{
++	struct iscsi_hdr *hdr = &amp;task-&gt;conn-&gt;req.bhs;
++	int err = 0;
++
++	if (hdr-&gt;ttt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
++		if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) {
++			task-&gt;unsol_count = 0;
++			if (!task_pending(task))
++				err = iscsi_scsi_cmd_execute(task);
++		}
++	} else {
++		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL))
++			return err;
++
++		err = iscsi_scsi_cmd_execute(task);
++	}
++
++	return err;
++}
++
++static int iscsi_data_out_rx_start(struct connection *conn)
++{
++	struct iscsi_task *task;
++	struct iscsi_data *req = (struct iscsi_data *) &amp;conn-&gt;req.bhs;
++
++	list_for_each_entry(task, &amp;conn-&gt;session-&gt;cmd_list, c_hlist) {
++		if (task-&gt;tag == req-&gt;itt)
++			goto found;
++	}
++	return -EINVAL;
++found:
++	dprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u %u %u\n&quot;, task-&gt;tag,
++		ntohl(((struct iscsi_cmd *) (&amp;task-&gt;req))-&gt;data_length),
++		task-&gt;offset,
++		task-&gt;r2t_count,
++		ntoh24(req-&gt;dlength), be32_to_cpu(req-&gt;offset));
++
++	conn-&gt;rx_buffer = (void *) (unsigned long) task-&gt;c_buffer;
++	conn-&gt;rx_buffer += be32_to_cpu(req-&gt;offset);
++	conn-&gt;rx_size = ntoh24(req-&gt;dlength);
++
++	task-&gt;offset += ntoh24(req-&gt;dlength);
++	task-&gt;r2t_count -= ntoh24(req-&gt;dlength);
++
++	conn-&gt;rx_task = task;
++
++	return 0;
++}
++
+ static int iscsi_task_queue(struct iscsi_task *task)
+ {
+ 	struct session *session = task-&gt;conn-&gt;session;
+@@ -944,11 +995,12 @@
+ 	struct iscsi_task *ent;
+ 	int err;
+ 
+-	if (req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE) {
++	dprintf(&quot;%x %x %x\n&quot;, be32_to_cpu(req-&gt;statsn), session-&gt;exp_cmd_sn,
++		req-&gt;opcode);
++
++	if (req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE)
+ 		return iscsi_task_execute(task);
+-	}
+ 
+-	dprintf(&quot;%x %x\n&quot;, be32_to_cpu(req-&gt;statsn), session-&gt;exp_cmd_sn);
+ 	cmd_sn = be32_to_cpu(req-&gt;statsn);
+ 	if (cmd_sn == session-&gt;exp_cmd_sn) {
+ 	retry:
+@@ -987,58 +1039,8 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_data_out_rx_start(struct connection *conn)
++static int iscsi_scsi_cmd_rx_start(struct connection *conn)
+ {
+-	struct iscsi_task *task;
+-	struct iscsi_data *req = (struct iscsi_data *) &amp;conn-&gt;req.bhs;
+-
+-	list_for_each_entry(task, &amp;conn-&gt;session-&gt;cmd_list, c_hlist) {
+-		if (task-&gt;tag == req-&gt;itt)
+-			goto found;
+-	}
+-	return -EINVAL;
+-found:
+-	dprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u %u %u\n&quot;, task-&gt;tag,
+-		ntohl(((struct iscsi_cmd *) (&amp;task-&gt;req))-&gt;data_length),
+-		task-&gt;offset,
+-		task-&gt;r2t_count,
+-		ntoh24(req-&gt;dlength), be32_to_cpu(req-&gt;offset));
+-
+-	conn-&gt;rx_buffer = (void *) (unsigned long) task-&gt;c_buffer;
+-	conn-&gt;rx_buffer += be32_to_cpu(req-&gt;offset);
+-	conn-&gt;rx_size = ntoh24(req-&gt;dlength);
+-
+-	task-&gt;offset += ntoh24(req-&gt;dlength);
+-	task-&gt;r2t_count -= ntoh24(req-&gt;dlength);
+-
+-	conn-&gt;rx_task = task;
+-
+-	return 0;
+-}
+-
+-static int iscsi_data_out_rx_done(struct iscsi_task *task)
+-{
+-	struct iscsi_hdr *hdr = &amp;task-&gt;conn-&gt;req.bhs;
+-	int err = 0;
+-
+-	if (hdr-&gt;ttt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+-		if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) {
+-			task-&gt;unsol_count = 0;
+-			if (!task_pending(task))
+-				err = iscsi_scsi_cmd_execute(task);
+-		}
+-	} else {
+-		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL))
+-			return err;
+-
+-		err = iscsi_scsi_cmd_execute(task);
+-	}
+-
+-	return err;
+-}
+-
+-static int iscsi_cmd_init(struct connection *conn)
+-{
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+ 	int len;
+@@ -1051,7 +1053,6 @@
+ 	task-&gt;tag = req-&gt;itt;
+ 	task-&gt;conn = conn;
+ 	INIT_LIST_HEAD(&amp;task-&gt;c_hlist);
+-
+ 	list_add(&amp;task-&gt;c_hlist, &amp;conn-&gt;session-&gt;cmd_list);
+ 
+ 	dprintf(&quot;%u %x %d %d %x\n&quot;, conn-&gt;session-&gt;tsih,
+@@ -1082,8 +1083,60 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_cmd_rx_done(struct connection *conn)
++static int iscsi_noop_out_rx_start(struct connection *conn)
+ {
++	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;conn-&gt;req.bhs;
++	struct iscsi_task *task;
++	int len, err = -ENOMEM;
++
++	dprintf(&quot;%x %x %u\n&quot;, req-&gt;ttt, req-&gt;itt, ntoh24(req-&gt;dlength));
++	if (req-&gt;ttt != cpu_to_be32(ISCSI_RESERVED_TAG)) {
++		/*
++		 * We don't request a NOP-Out by sending a NOP-In.
++		 * See 10.18.2 in the draft 20.
++		 */
++		eprintf(&quot;initiator bug\n&quot;);
++		err = -ISCSI_REASON_PROTOCOL_ERROR;
++		goto out;
++	}
++
++	if (req-&gt;itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
++		if (!(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE)) {
++			eprintf(&quot;initiator bug\n&quot;);
++			err = -ISCSI_REASON_PROTOCOL_ERROR;
++			goto out;
++		}
++	}
++
++	conn-&gt;exp_stat_sn = be32_to_cpu(req-&gt;exp_statsn);
++
++	task = zalloc(sizeof(*task));
++	if (!task)
++		goto out;
++
++	memcpy(&amp;task-&gt;req, req, sizeof(*req));
++	task-&gt;conn = conn;
++
++	len = ntoh24(req-&gt;dlength);
++	if (len) {
++		conn-&gt;rx_size = len;
++		task-&gt;len = len;
++		task-&gt;c_buffer = malloc(len);
++		if (!task-&gt;c_buffer) {
++			free(task);
++			goto out;
++		}
++
++		conn-&gt;rx_buffer = task-&gt;c_buffer;
++	}
++
++	conn-&gt;rx_task = task;
++out:
++	return err;
++}
++
++static int iscsi_task_rx_done(struct connection *conn)
++{
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task = conn-&gt;rx_task;
+ 	uint8_t op;
+@@ -1092,12 +1145,12 @@
+ 	op = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	switch (op) {
+ 	case ISCSI_OP_SCSI_CMD:
++	case ISCSI_OP_NOOP_OUT:
+ 		err = iscsi_task_queue(task);
+ 		break;
+ 	case ISCSI_OP_SCSI_DATA_OUT:
+ 		err = iscsi_data_out_rx_done(task);
+ 		break;
+-	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+ 	case ISCSI_OP_TEXT:
+@@ -1111,7 +1164,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_cmd_rx_start(struct connection *conn)
++static int iscsi_task_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	uint8_t op;
+@@ -1120,7 +1173,7 @@
+ 	op = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	switch (op) {
+ 	case ISCSI_OP_SCSI_CMD:
+-		err = iscsi_cmd_init(conn);
++		err = iscsi_scsi_cmd_rx_start(conn);
+ 		if (!err)
+ 			conn-&gt;exp_stat_sn = be32_to_cpu(hdr-&gt;exp_statsn);
+ 		break;
+@@ -1130,6 +1183,8 @@
+ 			conn-&gt;exp_stat_sn = be32_to_cpu(hdr-&gt;exp_statsn);
+ 		break;
+ 	case ISCSI_OP_NOOP_OUT:
++		err = iscsi_noop_out_rx_start(conn);
++		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+ 	case ISCSI_OP_TEXT:
+@@ -1145,8 +1200,58 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_cmd_tx_done(struct connection *conn)
++static int iscsi_scsi_cmd_tx_start(struct iscsi_task *task)
+ {
++	int err = 0;
++	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
++
++	if (task-&gt;r2t_count)
++		err = iscsi_r2t_build(task);
++	else {
++		if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
++			err = iscsi_cmd_rsp_build(task);
++		else {
++			if (task-&gt;len)
++				err = iscsi_data_rsp_build(task);
++			else
++				err = iscsi_cmd_rsp_build(task);
++		}
++	}
++
++	return err;
++}
++
++static int iscsi_noop_out_tx_start(struct iscsi_task *task, int *is_rsp)
++{
++	struct connection *conn = task-&gt;conn;
++	struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *) &amp;conn-&gt;rsp.bhs;
++
++	if (task-&gt;req.itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
++		*is_rsp = 0;
++		free(task);
++	} else {
++		*is_rsp = 1;
++
++		memset(rsp, 0, sizeof(*rsp));
++		rsp-&gt;opcode = ISCSI_OP_NOOP_IN;
++		rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++		rsp-&gt;itt = task-&gt;req.itt;
++		rsp-&gt;ttt = cpu_to_be32(ISCSI_RESERVED_TAG);
++		rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++		rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
++		rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
++
++		/* TODO: honor max_burst */
++		conn-&gt;rsp.datasize = task-&gt;len;
++		hton24(rsp-&gt;dlength, task-&gt;len);
++		conn-&gt;rsp.data = task-&gt;c_buffer;
++	}
++
++	return 0;
++}
++
++static int iscsi_scsi_cmd_tx_done(struct connection *conn)
++{
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_task *task = conn-&gt;tx_task;
+ 
+@@ -1157,9 +1262,9 @@
+ 		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)) {
+ 			dprintf(&quot;more data %x\n&quot;, hdr-&gt;itt);
+ 			list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+-			goto out;
++			return 0;
+ 		}
+-	default:
++	case ISCSI_OP_SCSI_CMD_RSP:
+ 		target_cmd_done(conn-&gt;session-&gt;tsih, task-&gt;tag);
+ 		list_del(&amp;task-&gt;c_hlist);
+ 		if (task-&gt;c_buffer) {
+@@ -1168,29 +1273,44 @@
+ 			free(task-&gt;c_buffer);
+ 		}
+ 		free(task);
++		break;
++	default:
++		eprintf(&quot;target bug %x\n&quot;, hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK);
+ 	}
+ 
+-out:
++	return 0;
++}
++
++static int iscsi_task_tx_done(struct connection *conn)
++{
++	struct iscsi_task *task = conn-&gt;tx_task;
++	int err;
++
++	switch (task-&gt;req.opcode &amp; ISCSI_OPCODE_MASK) {
++	case ISCSI_OP_SCSI_CMD:
++		err = iscsi_scsi_cmd_tx_done(conn);
++		break;
++	case ISCSI_OP_NOOP_OUT:
++		if (task-&gt;c_buffer)
++			free(task-&gt;c_buffer);
++		free(task);
++	}
++
+ 	conn-&gt;tx_task = NULL;
+ 	return 0;
+ }
+ 
+-static int iscsi_cmd_tx_start(struct connection *conn)
++static int iscsi_task_tx_start(struct connection *conn)
+ {
+ 	struct iscsi_task *task;
+-	struct iscsi_cmd *req;
+-	int err = 0;
++	int is_rsp, err = 0;
+ 
+-	if (list_empty(&amp;conn-&gt;tx_clist)) {
+-		dprintf(&quot;no more data\n&quot;);
+-		tgt_event_modify(conn-&gt;fd, EPOLLIN);
+-		return -EAGAIN;
+-	}
++	if (list_empty(&amp;conn-&gt;tx_clist))
++		goto nodata;
+ 
+ 	conn_write_pdu(conn);
+ 
+ 	task = list_entry(conn-&gt;tx_clist.next, struct iscsi_task, c_list);
+-	conn-&gt;tx_task = task;
+ 	dprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u\n&quot;, task-&gt;tag,
+ 		ntohl(((struct iscsi_cmd *) (&amp;task-&gt;req))-&gt;data_length),
+ 		task-&gt;offset,
+@@ -1198,22 +1318,24 @@
+ 
+ 	list_del(&amp;task-&gt;c_list);
+ 
+-	req = (struct iscsi_cmd *) &amp;task-&gt;req;
+-
+-	if (task-&gt;r2t_count)
+-		iscsi_r2t_build(task);
+-	else {
+-		if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
+-			err = iscsi_cmd_rsp_build(task);
+-		else {
+-			if (task-&gt;len)
+-				err = iscsi_data_rsp_build(task);
+-			else
+-				err = iscsi_cmd_rsp_build(task);
+-		}
++	switch (task-&gt;req.opcode &amp; ISCSI_OPCODE_MASK) {
++	case ISCSI_OP_SCSI_CMD:
++		err = iscsi_scsi_cmd_tx_start(task);
++		break;
++	case ISCSI_OP_NOOP_OUT:
++		err = iscsi_noop_out_tx_start(task, &amp;is_rsp);
++		if (!is_rsp)
++			goto nodata;
++		break;
+ 	}
+ 
++	conn-&gt;tx_task = task;
+ 	return err;
++
++nodata:
++	dprintf(&quot;no more data\n&quot;);
++	tgt_event_modify(conn-&gt;fd, EPOLLIN);
++	return -EAGAIN;
+ }
+ 
+ 
+@@ -1271,7 +1393,7 @@
+ 			}
+ 
+ 			if (conn-&gt;state == STATE_SCSI) {
+-				res = iscsi_cmd_rx_start(conn);
++				res = iscsi_task_rx_start(conn);
+ 				if (res) {
+ 					conn-&gt;state = STATE_CLOSE;
+ 					break;
+@@ -1290,7 +1412,7 @@
+ 
+ 		case IOSTATE_READ_AHS_DATA:
+ 			if (conn-&gt;state == STATE_SCSI) {
+-				res = iscsi_cmd_rx_done(conn);
++				res = iscsi_task_rx_done(conn);
+ 				if (!res)
+ 					conn_read_pdu(conn);
+ 			} else {
+@@ -1312,7 +1434,7 @@
+ 	int res, opt;
+ 
+ 	if (conn-&gt;state == STATE_SCSI &amp;&amp; !conn-&gt;tx_task) {
+-		res = iscsi_cmd_tx_start(conn);
++		res = iscsi_task_tx_start(conn);
+ 		if (res)
+ 			return;
+ 	}
+@@ -1382,7 +1504,7 @@
+ 			case STATE_CLOSE:
+ 				break;
+ 			case STATE_SCSI:
+-				iscsi_cmd_tx_done(conn);
++				iscsi_task_tx_done(conn);
+ 				break;
+ 			default:
+ 				conn_read_pdu(conn);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000571.html">[Stgt-svn] r584 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000573.html">[Stgt-svn] r586 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#572">[ date ]</a>
+              <a href="thread.html#572">[ thread ]</a>
+              <a href="subject.html#572">[ subject ]</a>
+              <a href="author.html#572">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,206 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r257 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r257%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602030613.k136Dvu6018771%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000243.html">
+   <LINK REL="Next"  HREF="000245.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r257 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r257%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602030613.k136Dvu6018771%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r257 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Feb  3 07:13:57 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000243.html">[Stgt-svn] r256 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000245.html">[Stgt-svn] r258 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#244">[ date ]</a>
+              <a href="thread.html#244">[ thread ]</a>
+              <a href="subject.html#244">[ subject ]</a>
+              <a href="author.html#244">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-03 07:13:43 +0100 (Fri, 03 Feb 2006)
+New Revision: 257
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+   branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+Log:
+o Add workaround to cheat queue_dma_alignment in __bio_map_user_iov.
+o Save scmd-&gt;bufflen for LLDs. Need to fix this later.
+o Put dummy data in uspace_send_status.
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-03 06:08:44 UTC (rev 256)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-03 06:13:43 UTC (rev 257)
+@@ -234,6 +234,7 @@
+ 		return 0;
+ 	}
+ 
++	eprintk(&quot;cmd %p addr %p cnt %d\n&quot;, cmd, cmd-&gt;buffer, cmd-&gt;use_sg);
+ 	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+ 	return -EINVAL;
+ }
+@@ -248,13 +249,22 @@
+ 	struct bio *bio;
+ 	int err;
+ 
++	/*
++	 * TODO: We need to cheat queue_dma_alignment in
++	 * __bio_map_user_iov.
++	 */
++	len = (len + PAGE_SIZE - 1) &amp; PAGE_MASK;
++
+ 	bio_list_init(&amp;cmd-&gt;xfer_list);
+ 	bio_list_init(&amp;cmd-&gt;xfer_done_list);
+ 
+ 	while (len &gt; 0) {
+-		bio = bio_map_user(q, NULL, (unsigned long)uaddr, len, rw, 1);
++		dprintk(&quot;%lx %u\n&quot;, (unsigned long) uaddr, len);
++		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw, 1);
+ 		if (IS_ERR(bio)) {
+ 			err = PTR_ERR(bio);
++			dprintk(&quot;fail to map %lx %u\n&quot;,
++				(unsigned long) uaddr, len);
+ 			goto unmap_bios;
+ 		}
+ 
+@@ -284,9 +294,11 @@
+ 	return 0;
+ 
+ unmap_bios:
+-	bio_unmap_user(rq-&gt;bio);
+-	while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_list)))
+-		bio_unmap_user(bio);
++	if (rq-&gt;bio) {
++		bio_unmap_user(rq-&gt;bio);
++		while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_list)))
++			bio_unmap_user(bio);
++	}
+ 
+ 	return err;
+ }
+@@ -313,11 +325,10 @@
+ 	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+ 	bio_list_add(&amp;cmd-&gt;xfer_done_list, cmd-&gt;request-&gt;bio);
+ 
+-	cmd-&gt;bufflen -= cmd-&gt;request_bufflen;
+ 	cmd-&gt;buffer += cmd-&gt;request_bufflen;
+ 	cmd-&gt;offset += cmd-&gt;request_bufflen;
+ 
+-	if (!cmd-&gt;bufflen) {
++	if (!cmd-&gt;xfer_list.head) {
+ 		scsi_tgt_transfer_response(cmd);
+ 		return;
+ 	}
+@@ -376,6 +387,9 @@
+ 	struct request *rq;
+ 	int err = 0;
+ 
++	dprintk(&quot;%d %u %d %u %llu %lx %u %u\n&quot;, host_no, cid, result,
++		len, (unsigned long long) offset, uaddr, rw, try_map);
++
+ 	/* TODO: replace with a O(1) alg */
+ 	shost = scsi_host_lookup(host_no);
+ 	if (IS_ERR(shost)) {
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-03 06:08:44 UTC (rev 256)
++++ branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-03 06:13:43 UTC (rev 257)
+@@ -9,6 +9,7 @@
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;net/tcp.h&gt;
++#include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+@@ -42,7 +43,8 @@
+ 	pid_t pid;
+ 
+ 	pid = scsi_tgt_get_pid(cmd-&gt;shost);
+-	len = NLMSG_SPACE(sizeof(*ev) + MAX_COMMAND_SIZE);
++	len = NLMSG_SPACE(sizeof(*ev) +
++			  MAX_COMMAND_SIZE + sizeof(struct scsi_lun));
+ 	/*
+ 	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+ 	 */
+@@ -60,8 +62,13 @@
+ 	ev-&gt;k.cmd_req.host_no = cmd-&gt;shost-&gt;host_no;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+-	memcpy(ev-&gt;data, cmd-&gt;cmnd, MAX_COMMAND_SIZE);
+ 
++	/* FIXME: we need scsi core to do that. */
++	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
++	memcpy(pdu, cmd-&gt;cmnd, MAX_COMMAND_SIZE);
++	memcpy(pdu + MAX_COMMAND_SIZE, cmd-&gt;request-&gt;end_io_data,
++	       sizeof(struct scsi_lun));
++
+ 	err = netlink_unicast(nls, skb, pid, 0);
+ 	if (err &lt; 0)
+ 		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb &quot;
+@@ -95,14 +102,15 @@
+ int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+ {
+ 	struct tgt_event ev;
++	char dummy[MAX_COMMAND_SIZE + sizeof(struct scsi_lun)];
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 	ev.k.cmd_done.host_no = cmd-&gt;shost-&gt;host_no;
+-	ev.k.cmd_done.cid = (unsigned long)cmd;
++	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+ 	ev.k.cmd_done.result = cmd-&gt;result;
+ 
+-	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, NULL, 0, gfp_mask,
+-			     scsi_tgt_get_pid(cmd-&gt;shost));
++	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
++			      gfp_mask, scsi_tgt_get_pid(cmd-&gt;shost));
+ }
+ 
+ static int scsi_tgt_bind_host(struct tgt_event *ev)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000243.html">[Stgt-svn] r256 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000245.html">[Stgt-svn] r258 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#244">[ date ]</a>
+              <a href="thread.html#244">[ thread ]</a>
+              <a href="subject.html#244">[ subject ]</a>
+              <a href="author.html#244">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,145 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r293 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r293%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602140617.k1E6Hf4I024066%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000279.html">
+   <LINK REL="Next"  HREF="000281.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r293 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r293%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602140617.k1E6Hf4I024066%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r293 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 14 07:17:41 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000279.html">[Stgt-svn] r292 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000281.html">[Stgt-svn] r294 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#280">[ date ]</a>
+              <a href="thread.html#280">[ thread ]</a>
+              <a href="subject.html#280">[ subject ]</a>
+              <a href="author.html#280">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-14 07:17:30 +0100 (Tue, 14 Feb 2006)
+New Revision: 293
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+bio_map_user() and blk_rq_bio_prep() ruined rq-&gt;flags. As a result, freed_request() breaks q.rq.count[]. We must set rq-&gt;flags by hand before calling scsi_host_put_command().
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-13 22:42:34 UTC (rev 292)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-14 06:17:30 UTC (rev 293)
+@@ -69,7 +69,16 @@
+ 	struct scsi_cmnd *cmd = data;
+ 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+ 
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
++	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
++		rq_data_dir(cmd-&gt;request));
++	/*
++	 * We must set rq-&gt;flags here because bio_map_user and
++	 * blk_rq_bio_prep ruined ti.
++	 */
++	if (cmd-&gt;sc_data_direction == DMA_TO_DEVICE)
++		cmd-&gt;request-&gt;flags |= 1;
++	else
++		cmd-&gt;request-&gt;flags &amp;= ~1UL;
+ 
+ 	scsi_unmap_user_pages(tcmd);
+ 	scsi_tgt_uspace_send_status(cmd, GFP_KERNEL);
+@@ -206,6 +215,11 @@
+ void scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+ 			    int noblock)
+ {
++	struct request_queue *q = cmd-&gt;request-&gt;q;
++	struct request_list *rl = &amp;q-&gt;rq;
++	dprintk(&quot;%d %d %lu\n&quot;, rl-&gt;count[0], rl-&gt;count[1],
++		rq_data_dir(cmd-&gt;request));
++
+ 	/*
+ 	 * For now this just calls the request_fn from this context.
+ 	 * For HW llds though we do not want to execute from here so
+@@ -225,7 +239,7 @@
+ {
+ 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+ 
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
++	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+ 
+ 	/* don't we have to call this if result is set or not */
+ 	if (cmd-&gt;result) {
+@@ -242,7 +256,7 @@
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	int err;
+ 
+-	dprintk(&quot;cmd %p\n&quot;, cmd);
++	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+ 
+ 	err = shost-&gt;hostt-&gt;transfer_response(cmd, scsi_tgt_cmd_done);
+ 	switch (err) {
+@@ -280,7 +294,8 @@
+ 
+ 	cmd-&gt;request_bufflen = rq-&gt;data_len;
+ 
+-	dprintk(&quot;cmd %p addr %p cnt %d\n&quot;, cmd, cmd-&gt;buffer, cmd-&gt;use_sg);
++	dprintk(&quot;cmd %p addr %p cnt %d %lu\n&quot;, cmd, cmd-&gt;buffer, cmd-&gt;use_sg,
++		rq_data_dir(rq));
+ 	count = blk_rq_map_sg(rq-&gt;q, rq, cmd-&gt;request_buffer);
+ 	if (likely(count &lt;= cmd-&gt;use_sg)) {
+ 		cmd-&gt;use_sg = count;
+@@ -454,8 +469,8 @@
+ 	}
+ 	cmd = rq-&gt;special;
+ 
+-	dprintk(&quot;cmd %p result %d len %d bufflen %u\n&quot;, cmd,
+-		result, len, cmd-&gt;request_bufflen);
++	dprintk(&quot;cmd %p result %d len %d bufflen %u %lu\n&quot;, cmd,
++		result, len, cmd-&gt;request_bufflen, rq_data_dir(rq));
+ 
+ 	/*
+ 	 * store the userspace values here, the working values are
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000279.html">[Stgt-svn] r292 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000281.html">[Stgt-svn] r294 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#280">[ date ]</a>
+              <a href="thread.html#280">[ thread ]</a>
+              <a href="subject.html#280">[ subject ]</a>
+              <a href="author.html#280">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

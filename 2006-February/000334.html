@@ -1,0 +1,352 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r347 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r347%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602281228.k1SCSGPm026738%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000333.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r347 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r347%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602281228.k1SCSGPm026738%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r347 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 28 13:28:16 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000333.html">[Stgt-svn] r346 - branches/use-scsi-ml/usr
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#334">[ date ]</a>
+              <a href="thread.html#334">[ thread ]</a>
+              <a href="subject.html#334">[ subject ]</a>
+              <a href="author.html#334">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-28 13:28:01 +0100 (Tue, 28 Feb 2006)
+New Revision: 347
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Remove some of the ancient code in scsi.c for target and device structures in kernel space.
+
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-28 11:57:06 UTC (rev 346)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-28 12:28:01 UTC (rev 347)
+@@ -154,20 +154,14 @@
+ 	return sizeof(geo_m_pg);
+ }
+ 
+-static int mode_sense(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len)
++static int mode_sense(struct tgt_device *dev, uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t pcode = scb[2] &amp; 0x3f;
+ 	uint64_t size;
+ 
+-	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+-					0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-
+ 	*len = 4;
+-	size &gt;&gt;= BLK_SHIFT;
++	size = dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+ 	if ((scb[1] &amp; 0x8))
+ 		data[3] = 0;
+@@ -467,7 +461,7 @@
+ 	return result;
+ }
+ 
+-static int read_capacity(int tid, uint64_t lun, uint8_t *scb, uint8_t *p, int *len)
++static int read_capacity(struct tgt_device *dev, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t size;
+@@ -478,14 +472,8 @@
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+ 
+-	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+-					0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
++	size = dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+-	size &gt;&gt;= BLK_SHIFT;
+-
+ 	data[0] = (size &gt;&gt; 32) ?
+ 		cpu_to_be32(0xffffffff) : cpu_to_be32(size - 1);
+ 	data[1] = cpu_to_be32(1U &lt;&lt; BLK_SHIFT);
+@@ -494,72 +482,13 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int getfd(int tid, uint64_t lun)
++static int sync_cache(struct tgt_device *dev, uint8_t *data, int *len)
+ {
+-	int fd, err;
+-	char path[PATH_MAX], buf[PATH_MAX];
++	int err;
+ 
+-	sprintf(path, TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;,
+-		tid, lun);
+-
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		log_error(&quot;scsi sync_cache could not get LU's fd err %d&quot;,
+-			  errno);
+-		goto out;
+-	}
+-
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		log_error(&quot;scsi sync_cache could not read LUN path err %d&quot;,
+-			  errno);
+-		fd = -EIO;
+-		goto out;
+-	}
+-
+-	fd = 0;
+-	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+-
+-out:
+-	return fd;
+-}
+-
+-static int sync_cache(int tid, uint64_t lun, uint8_t *scb, uint8_t *data,
+-		      int *len)
+-{
+-	int fd, err;
+-	char path[PATH_MAX], buf[PATH_MAX];
+-
+-	sprintf(path, TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;,
+-		tid, lun);
+-
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		log_error(&quot;scsi sync_cache could not get LU's fd err %d&quot;,
+-			  errno);
+-		err = EINVAL;
+-		goto einval;
+-	}
+-
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		log_error(&quot;scsi sync_cache could not read LUN path err %d&quot;,
+-			  errno);
+-		err = EIO;
+-		goto eio;
+-	}
+-	/*
+-	 * yuck! wtf should I be using
+-	 */
+-	fd = 0;
+-	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+-
+-	err = fsync(fd);
++	err = fsync(dev-&gt;fd);
+ 	if (err) {
+-		log_error(&quot;scsi sync_cache fsync of fd %d failed err %d&quot;,
+-			   fd, errno);
++		eprintf(&quot;fd %d failed err %d&quot;, dev-&gt;fd, errno);
+ 		/*
+ 		 * this is what we should do but for now we lie.
+ 		 * err = errno;
+@@ -571,12 +500,8 @@
+ 	case EROFS:
+ 	case EINVAL:
+ 	case EBADF:
+-einval:
+-		/* is this the right sense code? */
+-		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+ 	case EIO:
+-eio:
++		/* is this the right sense code? */
+ 		/* what should I put for the asc/ascq? */
+ 		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+@@ -589,24 +514,19 @@
+ /*
+  * TODO: We always assume autosense.
+  */
+-static int request_sense(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int* len)
++static int request_sense(uint8_t *data, int* len)
+ {
+ 	*len = sense_data_build(data, 0x70, NO_SENSE, 0, 0);
+ 
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int sevice_action(int tid, uint64_t lun, uint8_t *scb, uint8_t *p, int *len)
++static int sevice_action(struct tgt_device *dev, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t *data64, size;
+ 
+-	if (device_info(tid, lun, &amp;size) &lt; 0) {
+-		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+-					0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-	size &gt;&gt;= BLK_SHIFT;
++	size = dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+ 	data64 = (uint64_t *) data;
+ 	data64[0] = cpu_to_be64(size - 1);
+@@ -617,8 +537,7 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int mmap_device(int tid, uint64_t lun, uint8_t *scb,
+-		       int *len, int fd, uint32_t datalen, unsigned long *uaddr,
++static int mmap_device(uint8_t *scb, int *len, int fd, uint32_t datalen, unsigned long *uaddr,
+ 		       uint64_t *offset)
+ {
+ 	void *p;
+@@ -722,9 +641,10 @@
+ 
+ int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf)
++		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
++		     struct tgt_device *dev)
+ {
+-	int fd, result = SAM_STAT_GOOD;
++	int result = SAM_STAT_GOOD;
+ 	uint8_t *data = NULL, *scb = pdu;
+ 	uint64_t lun;
+ 
+@@ -736,7 +656,7 @@
+ 	if (!mmap_cmd_init(scb, rw))
+ 		data = valloc(PAGE_SIZE);
+ 
+-	if (lun == TGT_INVALID_DEV_ID)
++	if (!dev)
+ 		switch (scb[0]) {
+ 		case REQUEST_SENSE:
+ 		case INQUIRY:
+@@ -760,19 +680,19 @@
+ 		result = report_luns(tid, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+-		result = read_capacity(tid, lun, scb, data, len);
++		result = read_capacity(dev, scb, data, len);
+ 		break;
+ 	case MODE_SENSE:
+-		result = mode_sense(tid, lun, scb, data, len);
++		result = mode_sense(dev, scb, data, len);
+ 		break;
+ 	case REQUEST_SENSE:
+-		result = request_sense(tid, lun, scb, data, len);
++		result = request_sense(data, len);
+ 		break;
+ 	case SERVICE_ACTION_IN:
+-		result = sevice_action(tid, lun, scb, data, len);
++		result = sevice_action(dev, scb, data, len);
+ 		break;
+ 	case SYNCHRONIZE_CACHE:
+-		result = sync_cache(tid, lun, scb, data, len);
++		result = sync_cache(dev, data, len);
+ 		break;
+ 	case START_STOP:
+ 	case TEST_UNIT_READY:
+@@ -786,18 +706,11 @@
+ 	case WRITE_10:
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+-		if (*uaddr)
+-			fd = 0;
+-		else
+-			fd = getfd(tid, lun);
+-		if (fd &gt;= 0) {
+-			result = mmap_device(tid, lun, scb, len, fd, datalen,
+-					     uaddr, offset);
+-			if (result == SAM_STAT_GOOD)
+-				*try_map = 1;
+-		}
+-
+-		if (fd &lt; 0 || result != SAM_STAT_GOOD) {
++		result = mmap_device(scb, len, dev-&gt;fd, datalen,
++				     uaddr, offset);
++		if (result == SAM_STAT_GOOD)
++			*try_map = 1;
++		else {
+ 			*offset = 0;
+ 			if (!data)
+ 				data = valloc(PAGE_SIZE);
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-28 11:57:06 UTC (rev 346)
++++ branches/use-scsi-ml/usr/target.c	2006-02-28 12:28:01 UTC (rev 347)
+@@ -364,7 +364,7 @@
+ 	result = scsi_cmd_process(host_no, target-&gt;tid, ev_req-&gt;k.cmd_req.scb,
+ 				  &amp;len, ev_req-&gt;k.cmd_req.data_len,
+ 				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset,
+-				  ev_req-&gt;k.cmd_req.lun);
++				  ev_req-&gt;k.cmd_req.lun, device);
+ 
+ 	dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+ 		cid, ev_req-&gt;k.cmd_req.scb[0], uaddr, offset, result);
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-28 11:57:06 UTC (rev 346)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-28 12:28:01 UTC (rev 347)
+@@ -40,6 +40,7 @@
+ extern uint64_t scsi_get_devid(uint8_t *pdu);
+ extern int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-			    uint8_t *try_map, uint64_t *offset, uint8_t *lun);
++			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
++			    struct tgt_device *dev);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000333.html">[Stgt-svn] r346 - branches/use-scsi-ml/usr
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#334">[ date ]</a>
+              <a href="thread.html#334">[ thread ]</a>
+              <a href="subject.html#334">[ subject ]</a>
+              <a href="author.html#334">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

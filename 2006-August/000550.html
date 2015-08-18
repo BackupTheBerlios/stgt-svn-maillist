@@ -1,0 +1,180 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r563 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r563%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608310810.k7V8AjJD014359%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000549.html">
+   <LINK REL="Next"  HREF="000551.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r563 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r563%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608310810.k7V8AjJD014359%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r563 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 10:10:45 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000549.html">[Stgt-svn] r562 - in trunk: . usr usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000551.html">[Stgt-svn] r564 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#550">[ date ]</a>
+              <a href="thread.html#550">[ thread ]</a>
+              <a href="subject.html#550">[ subject ]</a>
+              <a href="author.html#550">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 10:10:12 +0200 (Thu, 31 Aug 2006)
+New Revision: 563
+
+Modified:
+   trunk/usr/iscsi/chap.c
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/session.c
+Log:
+Kill log_debug and log_error.
+
+Modified: trunk/usr/iscsi/chap.c
+===================================================================
+--- trunk/usr/iscsi/chap.c	2006-08-31 07:57:02 UTC (rev 562)
++++ trunk/usr/iscsi/chap.c	2006-08-31 08:10:12 UTC (rev 563)
+@@ -264,18 +264,16 @@
+ {
+ 	if (encoding_fmt == HEX_FORMAT) {
+ 		if ((strlen(encoded) - 2) &gt; (2 * buf_len)) {
+-			log_error(&quot;%s(%d) BUG? &quot;
+-				  &quot; buf[%d] !sufficient to decode string[%d]&quot;,
+-				  __FUNCTION__, __LINE__, buf_len, (int) strlen(encoded));
++			eprintf(&quot;buf[%d] !sufficient to decode string[%d]\n&quot;,
++				  buf_len, (int) strlen(encoded));
+ 			return CHAP_TARGET_ERROR;
+ 		}
+ 		decode_hex_string(encoded + 2, decode_buf, buf_len);
+ 
+ 	} else if (encoding_fmt == BASE64_FORMAT) {
+ 		if ((strlen(encoded) - 2) &gt; ((buf_len - 1) / 3 + 1) * 4) {
+-			log_error(&quot;%s(%d) BUG? &quot;
+-				  &quot; buf[%d] !sufficient to decode string[%d]&quot;,
+-				  __FUNCTION__, __LINE__, buf_len, (int) strlen(encoded));
++			eprintf(&quot;buf[%d] !sufficient to decode string[%d]&quot;,
++				buf_len, (int) strlen(encoded));
+ 			return CHAP_TARGET_ERROR;
+ 		}
+ 		decode_base64_string(encoded + 2, decode_buf, buf_len);
+@@ -619,8 +617,7 @@
+ 		res = chap_target_auth_create_response(conn);
+ 		break;
+ 	default:
+-		log_error(&quot;%s(%d): BUG. unknown conn-&gt;auth_state %d&quot;,
+-			  __FUNCTION__, __LINE__, conn-&gt;auth_state);
++		eprintf(&quot;BUG. unknown conn-&gt;auth_state %d\n&quot;, conn-&gt;auth_state);
+ 		res = CHAP_TARGET_ERROR;
+ 	}
+ 
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-08-31 07:57:02 UTC (rev 562)
++++ trunk/usr/iscsi/conn.c	2006-08-31 08:10:12 UTC (rev 563)
+@@ -86,7 +86,7 @@
+ {
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
+ 
+-	log_debug(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64,
++	dprintf(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64 &quot;\n&quot;,
+ 		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 
+ 	conn-&gt;session-&gt;conn_cnt++;
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-08-31 07:57:02 UTC (rev 562)
++++ trunk/usr/iscsi/iscsid.c	2006-08-31 08:10:12 UTC (rev 563)
+@@ -386,7 +386,7 @@
+ 
+ /* 		ki-&gt;param_get(conn-&gt;tid, 0, conn-&gt;session_param); */
+ 		conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+-		log_debug(&quot;exp_cmd_sn: %d,%d&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmdsn);
++		dprintf(&quot;exp_cmd_sn: %d,%d\n&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmdsn);
+ 		conn-&gt;max_cmd_sn = conn-&gt;exp_cmd_sn;
+ 	}
+ 	text_key_add(conn, &quot;TargetPortalGroupTag&quot;, &quot;1&quot;);
+@@ -420,7 +420,7 @@
+                 res = 0;
+                 break;
+         default:
+-                log_error(&quot;Unknown auth. method %d&quot;, conn-&gt;auth_method);
++                eprintf(&quot;Unknown auth. method %d\n&quot;, conn-&gt;auth_method);
+                 res = -3;
+         }
+ 
+@@ -652,7 +652,7 @@
+ 	if (!(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE))
+ 		conn-&gt;exp_cmd_sn++;
+ 
+-	log_debug(&quot;Text request: %d&quot;, conn-&gt;state);
++	dprintf(&quot;Text request: %d\n&quot;, conn-&gt;state);
+ 	text_scan_text(conn);
+ 
+ 	if (req-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-08-31 07:57:02 UTC (rev 562)
++++ trunk/usr/iscsi/session.c	2006-08-31 08:10:12 UTC (rev 563)
+@@ -27,7 +27,7 @@
+ 	if (!(target = target_find_by_id(tid)))
+ 		return NULL;
+ 
+-	log_debug(&quot;session_find_name: %s %x %x %x %x %x %x&quot;, iname,
++	dprintf(&quot;session_find_name: %s %x %x %x %x %x %x\n&quot;, iname,
+ 		  isid[0], isid[1], isid[2], isid[3], isid[4], isid[5]);
+ 	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
+ 		if (!memcmp(isid, session-&gt;isid, sizeof(session-&gt;isid)) &amp;&amp;
+@@ -85,7 +85,7 @@
+ 	conn_add_to_session(conn, session);
+ 	conn-&gt;session-&gt;initiator = strdup(conn-&gt;initiator);
+ 
+-	log_debug(&quot;session_create: %#&quot; PRIx64, sid64(conn-&gt;isid, session-&gt;tsih));
++	dprintf(&quot;session_create: %#&quot; PRIx64 &quot;\n&quot;, sid64(conn-&gt;isid, session-&gt;tsih));
+ 
+ 	list_add(&amp;session-&gt;hlist, &amp;sessions_list);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000549.html">[Stgt-svn] r562 - in trunk: . usr usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000551.html">[Stgt-svn] r564 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#550">[ date ]</a>
+              <a href="thread.html#550">[ thread ]</a>
+              <a href="subject.html#550">[ subject ]</a>
+              <a href="author.html#550">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

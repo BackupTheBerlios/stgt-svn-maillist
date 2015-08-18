@@ -1,0 +1,124 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r808 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r808%20-%20trunk/usr&In-Reply-To=%3C200703041034.l24AYLUx015520%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000794.html">
+   <LINK REL="Next"  HREF="000796.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r808 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r808%20-%20trunk/usr&In-Reply-To=%3C200703041034.l24AYLUx015520%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r808 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 11:34:21 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000794.html">[Stgt-svn] r807 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000796.html">[Stgt-svn] r809 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#795">[ date ]</a>
+              <a href="thread.html#795">[ thread ]</a>
+              <a href="subject.html#795">[ subject ]</a>
+              <a href="author.html#795">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 11:34:21 +0100 (Sun, 04 Mar 2007)
+New Revision: 808
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Remove backing store type again.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-04 10:32:27 UTC (rev 807)
++++ trunk/usr/target.c	2007-03-04 10:34:21 UTC (rev 808)
+@@ -1217,13 +1217,10 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 
+ 	/* FIXME */
+-	if (t_type == TYPE_SPT) {
+-		target-&gt;target_iotype = SCSI_TARGET_RAWIO;
++	if (t_type == TYPE_SPT)
+ 		target-&gt;bdt = &amp;sg_bdt;
+-	} else {
+-		target-&gt;target_iotype = SCSI_TARGET_FILEIO;
++	else
+ 		target-&gt;bdt = tgt_drivers[lld]-&gt;default_bdt;
+-	}
+ 
+ 	target-&gt;target_state = SCSI_TARGET_RUNNING;
+ 	target-&gt;lid = lld;
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-03-04 10:32:27 UTC (rev 807)
++++ trunk/usr/target.h	2007-03-04 10:34:21 UTC (rev 808)
+@@ -32,7 +32,6 @@
+ 	int tid;
+ 	int lid;
+ 
+-	enum scsi_target_iotype target_iotype;
+ 	enum scsi_target_state target_state;
+ 
+ 	struct list_head target_siblings;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-04 10:32:27 UTC (rev 807)
++++ trunk/usr/tgtd.h	2007-03-04 10:34:21 UTC (rev 808)
+@@ -18,11 +18,6 @@
+ #define TAB3 TAB1 TAB1 TAB1
+ #define TAB4 TAB2 TAB2
+ 
+-enum scsi_target_iotype {
+-	SCSI_TARGET_FILEIO = 1,
+-	SCSI_TARGET_RAWIO,
+-};
+-
+ enum scsi_target_state {
+ 	SCSI_TARGET_SUSPENDED = 1,
+ 	SCSI_TARGET_RUNNING,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000794.html">[Stgt-svn] r807 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000796.html">[Stgt-svn] r809 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#795">[ date ]</a>
+              <a href="thread.html#795">[ thread ]</a>
+              <a href="subject.html#795">[ subject ]</a>
+              <a href="author.html#795">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

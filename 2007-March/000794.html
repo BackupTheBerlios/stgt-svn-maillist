@@ -1,0 +1,269 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r807 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r807%20-%20trunk/usr&In-Reply-To=%3C200703041032.l24AWSXe015456%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000793.html">
+   <LINK REL="Next"  HREF="000795.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r807 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r807%20-%20trunk/usr&In-Reply-To=%3C200703041032.l24AWSXe015456%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r807 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 11:32:28 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000793.html">[Stgt-svn] r806 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000795.html">[Stgt-svn] r808 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#794">[ date ]</a>
+              <a href="thread.html#794">[ thread ]</a>
+              <a href="subject.html#794">[ subject ]</a>
+              <a href="author.html#794">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 11:32:27 +0100 (Sun, 04 Mar 2007)
+New Revision: 807
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+Log:
+Remove backing store type.
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2007-03-04 10:19:46 UTC (rev 806)
++++ trunk/usr/mgmt.c	2007-03-04 10:32:27 UTC (rev 807)
+@@ -78,7 +78,7 @@
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+ 		err = tgt_target_create(lld_no, req-&gt;tid, mtask-&gt;buf,
+-					req-&gt;target_type, req-&gt;bs_type);
++					req-&gt;target_type);
+ 		if (!err &amp;&amp; tgt_drivers[lld_no]-&gt;target_create)
+ 			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, mtask-&gt;buf);
+ 		break;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-04 10:19:46 UTC (rev 806)
++++ trunk/usr/target.c	2007-03-04 10:32:27 UTC (rev 807)
+@@ -997,28 +997,6 @@
+ 	return 0;
+ }
+ 
+-static struct {
+-	enum scsi_target_iotype value;
+-	char *name;
+-} target_iotype[] = {
+-	{SCSI_TARGET_FILEIO, &quot;file&quot;},
+-	{SCSI_TARGET_RAWIO, &quot;raw&quot;},
+-};
+-
+-static char *target_iotype_name(enum scsi_target_state state)
+-{
+-	int i;
+-	char *name = NULL;
+-
+-	for (i = 0; i &lt; ARRAY_SIZE(target_iotype); i++) {
+-		if (target_iotype[i].value == state) {
+-			name = target_iotype[i].name;
+-			break;
+-		}
+-	}
+-	return name;
+-}
+-
+ enum scsi_target_state tgt_get_target_state(int tid)
+ {
+ 	struct target *target;
+@@ -1097,9 +1075,9 @@
+ 		shprintf(total, buf, rest,
+ 			 &quot;Target %d: %s\n&quot;
+ 			 TAB1 &quot;System information:\n&quot;
+-			 TAB2 &quot;driver : %s\n&quot;
+-			 TAB2 &quot;type   : %s\n&quot;
+-			 TAB2 &quot;status : %s\n&quot;,
++			 TAB2 &quot;Type: %s\n&quot;
++			 TAB2 &quot;Driver: %s\n&quot;
++			 TAB2 &quot;Status: %s\n&quot;,
+ 			 target-&gt;tid,
+ 			 target-&gt;name,
+ 			 tgt_drivers[target-&gt;lid]-&gt;name,
+@@ -1122,14 +1100,12 @@
+ 				 TAB3 &quot;SCSI ID: %s\n&quot;
+ 				 TAB3 &quot;SCSI SN: %s\n&quot;
+ 				 TAB3 &quot;Size: %s\n&quot;
+-				 TAB3 &quot;Backing store: %s\n&quot;
+-				 TAB3 &quot;Backing store type: %s\n&quot;,
++				 TAB3 &quot;Backing store: %s\n&quot;,
+ 				 device-&gt;lun,
+ 				 device-&gt;scsi_id,
+ 				 device-&gt;scsi_sn,
+ 				 print_disksize(device-&gt;size),
+-				 device-&gt;path,
+-				 target_iotype_name(target-&gt;target_iotype));
++				 device-&gt;path);
+ 
+ 		if (!strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;)) {
+ 			int i, aid;
+@@ -1171,7 +1147,7 @@
+ 
+ #define DEFAULT_NR_ACCOUNT 16
+ 
+-int tgt_target_create(int lld, int tid, char *args, int t_type, int bs_type)
++int tgt_target_create(int lld, int tid, char *args, int t_type)
+ {
+ 	int i;
+ 	struct target *target, *pos;
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2007-03-04 10:19:46 UTC (rev 806)
++++ trunk/usr/tgtadm.c	2007-03-04 10:32:27 UTC (rev 807)
+@@ -106,7 +106,6 @@
+ 
+ 	{&quot;bus&quot;, required_argument, NULL, 'B'},
+ 	{&quot;target-type&quot;, required_argument, NULL, 'Y'},
+-	{&quot;backing-store-type&quot;, required_argument, NULL, 'S'},
+ 	{&quot;outgoing&quot;, no_argument, NULL, 'O'},
+ 	{NULL, 0, NULL, 0},
+ };
+@@ -291,18 +290,6 @@
+ 	return host;
+ }
+ 
+-static int backing_store_type(char *str)
+-{
+-	if (!strcmp(str, &quot;file&quot;))
+-		return LU_BS_FILE;
+-	else if (!strcmp(str, &quot;raw&quot;))
+-		return LU_BS_RAW;
+-	else {
+-		eprintf(&quot;unknown backing store type: %s\n&quot;, str);
+-		exit(EINVAL);
+-	}
+-}
+-
+ static int target_type(char *str)
+ {
+ 	if (!strcmp(str, &quot;disk&quot;))
+@@ -364,7 +351,7 @@
+ int main(int argc, char **argv)
+ {
+ 	int ch, longindex;
+-	int op, total, tid, rest, mode, t_type, bs_type, ac_dir;
++	int op, total, tid, rest, mode, t_type, ac_dir;
+ 	uint32_t cid, hostno;
+ 	uint64_t sid, lun;
+ 	char *name, *value, *path, *targetname, *params, *address;
+@@ -375,7 +362,6 @@
+ 	op = tid = mode = -1;
+ 	total = cid = hostno = sid = lun = 0;
+ 	t_type = TYPE_DISK;
+-	bs_type = LU_BS_FILE;
+ 	ac_dir = ACCOUNT_TYPE_INCOMING;
+ 	rest = BUFSIZE;
+ 	name = value = path = targetname = address = NULL;
+@@ -436,9 +422,6 @@
+ 		case 'Y':
+ 			t_type = target_type(optarg);
+ 			break;
+-		case 'S':
+-			bs_type = backing_store_type(optarg);
+-			break;
+ 		case 'O':
+ 			ac_dir = ACCOUNT_TYPE_OUTGOING;
+ 			break;
+@@ -565,7 +548,6 @@
+ 	req-&gt;mode = mode;
+ 	req-&gt;host_no = hostno;
+ 	req-&gt;target_type = t_type;
+-	req-&gt;bs_type = bs_type;
+ 	req-&gt;ac_dir = ac_dir;
+ 
+ 	params = buf + sizeof(*req);
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2007-03-04 10:19:46 UTC (rev 806)
++++ trunk/usr/tgtadm.h	2007-03-04 10:32:27 UTC (rev 807)
+@@ -49,12 +49,6 @@
+ 	MODE_ACCOUNT,
+ };
+ 
+-/* backing store type */
+-enum tgtadm_lu_bs_type {
+-	LU_BS_FILE,
+-	LU_BS_RAW, /* pass through */
+-};
+-
+ enum tgtadm_account_dir {
+ 	ACCOUNT_TYPE_INCOMING,
+ 	ACCOUNT_TYPE_OUTGOING,
+@@ -71,7 +65,6 @@
+ 	uint32_t cid;
+ 	uint32_t host_no;
+ 	uint32_t target_type;
+-	uint32_t bs_type;
+ 	uint32_t ac_dir;
+ 	uint32_t pack;
+ };
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-04 10:19:46 UTC (rev 806)
++++ trunk/usr/tgtd.h	2007-03-04 10:32:27 UTC (rev 807)
+@@ -120,7 +120,7 @@
+ extern int device_release(uint64_t nid, uint64_t lun, uint64_t reserve_id, int force);
+ extern int device_reserved(uint64_t nid, uint64_t lun, uint64_t reserve_id);
+ 
+-extern int tgt_target_create(int lld, int tid, char *args, int t_type, int bs_type);
++extern int tgt_target_create(int lld, int tid, char *args, int t_type);
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lld);
+ extern char *tgt_targetname(int tid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000793.html">[Stgt-svn] r806 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000795.html">[Stgt-svn] r808 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#794">[ date ]</a>
+              <a href="thread.html#794">[ thread ]</a>
+              <a href="subject.html#794">[ subject ]</a>
+              <a href="author.html#794">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

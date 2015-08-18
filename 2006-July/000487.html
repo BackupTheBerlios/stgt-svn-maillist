@@ -1,0 +1,167 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r500 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r500%20-%20trunk/istgt/kernel&In-Reply-To=%3C200607090454.k694smYU003888%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000484.html">
+   <LINK REL="Next"  HREF="000486.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r500 - trunk/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r500%20-%20trunk/istgt/kernel&In-Reply-To=%3C200607090454.k694smYU003888%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r500 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Jul  9 06:54:48 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000484.html">[Stgt-svn] r499 - in trunk: istgt/kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000486.html">[Stgt-svn] r501 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#487">[ date ]</a>
+              <a href="thread.html#487">[ thread ]</a>
+              <a href="subject.html#487">[ subject ]</a>
+              <a href="author.html#487">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-09 06:54:45 +0200 (Sun, 09 Jul 2006)
+New Revision: 500
+
+Modified:
+   trunk/istgt/kernel/iscsi_tcp.c
+   trunk/istgt/kernel/iscsi_tcp_target.c
+Log:
+Fix locking issue and invalid memory access.
+
+Modified: trunk/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- trunk/istgt/kernel/iscsi_tcp.c	2006-07-08 12:09:06 UTC (rev 499)
++++ trunk/istgt/kernel/iscsi_tcp.c	2006-07-09 04:54:45 UTC (rev 500)
+@@ -53,12 +53,17 @@
+ /* #define DEBUG_TCP */
+ #define DEBUG_ASSERT
+ 
+-#ifdef DEBUG_TCP
+-#define debug_tcp(fmt...) printk(KERN_INFO &quot;tcp: &quot; fmt)
+-#else
+-#define debug_tcp(fmt...)
+-#endif
++/* #ifdef DEBUG_TCP */
++/* #define debug_tcp(fmt...) printk(KERN_INFO &quot;tcp: &quot; fmt) */
++/* #else */
++/* #define debug_tcp(fmt...) */
++/* #endif */
+ 
++#define debug_tcp(fmt, args...)					\
++do {								\
++	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
++} while (0)
++
+ #ifndef DEBUG_ASSERT
+ #ifdef BUG_ON
+ #undef BUG_ON
+
+Modified: trunk/istgt/kernel/iscsi_tcp_target.c
+===================================================================
+--- trunk/istgt/kernel/iscsi_tcp_target.c	2006-07-08 12:09:06 UTC (rev 499)
++++ trunk/istgt/kernel/iscsi_tcp_target.c	2006-07-09 04:54:45 UTC (rev 500)
+@@ -356,22 +356,23 @@
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct iscsi_cmd_task *ctask = tcp_conn-&gt;in.ctask;
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
++	struct iscsi_hdr *hdr = (struct iscsi_hdr *) ctask-&gt;hdr;
+ 
+ 	BUG_ON(ctask-&gt;data_count);
+-	tcp_ctask-&gt;data_offset += ntoh24(tcp_conn-&gt;in.hdr-&gt;dlength);
++	tcp_ctask-&gt;data_offset += ntoh24(hdr-&gt;dlength);
+ 
+-	dprintk(&quot;%p %x %u %u %u %u %u\n&quot;, ctask, tcp_conn-&gt;in.hdr-&gt;flags,
++	dprintk(&quot;%p %x %u %u %u %u %u\n&quot;, ctask, hdr-&gt;flags,
+ 		tcp_ctask-&gt;r2t_data_count, ctask-&gt;unsol_count,
+ 		ctask-&gt;total_length, ctask-&gt;imm_count, tcp_ctask-&gt;data_offset);
+ 
+-	if (tcp_conn-&gt;in.hdr-&gt;ttt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+-		tcp_ctask-&gt;r2t_data_count -= ntoh24(tcp_conn-&gt;in.hdr-&gt;dlength);
+-		if (tcp_conn-&gt;in.hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) {
++	if (hdr-&gt;ttt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
++		tcp_ctask-&gt;r2t_data_count -= ntoh24(hdr-&gt;dlength);
++		if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) {
+ 			ctask-&gt;unsol_count = 0;
+ 			iscsi_cmd_data_done(ctask);
+ 		}
+ 	} else {
+-		if (tcp_conn-&gt;in.hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
++		if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
+ 			iscsi_cmd_data_done(ctask);
+ 	}
+ }
+@@ -380,9 +381,10 @@
+ {
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct iscsi_cmd_task *ctask = tcp_conn-&gt;in.ctask;
++	struct iscsi_cmd *hdr = ctask-&gt;hdr;
+ 	int rc = 0, opcode;
+ 
+-	opcode = tcp_conn-&gt;in.hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
++	opcode = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	dprintk(&quot;opcode 0x%x offset %d copy %d datalen %d\n&quot;,
+ 		opcode, tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy,
+ 		tcp_conn-&gt;in.datalen);
+@@ -394,7 +396,7 @@
+ 			struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+ 
+ 			dprintk(&quot;%p %x %u %u %u %u %u\n&quot;, ctask,
+-				tcp_conn-&gt;in.hdr-&gt;flags,
++				hdr-&gt;flags,
+ 				tcp_ctask-&gt;r2t_data_count,
+ 				ctask-&gt;unsol_count,
+ 				ctask-&gt;total_length,
+@@ -562,9 +564,9 @@
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct sock *sk = tcp_conn-&gt;sock-&gt;sk;
+ 
+-	bh_lock_sock(sk);
++	lock_sock(sk);
+ 	sk-&gt;sk_data_ready(sk, 0);
+-	bh_unlock_sock(sk);
++	release_sock(sk);
+ }
+ 
+ static int iscsi_tgt_transfer_data(struct scsi_cmnd *sc,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000484.html">[Stgt-svn] r499 - in trunk: istgt/kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000486.html">[Stgt-svn] r501 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#487">[ date ]</a>
+              <a href="thread.html#487">[ thread ]</a>
+              <a href="subject.html#487">[ subject ]</a>
+              <a href="author.html#487">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

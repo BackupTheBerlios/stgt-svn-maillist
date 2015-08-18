@@ -1,0 +1,133 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r435%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291531.k3TFVsKM023828%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000421.html">
+   <LINK REL="Next"  HREF="000423.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r435%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291531.k3TFVsKM023828%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r435 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 29 17:31:54 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000421.html">[Stgt-svn] r434 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000423.html">[Stgt-svn] r436 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#422">[ date ]</a>
+              <a href="thread.html#422">[ thread ]</a>
+              <a href="subject.html#422">[ subject ]</a>
+              <a href="author.html#422">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-29 17:31:54 +0200 (Sat, 29 Apr 2006)
+New Revision: 435
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+iscsi_tcp library again.
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 15:25:55 UTC (rev 434)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-04-29 15:31:54 UTC (rev 435)
+@@ -20,3 +20,6 @@
+ extern inline int iscsi_hdr_extract(struct iscsi_tcp_conn *tcp_conn);
+ extern int iscsi_scsi_data_in(struct iscsi_conn *conn);
+ extern inline int iscsi_tcp_copy(struct iscsi_tcp_conn *tcp_conn);
++
++extern int iscsi_tcp_init(void);
++extern void iscsi_tcp_exit(void);
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 15:25:55 UTC (rev 434)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 15:31:54 UTC (rev 435)
+@@ -65,8 +65,6 @@
+ 	struct list_head tlist;
+ };
+ 
+-static kmem_cache_t *taskcache;
+-
+ static inline struct istgt_task *ctask_to_ttask(struct iscsi_cmd_task *ctask)
+ {
+ 	return (struct istgt_task *) ((void *) ctask-&gt;dd_data +
+@@ -770,26 +768,26 @@
+ 
+ static int __init istgt_tcp_init(void)
+ {
++	int err;
+ 	printk(&quot;iSCSI Target over TCP\n&quot;);
+ 
+-	taskcache = kmem_cache_create(&quot;istgt_taskcache&quot;,
+-				      sizeof(struct iscsi_data_task), 0,
+-				      SLAB_HWCACHE_ALIGN, NULL, NULL);
+-	if (!taskcache)
+-		return -ENOMEM;
++	err = iscsi_tcp_init();
++	if (err)
++		return err;
+ 
+ 	if (!iscsi_register_transport(&amp;istgt_tcp_transport))
+-		goto free_taskcache;
++		goto call_iscsi_tcp_exit;
+ 	return 0;
+-free_taskcache:
+-	kmem_cache_destroy(taskcache);
++
++call_iscsi_tcp_exit:
++	iscsi_tcp_exit();
+ 	return -ENOMEM;
+ }
+ 
+ static void __exit istgt_tcp_exit(void)
+ {
++	iscsi_tcp_exit();
+ 	iscsi_unregister_transport(&amp;istgt_tcp_transport);
+-	kmem_cache_destroy(taskcache);
+ }
+ 
+ module_init(istgt_tcp_init);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000421.html">[Stgt-svn] r434 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000423.html">[Stgt-svn] r436 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#422">[ date ]</a>
+              <a href="thread.html#422">[ thread ]</a>
+              <a href="subject.html#422">[ subject ]</a>
+              <a href="author.html#422">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

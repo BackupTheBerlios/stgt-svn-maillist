@@ -1,0 +1,130 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r10 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r10%20-%20trunk/kernel&In-Reply-To=%3C200508181818.j7IIIueP028665%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000004.html">
+   <LINK REL="Next"  HREF="000006.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r10 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r10%20-%20trunk/kernel&In-Reply-To=%3C200508181818.j7IIIueP028665%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r10 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Aug 18 20:18:56 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000004.html">[Stgt-svn] r9 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000006.html">[Stgt-svn] r11 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#5">[ date ]</a>
+              <a href="thread.html#5">[ thread ]</a>
+              <a href="subject.html#5">[ subject ]</a>
+              <a href="author.html#5">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-18 20:18:56 +0200 (Thu, 18 Aug 2005)
+New Revision: 10
+
+Modified:
+   trunk/kernel/stgt.c
+Log:
+Small cleanups on stgt_work stuff.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-18 18:12:22 UTC (rev 9)
++++ trunk/kernel/stgt.c	2005-08-18 18:18:56 UTC (rev 10)
+@@ -78,6 +78,23 @@
+ 	struct list_head list;
+ };
+ 
++static struct stgt_work * stgt_init_work(struct stgt_session *session,
++					 void (*fn)(void *), void *arg)
++{
++	struct stgt_work *work;
++	mempool_t *pool = session-&gt;work_pool;
++
++	work = mempool_alloc(pool, GFP_ATOMIC);
++	if (!work)
++		return NULL;
++
++	work-&gt;fn = fn;
++	work-&gt;arg = arg;
++	work-&gt;pool = pool;
++
++	return work;
++}
++
+ static void stgt_worker(void *data)
+ {
+ 	struct stgt_target *target = (struct stgt_target *) data;
+@@ -410,13 +427,10 @@
+ 	assert(list_empty(&amp;cmnd-&gt;clist));
+ 
+ 	if (done) {
++		struct stgt_session *session = cmnd-&gt;session;
+ 		struct stgt_work *work;
+-		struct stgt_session *session = cmnd-&gt;session;
+ 
+-		work = mempool_alloc(session-&gt;work_pool, GFP_ATOMIC);
+-		work-&gt;fn = alloc_buffer;
+-		work-&gt;arg = cmnd;
+-		work-&gt;pool = session-&gt;work_pool;
++		work = stgt_init_work(session, alloc_buffer, cmnd);
+ 		stgt_queue_work(session-&gt;target, work);
+ 		return;
+ 	};
+@@ -514,11 +528,9 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	work = mempool_alloc(session-&gt;work_pool, GFP_ATOMIC);
+-	work-&gt;fn = virtual_disk_handler;
+-	work-&gt;arg = cmnd;
+-	work-&gt;pool =session-&gt;work_pool;
+-
++	work = stgt_init_work(session, virtual_disk_handler, cmnd);
++	if (!work)
++		return -ENOMEM;
+ 	stgt_queue_work(session-&gt;target, work);
+ 
+ 	return 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000004.html">[Stgt-svn] r9 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000006.html">[Stgt-svn] r11 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#5">[ date ]</a>
+              <a href="thread.html#5">[ thread ]</a>
+              <a href="subject.html#5">[ subject ]</a>
+              <a href="author.html#5">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,295 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r557 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r557%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608290104.k7T14Ons017801%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000543.html">
+   <LINK REL="Next"  HREF="000545.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r557 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r557%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608290104.k7T14Ons017801%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r557 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Aug 29 03:04:24 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000543.html">[Stgt-svn] r556 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000545.html">[Stgt-svn] r558 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#544">[ date ]</a>
+              <a href="thread.html#544">[ thread ]</a>
+              <a href="subject.html#544">[ subject ]</a>
+              <a href="author.html#544">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-29 03:04:15 +0200 (Tue, 29 Aug 2006)
+New Revision: 557
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Add cmd/mgmt_end_notify to driver structure.
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/driver.h	2006-08-29 01:04:15 UTC (rev 557)
+@@ -13,6 +13,10 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
++	int (*cmd_end_notify)(int host_no, int len, int result, int rw, uint64_t addr,
++			      uint64_t tag);
++	int (*mgmt_end_notify)(int host_no, uint64_t mid, int result);
++
+ 	int enable;
+ 	int pfd_index;
+ 
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/ibmvio/ibmvio.h	2006-08-29 01:04:15 UTC (rev 557)
+@@ -10,5 +10,7 @@
+ 	.scsi_get_lun		= scsi_lun_to_int,
+ 	.scsi_report_luns	= scsi_report_luns,
+ 	.scsi_inquiry		= scsi_inquiry,
++	.cmd_end_notify		= kspace_send_cmd_res,
++	.mgtm_end_notify	= kspace_send_tsk_mgmt_res,
+ 	.bdt			= &amp;mmap_bdt,
+ };
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/target.c	2006-08-29 01:04:15 UTC (rev 557)
+@@ -247,7 +247,7 @@
+ }
+ 
+ int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun, uint32_t data_len,
+-		     int attribute, uint64_t tag, cmd_end_t *end_func)
++		     int attribute, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+@@ -272,7 +272,6 @@
+ 	cmd-&gt;hostno = host_no;
+ 	cmd-&gt;attribute = attribute;
+ 	cmd-&gt;tag = tag;
+-	cmd-&gt;cmd_end_func = end_func;
+ 	cmd_hlist_insert(target, cmd);
+ 
+ 	dev_id = scsi_get_devid(target-&gt;lid, lun);
+@@ -300,7 +299,7 @@
+ 			tag, scb[0], uaddr, offset, result);
+ 
+ 		set_cmd_processed(cmd);
+-		cmd-&gt;cmd_end_func(host_no, len, result, rw, uaddr, tag);
++		tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(host_no, len, result, rw, uaddr, tag);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %&quot; PRIx64 &quot; %x %&quot; PRIu64 &quot; %d\n&quot;,
+@@ -342,8 +341,12 @@
+ 						  &amp;cmd-&gt;c_target-&gt;device_list);
+ 			cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+-			cmd-&gt;cmd_end_func(cmd-&gt;hostno, len, result, rw,
+-					  uaddr, cmd-&gt;tag);
++			tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
++									len,
++									result,
++									rw,
++									uaddr,
++									cmd-&gt;tag);
+ 		} else
+ 			break;
+ 	}
+@@ -411,7 +414,8 @@
+ 	mreq = cmd-&gt;mreq;
+ 	if (mreq &amp;&amp; !--mreq-&gt;busy) {
+ 		int err = mreq-&gt;function == ABORT_TASK ? -EEXIST : 0;
+-		mreq-&gt;mgmt_end_func(cmd-&gt;hostno, mreq-&gt;mid, err);
++		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;mgmt_end_notify(cmd-&gt;hostno,
++								 mreq-&gt;mid, err);
+ 		free(mreq);
+ 	}
+ 
+@@ -435,7 +439,8 @@
+ 		err = -EBUSY;
+ 	} else {
+ 		__cmd_done(target, cmd);
+-		cmd-&gt;cmd_end_func(cmd-&gt;hostno, 0, TASK_ABORTED, 0, 0, cmd-&gt;tag);
++		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno, 0,
++								TASK_ABORTED, 0, 0, cmd-&gt;tag);
+ 	}
+ 	return err;
+ }
+@@ -466,7 +471,7 @@
+ }
+ 
+ void target_mgmt_request(int host_no, int req_id, int function, uint8_t *lun,
+-			 uint64_t tag, mgmt_end_t *end_func)
++			 uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct mgmt_req *mreq;
+@@ -481,7 +486,6 @@
+ 	mreq = calloc(1, sizeof(*mreq));
+ 	mreq-&gt;mid = req_id;
+ 	mreq-&gt;function = function;
+-	mreq-&gt;mgmt_end_func = end_func;
+ 
+ 	switch (function) {
+ 	case ABORT_TASK:
+@@ -512,7 +516,7 @@
+ 	}
+ 
+ 	if (send) {
+-		mreq-&gt;mgmt_end_func(host_no, req_id, err);
++		tgt_drivers[target-&gt;lid]-&gt;mgmt_end_notify(host_no, req_id, err);
+ 		free(mreq);
+ 	}
+ }
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/target.h	2006-08-29 01:04:15 UTC (rev 557)
+@@ -18,7 +18,6 @@
+ 	uint64_t mid;
+ 	int busy;
+ 	int function;
+-	mgmt_end_t *mgmt_end_func;
+ };
+ 
+ struct target {
+@@ -54,7 +53,6 @@
+ 	int attribute;
+ 	uint64_t tag;
+ 	struct mgmt_req *mreq;
+-	cmd_end_t *cmd_end_func;
+ };
+ 
+ enum {
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/tgtd.h	2006-08-29 01:04:15 UTC (rev 557)
+@@ -36,6 +36,9 @@
+ };
+ 
+ extern int kreq_init(void);
++extern int kspace_send_tsk_mgmt_res(int host_no, uint64_t mid, int result);
++extern int kspace_send_cmd_res(int host_no, int len, int result,
++			       int rw, uint64_t addr, uint64_t tag);
+ 
+ extern int ipc_init(void);
+ 
+@@ -49,15 +52,11 @@
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+ extern void tgt_event_del(int fd);
+ 
+-typedef int (cmd_end_t)(int host_no, int len, int result, int rw, uint64_t addr,
+-			 uint64_t tag);
+-typedef int (mgmt_end_t)(int host_no, uint64_t mid, int result);
+ extern int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun,
+-			    uint32_t data_len, int attribute, uint64_t tag,
+-			    cmd_end_t *cmd_end);
++			    uint32_t data_len, int attribute, uint64_t tag);
+ extern void target_cmd_done(int host_no, uint64_t tag);
+ extern void target_mgmt_request(int host_no, int req_id, int function,
+-				uint8_t *lun, uint64_t tag, mgmt_end_t *mgmt_end);
++				uint8_t *lun, uint64_t tag);
+ 
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+ extern int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-29 00:39:51 UTC (rev 556)
++++ trunk/usr/tgtif.c	2006-08-29 01:04:15 UTC (rev 557)
+@@ -79,7 +79,7 @@
+ 	return 0;
+ }
+ 
+-static int kspace_send_tsk_mgmt(int host_no, uint64_t mid, int result)
++int kspace_send_tsk_mgmt_res(int host_no, uint64_t mid, int result)
+ {
+ 	struct tgt_event ev;
+ 
+@@ -90,8 +90,8 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-static int kspace_send_cmd_res(int host_no, int len, int result,
+-			       int rw, uint64_t addr, uint64_t tag)
++int kspace_send_cmd_res(int host_no, int len, int result,
++			int rw, uint64_t addr, uint64_t tag)
+ {
+ 	struct tgt_event ev;
+ 
+@@ -121,8 +121,7 @@
+ 	case TGT_KEVENT_CMD_REQ:
+ 		target_cmd_queue(ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.scb,
+ 				 ev-&gt;k.cmd_req.lun, ev-&gt;k.cmd_req.data_len,
+-				 ev-&gt;k.cmd_req.attribute, ev-&gt;k.cmd_req.tag,
+-				 kspace_send_cmd_res);
++				 ev-&gt;k.cmd_req.attribute, ev-&gt;k.cmd_req.tag);
+ 		break;
+ 	case TGT_KEVENT_CMD_DONE:
+ 		target_cmd_done(ev-&gt;k.cmd_done.host_no, ev-&gt;k.cmd_done.tag);
+@@ -132,8 +131,7 @@
+ 				    ev-&gt;k.tsk_mgmt_req.mid,
+ 				    ev-&gt;k.tsk_mgmt_req.function,
+ 				    ev-&gt;k.tsk_mgmt_req.lun,
+-				    ev-&gt;k.tsk_mgmt_req.tag,
+-				    kspace_send_tsk_mgmt);
++				    ev-&gt;k.tsk_mgmt_req.tag);
+ 		break;
+ 	default:
+ 		eprintf(&quot;unknown event %u\n&quot;, ev-&gt;type);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000543.html">[Stgt-svn] r556 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000545.html">[Stgt-svn] r558 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#544">[ date ]</a>
+              <a href="thread.html#544">[ thread ]</a>
+              <a href="subject.html#544">[ subject ]</a>
+              <a href="author.html#544">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

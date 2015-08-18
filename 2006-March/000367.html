@@ -1,0 +1,233 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r380 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r380%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603132234.k2DMYMnH028985%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000366.html">
+   <LINK REL="Next"  HREF="000368.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r380 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r380%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603132234.k2DMYMnH028985%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r380 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Mar 13 23:34:22 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000366.html">[Stgt-svn] r379 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000368.html">[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#367">[ date ]</a>
+              <a href="thread.html#367">[ thread ]</a>
+              <a href="subject.html#367">[ subject ]</a>
+              <a href="author.html#367">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-13 23:34:21 +0100 (Mon, 13 Mar 2006)
+New Revision: 380
+
+Modified:
+   branches/use-scsi-ml/usr/dl.h
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Add dynamic library support to scsi.c
+
+
+Modified: branches/use-scsi-ml/usr/dl.h
+===================================================================
+--- branches/use-scsi-ml/usr/dl.h	2006-03-13 14:53:58 UTC (rev 379)
++++ branches/use-scsi-ml/usr/dl.h	2006-03-13 22:34:21 UTC (rev 380)
+@@ -7,7 +7,7 @@
+ #define	DL_FN_POLL_EVENT	1
+ #define	DL_FN_IPC_MGMT		2
+ #define	DL_FN_SCSI_INQUIRY	3
+-#define	DL_FN_SCSI_REPORT_LUN	4
++#define	DL_FN_SCSI_REPORT_LUNS	4
+ #define	DL_FN_SCSI_LUN_TO_INT	5
+ #define	DL_FN_END		6
+ 
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-03-13 14:53:58 UTC (rev 379)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-13 22:34:21 UTC (rev 380)
+@@ -249,8 +249,8 @@
+ 	return sizeof(*id);
+ }
+ 
+-static int inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+-		   uint8_t *scb, uint8_t *data, int *len)
++static int __inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
++		     uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	int result = SAM_STAT_CHECK_CONDITION;
+ 
+@@ -336,6 +336,14 @@
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
++static int inquiry(int lid, struct tgt_device *dev, int host_no,
++		   uint8_t *lun_buf, uint8_t *scb, uint8_t *data, int *len)
++{
++	typeof(__inquiry) *fn;
++	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_INQUIRY) ? : __inquiry;
++	return fn(dev, host_no, lun_buf, scb, data, len);
++}
++
+ uint64_t make_lun(unsigned int bus, unsigned int target, unsigned int lun)
+ {
+ 	uint16_t result = (0x8000 |
+@@ -345,8 +353,8 @@
+ 	return ((uint64_t) result) &lt;&lt; 48;
+ }
+ 
+-static int report_luns(struct list_head *dev_list, uint8_t *lun_buf, uint8_t *scb,
+-		       uint8_t *p, int *len)
++static int __report_luns(struct list_head *dev_list, uint8_t *lun_buf,
++			 uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	struct tgt_device *dev;
+ 	uint64_t lun, *data = (uint64_t *) p;
+@@ -405,6 +413,14 @@
+ 	return result;
+ }
+ 
++static int report_luns(int lid, struct list_head *dev_list, uint8_t *lun_buf,
++		       uint8_t *scb, uint8_t *p, int *len)
++{
++	typeof(__report_luns) *fn;
++	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_REPORT_LUNS) ? : __report_luns;
++	return fn(dev_list, lun_buf, scb, p, len);
++}
++
+ static int read_capacity(struct tgt_device *dev, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t *data = (uint32_t *) p;
+@@ -548,7 +564,7 @@
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+ 
+-uint64_t scsi_get_devid(uint8_t *p)
++static uint64_t __scsi_get_devid(uint8_t *p)
+ {
+ 	uint64_t lun = TGT_INVALID_DEV_ID;
+ 
+@@ -577,7 +593,14 @@
+ 	return lun;
+ }
+ 
+-int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
++uint64_t scsi_get_devid(int lid, uint8_t *p)
++{
++	typeof(__scsi_get_devid) *fn;
++	fn = dl_fn(dlinfo, lid, DL_FN_SCSI_LUN_TO_INT) ? : __scsi_get_devid;
++	return fn(p);
++}
++
++int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+ 		     struct tgt_device *dev, struct list_head *dev_list)
+@@ -609,10 +632,10 @@
+ 
+ 	switch (scb[0]) {
+ 	case INQUIRY:
+-		result = inquiry(dev, host_no, lun_buf, scb, data, len);
++		result = inquiry(lid, dev, host_no, lun_buf, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
+-		result = report_luns(dev_list, lun_buf, scb, data, len);
++		result = report_luns(lid, dev_list, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+ 		result = read_capacity(dev, scb, data, len);
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-13 14:53:58 UTC (rev 379)
++++ branches/use-scsi-ml/usr/target.c	2006-03-13 22:34:21 UTC (rev 380)
+@@ -373,7 +373,7 @@
+ 	cmd-&gt;attribute = ev_req-&gt;k.cmd_req.attribute;
+ 	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cmd-&gt;cid)]);
+ 
+-	dev_id = scsi_get_devid(ev_req-&gt;k.cmd_req.lun);
++	dev_id = scsi_get_devid(target-&gt;lid, ev_req-&gt;k.cmd_req.lun);
+ 	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
+ 		dev_id);
+ 
+@@ -387,7 +387,8 @@
+ 	enabled = cmd_pre_perform(q, cmd);
+ 
+ 	if (enabled) {
+-		result = scsi_cmd_perform(cmd-&gt;hostno, ev_req-&gt;k.cmd_req.scb,
++		result = scsi_cmd_perform(target-&gt;lid,
++					  cmd-&gt;hostno, ev_req-&gt;k.cmd_req.scb,
+ 					  &amp;len, ev_req-&gt;k.cmd_req.data_len,
+ 					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+ 					  ev_req-&gt;k.cmd_req.lun, cmd-&gt;dev,
+@@ -432,7 +433,8 @@
+ 				exit(1);
+ 			}
+ 			dprintf(&quot;perform %u %x\n&quot;, cmd-&gt;cid, cmd-&gt;attribute);
+-			result = scsi_cmd_perform(cmd-&gt;hostno, cmd-&gt;scb,
++			result = scsi_cmd_perform(target-&gt;lid,
++						  cmd-&gt;hostno, cmd-&gt;scb,
+ 						  &amp;len,
+ 						  cmd-&gt;len,
+ 						  &amp;uaddr,
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-03-13 14:53:58 UTC (rev 379)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-13 22:34:21 UTC (rev 380)
+@@ -42,8 +42,8 @@
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+ 
+-extern uint64_t scsi_get_devid(uint8_t *pdu);
+-extern int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
++extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
++extern int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+ 			    struct tgt_device *dev, struct list_head *dev_list);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000366.html">[Stgt-svn] r379 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000368.html">[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#367">[ date ]</a>
+              <a href="thread.html#367">[ thread ]</a>
+              <a href="subject.html#367">[ subject ]</a>
+              <a href="author.html#367">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

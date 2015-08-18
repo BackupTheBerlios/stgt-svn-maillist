@@ -1,0 +1,406 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r26 - in trunk: iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r26%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200508301321.j7UDLvih013164%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000019.html">
+   <LINK REL="Next"  HREF="000021.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r26 - in trunk: iscsi/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r26%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200508301321.j7UDLvih013164%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r26 - in trunk: iscsi/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Aug 30 15:21:57 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000019.html">[Stgt-svn] r25 - in trunk: include iscsi/usr usr
+</A></li>
+        <LI>Next message: <A HREF="000021.html">[Stgt-svn] r27 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#20">[ date ]</a>
+              <a href="thread.html#20">[ thread ]</a>
+              <a href="subject.html#20">[ subject ]</a>
+              <a href="author.html#20">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-30 15:21:56 +0200 (Tue, 30 Aug 2005)
+New Revision: 26
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt_target.h
+Log:
+Move the stgt_target_template registration to the target driver's module_init function.
+
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-08-28 08:38:37 UTC (rev 25)
++++ trunk/iscsi/kernel/iscsi.c	2005-08-30 13:21:56 UTC (rev 26)
+@@ -13,6 +13,7 @@
+ #include &lt;iscsi.h&gt;
+ #include &lt;iscsi_dbg.h&gt;
+ #include &lt;stgt.h&gt;
++#include &lt;stgt_target.h&gt;
+ 
+ unsigned long debug_enable_flags;
+ 
+@@ -1533,6 +1534,11 @@
+ 	}
+ }
+ 
++static struct stgt_target_template iet_stgt_target_template = {
++	.name = &quot;iet&quot;,
++	.module = THIS_MODULE,
++};
++
+ static void iscsi_exit(void)
+ {
+ 	unregister_chrdev(ctr_major, ctr_name);
+@@ -1541,12 +1547,10 @@
+ 
+ 	event_exit();
+ 
+-/* 	tio_exit(); */
+-
+-/* 	iotype_exit(); */
+-
+ 	if (iscsi_cmnd_cache)
+ 		kmem_cache_destroy(iscsi_cmnd_cache);
++
++	stgt_target_template_unregister(&amp;iet_stgt_target_template);
+ }
+ 
+ static int iscsi_init(void)
+@@ -1571,12 +1575,10 @@
+ 	if (!iscsi_cmnd_cache)
+ 		goto err;
+ 
+-/* 	if ((err = tio_init()) &lt; 0) */
+-/* 		goto err; */
++	err = stgt_target_template_register(&amp;iet_stgt_target_template);
++	if (err &lt; 0)
++		goto err;
+ 
+-/* 	if ((err = iotype_init()) &lt; 0) */
+-/* 		goto err; */
+-
+ 	return 0;
+ 
+ err:
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-08-28 08:38:37 UTC (rev 25)
++++ trunk/iscsi/kernel/iscsi.h	2005-08-30 13:21:56 UTC (rev 26)
+@@ -73,7 +73,6 @@
+ 	struct iscsi_trgt_param trgt_param;
+ 
+ 	struct list_head session_list;
+-	struct list_head device_list;
+ 
+ 	struct network_thread_info nthread_info;
+ 
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-08-28 08:38:37 UTC (rev 25)
++++ trunk/iscsi/kernel/target.c	2005-08-30 13:21:56 UTC (rev 26)
+@@ -10,8 +10,8 @@
+ #include &lt;digest.h&gt;
+ #include &lt;iscsi_dbg.h&gt;
+ #include &lt;stgt.h&gt;
+-#include &lt;stgt_target.h&gt;
+ #include &lt;stgt_device.h&gt;
++#include &lt;stgt_target.h&gt;
+ 
+ #define	MAX_NR_TARGETS	(1UL &lt;&lt; 30)
+ 
+@@ -112,11 +112,6 @@
+ 	nthread_stop(target);
+ }
+ 
+-static struct stgt_target_template iet_stgt_target_template = {
+-	.name = &quot;iet&quot;,
+-	.queued_cmnds = DEFAULT_NR_QUEUED_CMNDS,
+-};
+-
+ static int iscsi_target_create(struct target_info *info)
+ {
+ 	int err = -EINVAL, len;
+@@ -130,11 +125,6 @@
+ 		return err;
+ 	}
+ 
+-	if (!try_module_get(THIS_MODULE)) {
+-		eprintk(&quot;%s\n&quot;, &quot;Fail to get module&quot;);
+-		return err;
+-	}
+-
+ 	if (!(target = kmalloc(sizeof(*target), GFP_KERNEL))) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -149,7 +139,6 @@
+ 	init_MUTEX(&amp;target-&gt;target_sem);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;session_list);
+-	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 	list_add(&amp;target-&gt;t_list, &amp;target_list);
+ 
+ 	nthread_init(target);
+@@ -159,8 +148,7 @@
+ 		goto out;
+ 	}
+ 
+-	target-&gt;stt = stgt_target_create(&amp;iet_stgt_target_template);
+-	assert(target-&gt;stt);
++	target-&gt;stt = stgt_target_create(&quot;iet&quot;, DEFAULT_NR_QUEUED_CMNDS);
+ 
+ 	/* FIXME: We shouldn't access stt inside. */
+ 	target-&gt;tid = info-&gt;tid = target-&gt;stt-&gt;tid;
+@@ -168,7 +156,6 @@
+ 	return 0;
+ out:
+ 	kfree(target);
+-	module_put(THIS_MODULE);
+ 
+ 	return err;
+ }
+@@ -207,8 +194,6 @@
+ 	target_thread_stop(target);
+ 
+ 	kfree(target);
+-
+-	module_put(THIS_MODULE);
+ }
+ 
+ int target_del(u32 id)
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-28 08:38:37 UTC (rev 25)
++++ trunk/kernel/stgt.c	2005-08-30 13:21:56 UTC (rev 26)
+@@ -49,6 +49,9 @@
+ static spinlock_t all_targets_lock;
+ static LIST_HEAD(all_targets);
+ 
++static spinlock_t target_tmpl_lock;
++static LIST_HEAD(target_tmpl_list);
++
+ static spinlock_t device_tmpl_lock;
+ static LIST_HEAD(device_tmpl_list);
+ 
+@@ -133,6 +136,74 @@
+ 	schedule_work(&amp;target-&gt;work);
+ }
+ 
++struct target_type_internal {
++	struct list_head list;
++	struct stgt_target_template *stt;
++};
++
++static struct stgt_target_template *target_template_get(const char *name)
++{
++	unsigned long flags;
++	struct target_type_internal *ti;
++
++	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
++
++	list_for_each_entry(ti, &amp;target_tmpl_list, list)
++		if (!strcmp(name, ti-&gt;stt-&gt;name)) {
++			if (!try_module_get(ti-&gt;stt-&gt;module))
++				ti = NULL;
++			spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++			return ti ? ti-&gt;stt : NULL;
++		}
++
++	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++
++	return NULL;
++}
++
++static void target_template_put(struct stgt_target_template *stt)
++{
++	module_put(stt-&gt;module);
++}
++
++int stgt_target_template_register(struct stgt_target_template *stt)
++{
++	unsigned long flags;
++	struct target_type_internal *ti;
++
++	ti = kmalloc(sizeof(*ti), GFP_KERNEL);
++	if (!ti)
++		return -ENOMEM;
++	memset(ti, 0, sizeof(*ti));
++	INIT_LIST_HEAD(&amp;ti-&gt;list);
++	ti-&gt;stt = stt;
++
++	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
++	list_add_tail(&amp;ti-&gt;list, &amp;target_tmpl_list);
++	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(stgt_target_template_register);
++
++void stgt_target_template_unregister(struct stgt_target_template *stt)
++{
++	unsigned long flags;
++	struct target_type_internal *ti;
++
++	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
++
++	list_for_each_entry(ti, &amp;target_tmpl_list, list)
++		if (ti-&gt;stt == stt) {
++			list_del(&amp;ti-&gt;list);
++			kfree(ti);
++			break;
++		}
++
++	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++}
++EXPORT_SYMBOL_GPL(stgt_target_template_unregister);
++
+ static struct stgt_target *target_find(int tid)
+ {
+ 	struct stgt_target *target;
+@@ -148,7 +219,7 @@
+ 	return target;
+ }
+ 
+-struct stgt_target *stgt_target_create(struct stgt_target_template *stt)
++struct stgt_target *stgt_target_create(char *target_type, int queued_cmnds)
+ {
+ 	static int target_id;
+ 	struct stgt_target *target;
+@@ -161,10 +232,13 @@
+ 	target = kmalloc(sizeof(*target), GFP_KERNEL);
+ 	if (!target)
+ 		return NULL;
+-
+ 	dprintk(&quot;%p\n&quot;, target);
++	memset(target, 0, sizeof(*target));
+ 
+-	memset(target, 0, sizeof(*target));
++	target-&gt;stt = target_template_get(target_type);
++	if (!target-&gt;stt)
++		goto free_target;
++
+ 	target-&gt;tid = target_id++;
+ 	spin_lock_init(&amp;target-&gt;lock);
+ 
+@@ -173,19 +247,21 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;work_list);
+ 
+ 	INIT_WORK(&amp;target-&gt;work, stgt_worker, target);
+-	target-&gt;stt = stt;
+-	target-&gt;queued_cmnds = stt-&gt;queued_cmnds;
++	target-&gt;queued_cmnds = queued_cmnds;
+ 
+-	if (stgt_sysfs_register_target(target)) {
+-		kfree(target);
+-		return NULL;
+-	}
++	if (stgt_sysfs_register_target(target))
++		goto put_template;
+ 
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+ 	spin_unlock(&amp;all_targets_lock);
++	return target;
+ 
+-	return target;
++put_template:
++	target_template_put(target-&gt;stt);
++free_target:
++	kfree(target);
++	return NULL;
+ }
+ EXPORT_SYMBOL(stgt_target_create);
+ 
+@@ -197,6 +273,7 @@
+ 	list_del(&amp;target-&gt;tlist);
+ 	spin_unlock(&amp;all_targets_lock);
+ 
++	target_template_put(target-&gt;stt);
+ 	stgt_sysfs_unregister_target(target);
+ 
+ 	return 0;
+@@ -904,6 +981,7 @@
+ 	spin_lock_init(&amp;all_targets_lock);
+ 	spin_lock_init(&amp;atomic_sessions_lock);
+ 	spin_lock_init(&amp;cmnd_hash_lock);
++	spin_lock_init(&amp;target_tmpl_lock);
+ 	spin_lock_init(&amp;device_tmpl_lock);
+ 
+ 	err = stgt_sysfs_init();
+
+Modified: trunk/kernel/stgt_target.h
+===================================================================
+--- trunk/kernel/stgt_target.h	2005-08-28 08:38:37 UTC (rev 25)
++++ trunk/kernel/stgt_target.h	2005-08-30 13:21:56 UTC (rev 26)
+@@ -13,8 +13,8 @@
+ 
+ struct stgt_target_template {
+ 	const char *name;
++	struct module *module;
+ 
+-	int queued_cmnds;
+ 	/*
+ 	 * Pointer to the sysfs class properties for this host, NULL terminated.
+ 	 */
+@@ -43,9 +43,11 @@
+ #define cdev_to_stgt_target(cdev) \
+ 	container_of(cdev, struct stgt_target, cdev)
+ 
+-extern struct stgt_target *stgt_target_create(struct stgt_target_template *stt);
++extern struct stgt_target *stgt_target_create(char *target_type, int nr_cmnds);
+ extern int stgt_target_destroy(struct stgt_target *target);
+ extern int stgt_sysfs_register_target(struct stgt_target *target);
+ extern void stgt_sysfs_unregister_target(struct stgt_target *target);
++extern int stgt_target_template_register(struct stgt_target_template *stt);
++extern void stgt_target_template_unregister(struct stgt_target_template *stt);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000019.html">[Stgt-svn] r25 - in trunk: include iscsi/usr usr
+</A></li>
+	<LI>Next message: <A HREF="000021.html">[Stgt-svn] r27 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#20">[ date ]</a>
+              <a href="thread.html#20">[ thread ]</a>
+              <a href="subject.html#20">[ subject ]</a>
+              <a href="author.html#20">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

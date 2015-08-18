@@ -1,0 +1,106 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r88 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r88%20-%20trunk/kernel&In-Reply-To=%3C200509230035.j8N0Zg3w021976%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000080.html">
+   <LINK REL="Next"  HREF="000082.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r88 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r88%20-%20trunk/kernel&In-Reply-To=%3C200509230035.j8N0Zg3w021976%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r88 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Fri Sep 23 02:35:42 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000080.html">[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000082.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#81">[ date ]</a>
+              <a href="thread.html#81">[ thread ]</a>
+              <a href="subject.html#81">[ subject ]</a>
+              <a href="author.html#81">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-23 02:35:37 +0200 (Fri, 23 Sep 2005)
+New Revision: 88
+
+Added:
+   trunk/kernel/tgt_scsi.h
+Log:
+we moved some scsi things to a lib to allow different scsi devices (like tape or disk or cd etc) to be able to use them
+
+Added: trunk/kernel/tgt_scsi.h
+===================================================================
+--- trunk/kernel/tgt_scsi.h	2005-09-23 00:33:42 UTC (rev 87)
++++ trunk/kernel/tgt_scsi.h	2005-09-23 00:35:37 UTC (rev 88)
+@@ -0,0 +1,30 @@
++/*
++ * SCSI target helpers
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#ifndef __TGT_SCSI_H
++#define __TGT_SCSI_H
++
++#include &lt;tgt.h&gt;
++#include &lt;scsi/scsi_cmnd.h&gt;
++
++struct scsi_tgt_cmnd {
++	uint8_t scb[MAX_COMMAND_SIZE];
++	uint8_t sense_buff[SCSI_SENSE_BUFFERSIZE];
++	int sense_len;
++	int tags;
++};
++
++static inline struct scsi_tgt_cmnd *tgt_cmnd_to_scsi(struct tgt_cmnd *cmnd)
++{
++	return (struct scsi_tgt_cmnd *) cmnd-&gt;proto_priv;
++}
++
++extern int scsi_tgt_sense_copy(struct tgt_cmnd *cmnd);
++extern int scsi_tgt_sense_data_build(struct tgt_cmnd *cmnd, uint8_t key,
++				     uint8_t ascode, uint8_t ascodeq);
++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000080.html">[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000082.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#81">[ date ]</a>
+              <a href="thread.html#81">[ thread ]</a>
+              <a href="subject.html#81">[ subject ]</a>
+              <a href="author.html#81">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

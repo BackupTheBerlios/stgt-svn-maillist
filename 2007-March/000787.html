@@ -1,0 +1,103 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r800 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r800%20-%20trunk/usr&In-Reply-To=%3C200703040923.l249N6VO011100%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000786.html">
+   <LINK REL="Next"  HREF="000788.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r800 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r800%20-%20trunk/usr&In-Reply-To=%3C200703040923.l249N6VO011100%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r800 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 10:23:06 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000786.html">[Stgt-svn] r799 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000788.html">[Stgt-svn] r801 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#787">[ date ]</a>
+              <a href="thread.html#787">[ thread ]</a>
+              <a href="subject.html#787">[ subject ]</a>
+              <a href="author.html#787">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 10:23:06 +0100 (Sun, 04 Mar 2007)
+New Revision: 800
+
+Modified:
+   trunk/usr/tgtd.c
+Log:
+Disable realtime priority because it leads to lots of dirty pages. We
+don't have asynchronous fsync. So it's not nice.
+
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2007-03-04 07:39:48 UTC (rev 799)
++++ trunk/usr/tgtd.c	2007-03-04 09:23:06 UTC (rev 800)
+@@ -83,14 +83,6 @@
+ static void signal_catch(int signo) {
+ }
+ 
+-static int set_realtime(void)
+-{
+-	struct sched_param sp;
+-
+-	sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+-	return sched_setscheduler(0, SCHED_FIFO, &amp;sp);
+-}
+-
+ static int oom_adjust(void)
+ {
+ 	int fd, err;
+@@ -286,10 +278,6 @@
+ 	if (err)
+ 		exit(1);
+ 
+-	err = set_realtime();
+-	if (err)
+-		eprintf(&quot;can't set SCHED_FIFO, %m\n&quot;);
+-
+ 	err = log_init(program_name, LOG_SPACE_SIZE, is_daemon, is_debug);
+ 	if (err)
+ 		exit(1);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000786.html">[Stgt-svn] r799 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000788.html">[Stgt-svn] r801 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#787">[ date ]</a>
+              <a href="thread.html#787">[ thread ]</a>
+              <a href="subject.html#787">[ subject ]</a>
+              <a href="author.html#787">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

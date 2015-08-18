@@ -1,0 +1,278 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r791 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r791%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200703030755.l237tYlW007467%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000777.html">
+   <LINK REL="Next"  HREF="000779.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r791 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r791%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200703030755.l237tYlW007467%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r791 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar  3 08:55:34 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000777.html">[Stgt-svn] r790 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000779.html">[Stgt-svn] r792 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#778">[ date ]</a>
+              <a href="thread.html#778">[ thread ]</a>
+              <a href="subject.html#778">[ subject ]</a>
+              <a href="author.html#778">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-03 08:55:34 +0100 (Sat, 03 Mar 2007)
+New Revision: 791
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/scsi.c
+Log:
+This enables a lld to modify device_command_operations
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-03-03 06:58:40 UTC (rev 790)
++++ trunk/usr/driver.h	2007-03-03 07:55:34 UTC (rev 791)
+@@ -12,11 +12,11 @@
+ 
+ 	int (*show) (int, int, uint64_t, uint32_t, uint64_t, char *, int);
+ 
++	/* the following three should be killed shortly */
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+-	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+-				uint8_t *, int *);
+-	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+-			    uint8_t *, int *);
++	int (*scsi_report_luns)(int host_no, struct scsi_cmd *cmd, void *key);
++	int (*scsi_inquiry)(int host_no, struct scsi_cmd *cmd, void *key);
++
+ 	int (*cmd_end_notify)(uint64_t nid, int result, struct scsi_cmd *);
+ 	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+ 
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2007-03-03 06:58:40 UTC (rev 790)
++++ trunk/usr/ibmvio/ibmvio.c	2007-03-03 07:55:34 UTC (rev 791)
+@@ -41,6 +41,7 @@
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
+ 
+ #define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+ #define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+@@ -124,18 +125,23 @@
+ 	return sizeof(*id);
+ }
+ 
+-int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+-		 uint8_t *scb, uint8_t *data, int *len)
++int scsi_inquiry(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	int result = SAM_STAT_CHECK_CONDITION;
++	uint8_t *data, *scb = cmd-&gt;scb;
++	int *len = &amp;cmd-&gt;len;
+ 
++	data = valloc(pagesize);
++	memset(data, 0, pagesize);
++	cmd-&gt;uaddr = (unsigned long) data;
++
+ 	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+ 		goto err;
+ 
+ 	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+-		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
++		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) cmd-&gt;lun), data);
+ 		result = SAM_STAT_GOOD;
+ 	} else if (scb[1] &amp; 0x2) {
+ 		/* CmdDt bit is set */
+@@ -168,8 +174,8 @@
+ 			data[4] = 0x1;
+ 			data[5] = 0x1;
+ 			data[7] = tmp;
+-			if (dev)
+-				strncpy(data + 8, dev-&gt;scsi_id, SCSI_ID_LEN);
++			if (cmd-&gt;dev)
++				strncpy(data + 8, cmd-&gt;dev-&gt;scsi_id, SCSI_ID_LEN);
+ 			*len = tmp + 8;
+ 			result = SAM_STAT_GOOD;
+ 		}
+@@ -180,7 +186,7 @@
+ 
+ 	*len = min_t(int, *len, scb[4]);
+ 
+-	if (!dev)
++	if (!cmd-&gt;dev)
+ 		data[0] = TYPE_NO_LUN;
+ 
+ 	return SAM_STAT_GOOD;
+@@ -200,19 +206,23 @@
+ 	return ((uint64_t) result) &lt;&lt; 48;
+ }
+ 
+-int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
+-		     uint8_t *scb, uint8_t *p, int *len)
++int scsi_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	struct tgt_device *dev;
+-	uint64_t lun, *data = (uint64_t *) p;
++	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
++	uint64_t lun, *data;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096;
+ 	int result = SAM_STAT_GOOD;
++	int *len = &amp;cmd-&gt;len;
++	uint8_t *lun_buf = cmd-&gt;lun;
+ 
+-	memset(data, 0, rbuflen);
++	data = valloc(pagesize);
++	memset(data, 0, pagesize);
++	cmd-&gt;uaddr = (unsigned long)data;
+ 
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+ 	if (alen &lt; 16) {
+-		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
++		*len = sense_data_build((void *)data, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2007-03-03 06:58:40 UTC (rev 790)
++++ trunk/usr/ibmvio/ibmvio.h	2007-03-03 07:55:34 UTC (rev 791)
+@@ -1,7 +1,5 @@
+-extern int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+-			uint8_t *scb, uint8_t *data, int *len);
+-extern int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
+-			    uint8_t *scb, uint8_t *p, int *len);
++extern int scsi_inquiry(int host_no, struct scsi_cmd *cmd, void *key);
++extern int scsi_report_luns(int host_no, struct scsi_cmd *cmd, void *key);
+ 
+ extern uint64_t scsi_lun_to_int(uint8_t *p);
+ 
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-03-03 06:58:40 UTC (rev 790)
++++ trunk/usr/scsi.c	2007-03-03 07:55:34 UTC (rev 791)
+@@ -105,17 +105,22 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int __report_luns(struct list_head *dev_list, uint8_t *lun_buf,
+-			 uint8_t *scb, uint8_t *p, int *len)
++static int __spc_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	struct tgt_device *dev;
+-	uint64_t lun, *data = (uint64_t *) p;
++	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
++	uint64_t lun, *data;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+ 	int result = SAM_STAT_GOOD;
++	int *len = &amp;cmd-&gt;len;
+ 
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	data = valloc(pagesize);
++	memset(data, 0, pagesize);
++	cmd-&gt;uaddr = (unsigned long)data;
++
++	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+ 	if (alen &lt; 16) {
+-		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
++		*len = sense_data_build((void *)data, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+@@ -155,16 +160,15 @@
+ static int spc_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	struct target *target = cmd-&gt;c_target;
+-	struct list_head *dev_list = &amp;target-&gt;device_list;
+-	uint8_t *data;
++	int ret, lid = target-&gt;lid;
+ 
+-	data = valloc(pagesize);
+-	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long)data;
++	/* temp hack */
++	if (tgt_drivers[lid]-&gt;scsi_report_luns)
++		ret = tgt_drivers[lid]-&gt;scsi_report_luns(host_no, cmd, key);
++	else
++		ret = __spc_report_luns(host_no, cmd, key);
+ 
+-	typeof(__report_luns) *fn;
+-	fn = tgt_drivers[target-&gt;lid]-&gt;scsi_report_luns ? : __report_luns;
+-	return fn(dev_list, cmd-&gt;lun, cmd-&gt;scb, data, &amp;cmd-&gt;len);
++	return ret;
+ }
+ 
+ static uint64_t sbc_rw_offset(uint8_t *scb)
+@@ -354,17 +358,10 @@
+ {
+ 	int ret, lid = cmd-&gt;c_target-&gt;lid;
+ 
+-	if (tgt_drivers[lid]-&gt;scsi_inquiry) {
+-		uint8_t *data;
+-
+-		data = valloc(pagesize);
+-		memset(data, 0, pagesize);
+-		cmd-&gt;uaddr = (unsigned long)data;
+-		ret = tgt_drivers[lid]-&gt;scsi_inquiry(cmd-&gt;dev, host_no, cmd-&gt;lun,
+-						     cmd-&gt;scb, data, &amp;cmd-&gt;len);
+-	} else
++	if (tgt_drivers[lid]-&gt;scsi_inquiry)
++		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd, key);
++	else
+ 		ret = __sbc_inquiry(host_no, cmd, key);
+-
+ 	return ret;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000777.html">[Stgt-svn] r790 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000779.html">[Stgt-svn] r792 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#778">[ date ]</a>
+              <a href="thread.html#778">[ thread ]</a>
+              <a href="subject.html#778">[ subject ]</a>
+              <a href="author.html#778">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

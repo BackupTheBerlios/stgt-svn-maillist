@@ -1,0 +1,150 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r499 - in trunk: istgt/kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r499%20-%20in%20trunk%3A%20istgt/kernel%20usr&In-Reply-To=%3C200607081209.k68C9T6F023858%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000488.html">
+   <LINK REL="Next"  HREF="000487.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r499 - in trunk: istgt/kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r499%20-%20in%20trunk%3A%20istgt/kernel%20usr&In-Reply-To=%3C200607081209.k68C9T6F023858%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r499 - in trunk: istgt/kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Jul  8 14:09:29 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000488.html">[Stgt-svn] r498 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000487.html">[Stgt-svn] r500 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#484">[ date ]</a>
+              <a href="thread.html#484">[ thread ]</a>
+              <a href="subject.html#484">[ subject ]</a>
+              <a href="author.html#484">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-08 14:09:06 +0200 (Sat, 08 Jul 2006)
+New Revision: 499
+
+Modified:
+   trunk/istgt/kernel/iscsi_tcp_target.c
+   trunk/usr/tgtd.c
+Log:
+Update for cmnd field removal again.
+
+Modified: trunk/istgt/kernel/iscsi_tcp_target.c
+===================================================================
+--- trunk/istgt/kernel/iscsi_tcp_target.c	2006-07-08 11:36:28 UTC (rev 498)
++++ trunk/istgt/kernel/iscsi_tcp_target.c	2006-07-08 12:09:06 UTC (rev 499)
+@@ -445,12 +445,12 @@
+ 	if (left &lt;= ctask-&gt;conn-&gt;max_xmit_dlength) {
+ 		hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
+ 
+-		if (sc-&gt;bufflen &lt; exp_datalen) {
++		if (sc-&gt;request_bufflen &lt; exp_datalen) {
+ 			hdr-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
+-			residual = exp_datalen - sc-&gt;bufflen;
+-		} else if (sc-&gt;bufflen &gt; exp_datalen) {
++			residual = exp_datalen - sc-&gt;request_bufflen;
++		} else if (sc-&gt;request_bufflen &gt; exp_datalen) {
+ 			hdr-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
+-			residual = sc-&gt;bufflen - exp_datalen;
++			residual = sc-&gt;request_bufflen - exp_datalen;
+ 		} else
+ 			residual = 0;
+ 		hdr-&gt;residual_count = cpu_to_be32(residual);
+@@ -459,7 +459,7 @@
+ 		size = ctask-&gt;conn-&gt;max_xmit_dlength;
+ 
+ 	dprintk(&quot;%d %d %d %d %d\n&quot;, size, left, ctask-&gt;conn-&gt;max_xmit_dlength,
+-		exp_datalen, sc-&gt;bufflen);
++		exp_datalen, sc-&gt;request_bufflen);
+ 
+ 	hton24(hdr-&gt;dlength, size);
+ 	ctask-&gt;data_count = ctask-&gt;unsol_count = size;
+@@ -541,11 +541,10 @@
+ {
+ 	struct iscsi_cmd_task *ctask = (struct iscsi_cmd_task *) scmd-&gt;SCp.ptr;
+ 
+-	dprintk(&quot;%p %x %x %u %u %u\n&quot;, ctask, ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK,
+-		ctask-&gt;hdr-&gt;cdb[0], scmd-&gt;request_bufflen,
+-		scmd-&gt;bufflen, scmd-&gt;sc_data_direction);
++	dprintk(&quot;%p %x %x %u %u\n&quot;, ctask, ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK,
++		ctask-&gt;hdr-&gt;cdb[0], scmd-&gt;request_bufflen, scmd-&gt;sc_data_direction);
+ 
+-	if (scmd-&gt;sc_data_direction == DMA_FROM_DEVICE &amp;&amp; scmd-&gt;bufflen) {
++	if (scmd-&gt;sc_data_direction == DMA_FROM_DEVICE &amp;&amp; scmd-&gt;request_bufflen) {
+ 		/* We've already sent data in transfer_data. */
+ 		iscsi_tcp_tgt_ctask_cleanup(ctask);
+ 		done(scmd);
+@@ -577,6 +576,9 @@
+ 	dprintk(&quot;%p %x %x %u %u\n&quot;, ctask, ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK,
+ 		ctask-&gt;hdr-&gt;cdb[0], sc-&gt;request_bufflen, sc-&gt;sc_data_direction);
+ 
++	/* We cannot handle this. */
++	BUG_ON(sc-&gt;offset);
++
+ 	sc-&gt;done = done;
+ 	if (sc-&gt;sc_data_direction == DMA_TO_DEVICE) {
+ 		struct iscsi_tcp_conn *tcp_conn = ctask-&gt;conn-&gt;dd_data;
+@@ -590,7 +592,7 @@
+ 	} else {
+ 		tcp_ctask-&gt;sg_count = 0;
+ 		tcp_ctask-&gt;data_offset = 0;
+-		ctask-&gt;unsol_count = sc-&gt;bufflen;
++		ctask-&gt;unsol_count = sc-&gt;request_bufflen;
+ 		tcp_ctask-&gt;sg = sc-&gt;request_buffer;
+ 		tcp_ctask-&gt;xmstate = XMSTATE_UNS_INIT | XMSTATE_UNS_HDR;
+ 		iscsi_tcp_tgt_ctask_xmitqueue(ctask);
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-07-08 11:36:28 UTC (rev 498)
++++ trunk/usr/tgtd.c	2006-07-08 12:09:06 UTC (rev 499)
+@@ -234,7 +234,7 @@
+ 		exit(1);
+ 
+ 	nr = dl_init(dlinfo);
+-	if (nr &lt; nr)
++	if (nr &lt; 0)
+ 		exit(1);
+ 
+ 	pfd = poll_init(nr, nl_fd, ud_fd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000488.html">[Stgt-svn] r498 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000487.html">[Stgt-svn] r500 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#484">[ date ]</a>
+              <a href="thread.html#484">[ thread ]</a>
+              <a href="subject.html#484">[ subject ]</a>
+              <a href="author.html#484">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,246 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r125 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r125%20-%20trunk/kernel&In-Reply-To=%3C200510280152.j9S1qFBg032685%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000118.html">
+   <LINK REL="Next"  HREF="000120.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r125 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r125%20-%20trunk/kernel&In-Reply-To=%3C200510280152.j9S1qFBg032685%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r125 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 03:52:15 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000118.html">[Stgt-svn] r124 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000120.html">[Stgt-svn] r126 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#119">[ date ]</a>
+              <a href="thread.html#119">[ thread ]</a>
+              <a href="subject.html#119">[ subject ]</a>
+              <a href="author.html#119">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 03:52:12 +0200 (Fri, 28 Oct 2005)
+New Revision: 125
+
+Added:
+   trunk/kernel/tgt_types.h
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sysfs.c
+Log:
+Fix compile warning for some 64-bit architectures (ppc64, sparc64, etc).
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-27 14:53:51 UTC (rev 124)
++++ trunk/kernel/tgt.c	2005-10-28 01:52:12 UTC (rev 125)
+@@ -438,7 +438,7 @@
+ 	struct tgt_device *device;
+ 	unsigned long flags;
+ 
+-	dprintk(&quot;tid %d dev_id %llu type %s fd %d\n&quot;,
++	dprintk(&quot;tid %d dev_id %&quot; PRIu64 &quot; type %s fd %d\n&quot;,
+ 		tid, dev_id, device_type, fd);
+ 
+ 	target = target_find(tid);
+@@ -569,13 +569,13 @@
+ 	struct tgt_target *target = cmd-&gt;session-&gt;target;
+ 	struct tgt_device *device = cmd-&gt;device;
+ 
+-	dprintk(&quot;cid %llu\n&quot;, cmd-&gt;cid);
++	dprintk(&quot;cid %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid);
+ 
+ 	/* Should we do this earlier? */
+ 	if (!device)
+ 		cmd-&gt;device = device = tgt_device_find(target, cmd-&gt;dev_id);
+ 	if (device)
+-		dprintk(&quot;found %llu\n&quot;, cmd-&gt;dev_id);
++		dprintk(&quot;found %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;dev_id);
+ 
+ 	err = target-&gt;proto-&gt;queue_cmd(cmd);
+ 
+@@ -585,7 +585,7 @@
+ 		dprintk(&quot;command completed %d\n&quot;, err);
+ 		tgt_transfer_response(cmd);
+ 	default:
+-		dprintk(&quot;command %llu queued\n&quot;, cmd-&gt;cid);
++		dprintk(&quot;command %&quot; PRIx64 &quot; queued\n&quot;, cmd-&gt;cid);
+ 	};
+ }
+ 
+@@ -607,7 +607,7 @@
+ 	INIT_LIST_HEAD(&amp;cmd-&gt;clist);
+ 	INIT_LIST_HEAD(&amp;cmd-&gt;hash_list);
+ 
+-	dprintk(&quot;%p %llu\n&quot;, session, cmd-&gt;cid);
++	dprintk(&quot;%p %&quot; PRIx64 &quot;\n&quot;, session, cmd-&gt;cid);
+ 
+ 	spin_lock_irqsave(&amp;cmd_hash_lock, flags);
+ 	list_add_tail(&amp;cmd-&gt;hash_list, &amp;cmd_hash[cmd_hashfn(cmd-&gt;cid)]);
+@@ -630,7 +630,7 @@
+ {
+ 	unsigned long flags;
+ 
+-	dprintk(&quot;cid %llu\n&quot;, cmd-&gt;cid);
++	dprintk(&quot;cid %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid);
+ 
+ 	tgt_free_buffer(cmd);
+ 
+@@ -686,8 +686,8 @@
+ 	cmd-&gt;sg_count = pgcnt(len, offset);
+ 	offset &amp;= ~PAGE_CACHE_MASK;
+ 
+-	dprintk(&quot;cid %llu pg_count %d offset %llu len %d\n&quot;, cmd-&gt;cid,
+-		cmd-&gt;sg_count, cmd-&gt;offset, cmd-&gt;bufflen);
++	dprintk(&quot;cid %&quot; PRIx64 &quot; pg_count %d offset %&quot; PRIu64 &quot; len %d\n&quot;,
++		cmd-&gt;cid, cmd-&gt;sg_count, cmd-&gt;offset, cmd-&gt;bufflen);
+ 
+ 	cmd-&gt;sg = kmalloc(cmd-&gt;sg_count * sizeof(struct scatterlist),
+ 			   GFP_KERNEL | __GFP_NOFAIL);
+@@ -784,7 +784,7 @@
+ 	char *p = data;
+ 	int i;
+ 
+-	dprintk(&quot;cid %llu result %d len %d bufflen %u\n&quot;,
++	dprintk(&quot;cid %&quot; PRIx64 &quot; result %d len %d bufflen %u\n&quot;,
+ 		cmd-&gt;cid, result, len, cmd-&gt;bufflen);
+ 
+ 	if (len) {
+@@ -972,7 +972,8 @@
+ 					 ev-&gt;u.cmd_res.result,
+ 					 ev-&gt;u.cmd_res.len);
+ 		else {
+-			eprintk(&quot;cannot found %llu\n&quot;, ev-&gt;u.cmd_res.cid);
++			eprintk(&quot;cannot found %&quot; PRIx64 &quot;\n&quot;,
++				ev-&gt;u.cmd_res.cid);
+ 			err = -EEXIST;
+ 		}
+ 		break;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-10-27 14:53:51 UTC (rev 124)
++++ trunk/kernel/tgt.h	2005-10-28 01:52:12 UTC (rev 125)
+@@ -12,6 +12,8 @@
+ #include &lt;linux/mempool.h&gt;
+ #include &lt;linux/dma-mapping.h&gt;
+ 
++#include &lt;tgt_types.h&gt;
++
+ struct tgt_device;
+ struct tgt_protocol;
+ 
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-10-27 14:53:51 UTC (rev 124)
++++ trunk/kernel/tgt_scsi.c	2005-10-28 01:52:12 UTC (rev 125)
+@@ -84,7 +84,7 @@
+ 	cmd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
+ 	device = tgt_device_find(session-&gt;target, cmd-&gt;dev_id);
+ 	if (!device) {
+-		printk(KERN_ERR &quot;Could not find device if %llu\n&quot;,
++		printk(KERN_ERR &quot;Could not find device if %&quot; PRIu64 &quot;\n&quot;,
+ 		       cmd-&gt;dev_id);
+ 		return NULL;
+ 	}
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-10-27 14:53:51 UTC (rev 124)
++++ trunk/kernel/tgt_sysfs.c	2005-10-28 01:52:12 UTC (rev 125)
+@@ -5,6 +5,7 @@
+  * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  * This code is licenced under the GPL.
+  */
++#include &lt;tgt_types.h&gt;
+ #include &lt;tgt_target.h&gt;
+ #include &lt;tgt_device.h&gt;
+ 
+@@ -155,7 +156,7 @@
+ static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+ 
+ tgt_device_rd_attr(fd, &quot;%d\n&quot;);
+-tgt_device_rd_attr(size, &quot;%llu\n&quot;);
++tgt_device_rd_attr(size, &quot;%&quot; PRIu64 &quot;\n&quot;);
+ 
+ static struct class_device_attribute *tgt_device_attrs[] = {
+ 	&amp;class_device_attr_fd,
+@@ -186,7 +187,7 @@
+ 	int err, i;
+ 
+ 	cdev-&gt;class = &amp;tgt_device_class;
+-	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;device%d:%llu&quot;,
++	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;device%d:%&quot; PRIu64,
+ 		 target-&gt;tid, device-&gt;dev_id);
+ 	err = class_device_register(cdev);
+ 	if (err)
+
+Added: trunk/kernel/tgt_types.h
+===================================================================
+--- trunk/kernel/tgt_types.h	2005-10-27 14:53:51 UTC (rev 124)
++++ trunk/kernel/tgt_types.h	2005-10-28 01:52:12 UTC (rev 125)
+@@ -0,0 +1,18 @@
++#ifndef __TGT_TYPES_H
++#define __TGT_TYPES_H
++
++#include &lt;linux/types.h&gt;
++
++/* taken from inttypes.h */
++
++#if BITS_PER_LONG == 64
++#  define __PRI64_PREFIX	&quot;l&quot;
++# else
++#  define __PRI64_PREFIX	&quot;ll&quot;
++# endif
++
++# define PRId64		__PRI64_PREFIX &quot;d&quot;
++# define PRIu64		__PRI64_PREFIX &quot;u&quot;
++# define PRIx64		__PRI64_PREFIX &quot;x&quot;
++
++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000118.html">[Stgt-svn] r124 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000120.html">[Stgt-svn] r126 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#119">[ date ]</a>
+              <a href="thread.html#119">[ thread ]</a>
+              <a href="subject.html#119">[ subject ]</a>
+              <a href="author.html#119">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

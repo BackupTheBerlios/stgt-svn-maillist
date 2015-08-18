@@ -1,0 +1,128 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r745 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r745%20-%20trunk/usr&In-Reply-To=%3C200701020826.l028Qeru003480%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000731.html">
+   <LINK REL="Next"  HREF="000733.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r745 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r745%20-%20trunk/usr&In-Reply-To=%3C200701020826.l028Qeru003480%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r745 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Jan  2 09:26:40 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000731.html">[Stgt-svn] r744 - trunk/usr/xen
+</A></li>
+        <LI>Next message: <A HREF="000733.html">[Stgt-svn] r746 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#732">[ date ]</a>
+              <a href="thread.html#732">[ thread ]</a>
+              <a href="subject.html#732">[ subject ]</a>
+              <a href="author.html#732">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-02 09:26:40 +0100 (Tue, 02 Jan 2007)
+New Revision: 745
+
+Modified:
+   trunk/usr/bd_xen.c
+Log:
+Add the makeshift readv/writev code.
+
+
+Modified: trunk/usr/bd_xen.c
+===================================================================
+--- trunk/usr/bd_xen.c	2007-01-02 07:36:52 UTC (rev 744)
++++ trunk/usr/bd_xen.c	2007-01-02 08:26:40 UTC (rev 745)
+@@ -27,17 +27,19 @@
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;libaio.h&gt;
+-
+ #include &lt;linux/fs.h&gt;
+ #include &lt;sys/epoll.h&gt;
++#include &lt;sys/uio.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ 
++#define O_DIRECT 040000 /* who defines this?*/
++
+ static int bd_xen_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+ {
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
++	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE | O_DIRECT, size);
+ 
+ 	return *fd &gt;= 0 ? 0 : *fd;
+ }
+@@ -47,10 +49,29 @@
+ 	close(dev-&gt;fd);
+ }
+ 
++/*
++ * Replace this with AIO readv/writev after 2.6.20.
++ */
+ static int bd_xen_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+ 			     uint32_t datalen, unsigned long *uaddr,
+ 			     uint64_t offset, int *async, void *key)
+ {
++	struct iovec *iov = (struct iovec *) (void *) *uaddr;
++	int cnt;
++	long total;
++
++	cnt = total = 0;
++	do {
++		total += iov[cnt++].iov_len;
++	} while (total &lt; datalen);
++
++	lseek64(dev-&gt;fd, offset, SEEK_SET);
++
++	if (rw == READ)
++		readv(dev-&gt;fd, iov, cnt);
++	else
++		writev(dev-&gt;fd, iov, cnt);
++
+ 	return 0;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000731.html">[Stgt-svn] r744 - trunk/usr/xen
+</A></li>
+	<LI>Next message: <A HREF="000733.html">[Stgt-svn] r746 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#732">[ date ]</a>
+              <a href="thread.html#732">[ thread ]</a>
+              <a href="subject.html#732">[ subject ]</a>
+              <a href="author.html#732">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

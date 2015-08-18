@@ -1,0 +1,1009 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r16 - in trunk: iscsi/include iscsi/kernel kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r16%20-%20in%20trunk%3A%20iscsi/include%20iscsi/kernel%20kernel%20usr&In-Reply-To=%3C200508231711.j7NHBQaE008618%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000010.html">
+   <LINK REL="Next"  HREF="000012.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r16 - in trunk: iscsi/include iscsi/kernel kernel usr</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r16%20-%20in%20trunk%3A%20iscsi/include%20iscsi/kernel%20kernel%20usr&In-Reply-To=%3C200508231711.j7NHBQaE008618%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r16 - in trunk: iscsi/include iscsi/kernel kernel usr">mnc at berlios.de
+       </A><BR>
+    <I>Tue Aug 23 19:11:26 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000010.html">[Stgt-svn] r15 - trunk/iscsi/usr
+</A></li>
+        <LI>Next message: <A HREF="000012.html">[Stgt-svn] r17 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#11">[ date ]</a>
+              <a href="thread.html#11">[ thread ]</a>
+              <a href="subject.html#11">[ subject ]</a>
+              <a href="author.html#11">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-08-23 19:11:24 +0200 (Tue, 23 Aug 2005)
+New Revision: 16
+
+Added:
+   trunk/kernel/stgt_device.h
+   trunk/kernel/stgt_sd.c
+   trunk/kernel/stgt_sysfs.c
+   trunk/kernel/stgt_target.h
+Modified:
+   trunk/iscsi/include/iet_u.h
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/kernel/Makefile
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+   trunk/usr/Makefile
+Log:
+add stgt_device and stgt_target sysfs code (with stgt_sd example)
+
+Modified: trunk/iscsi/include/iet_u.h
+===================================================================
+--- trunk/iscsi/include/iet_u.h	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/iscsi/include/iet_u.h	2005-08-23 17:11:24 UTC (rev 16)
+@@ -112,7 +112,7 @@
+ #define	MIN_NR_QUEUED_CMNDS	1
+ #define	MAX_NR_QUEUED_CMNDS	256
+ 
+-#define NETLINK_IET	11
++#define NETLINK_IET	21
+ 
+ #define ADD_TARGET _IOW('i', 0, struct target_info)
+ #define DEL_TARGET _IOW('i', 1, struct target_info)
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/iscsi/kernel/iscsi.h	2005-08-23 17:11:24 UTC (rev 16)
+@@ -56,6 +56,7 @@
+ };
+ 
+ struct iscsi_cmnd;
++struct stgt_target;
+ 
+ enum iscsi_device_state {
+ 	IDEV_RUNNING,
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/iscsi/kernel/target.c	2005-08-23 17:11:24 UTC (rev 16)
+@@ -10,6 +10,7 @@
+ #include &lt;digest.h&gt;
+ #include &lt;iscsi_dbg.h&gt;
+ #include &lt;stgt.h&gt;
++#include &lt;stgt_target.h&gt;
+ 
+ #define	MAX_NR_TARGETS	(1UL &lt;&lt; 30)
+ 
+@@ -111,6 +112,11 @@
+ 	nthread_stop(target);
+ }
+ 
++static struct stgt_target_template iet_stgt_target_template = {
++	.name = &quot;iet&quot;,
++	.queued_cmnds = DEFAULT_NR_QUEUED_CMNDS,
++};
++
+ static int iscsi_target_create(struct target_info *info, u32 tid)
+ {
+ 	int err = -EINVAL, len;
+@@ -154,7 +160,7 @@
+ 		goto out;
+ 	}
+ 
+-	target-&gt;stt = stgt_target_create();
++	target-&gt;stt = stgt_target_create(&amp;iet_stgt_target_template);
+ 	assert(target-&gt;stt);
+ 
+ 	return 0;
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/Makefile	2005-08-23 17:11:24 UTC (rev 16)
+@@ -2,10 +2,13 @@
+ # Makefile for the Linux kernel device drivers.
+ #
+ 
+-EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_STGT=12
++EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_STGT=20
+ 
+ ifneq ($(KERNELRELEASE),)
+-obj-m		+= stgt.o
++obj-m		+= stgt_core.o
++stgt_core-objs	:= stgt_sysfs.o stgt.o
++
++obj-m		+= stgt_sd.o
+ else
+ 
+ ifeq ($(KERNELSRC),)
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt.c	2005-08-23 17:11:24 UTC (rev 16)
+@@ -2,6 +2,7 @@
+  * SCSI Targets Framework
+  *
+  * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  * This code is licenced under the GPL.
+  */
+ 
+@@ -17,6 +18,8 @@
+ #include &lt;scsi/scsi.h&gt;
+ 
+ #include &lt;stgt.h&gt;
++#include &lt;stgt_target.h&gt;
++#include &lt;stgt_device.h&gt;
+ #include &lt;stgt_if.h&gt;
+ 
+ #define DEBUG_STGT
+@@ -46,6 +49,9 @@
+ static spinlock_t all_targets_lock;
+ static LIST_HEAD(all_targets);
+ 
++static spinlock_t device_tmpl_lock;
++static LIST_HEAD(device_tmpl_list);
++
+ static void session_init_handler(void *data);
+ static spinlock_t atomic_sessions_lock;
+ static LIST_HEAD(atomic_sessions);
+@@ -127,7 +133,7 @@
+ 	schedule_work(&amp;target-&gt;work);
+ }
+ 
+-struct stgt_target *stgt_target_create(void)
++struct stgt_target *stgt_target_create(struct stgt_target_template *stt)
+ {
+ 	struct stgt_target *target;
+ 
+@@ -150,7 +156,14 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;work_list);
+ 
+ 	INIT_WORK(&amp;target-&gt;work, stgt_worker, target);
++	target-&gt;stt = stt;
++	target-&gt;queued_cmnds = stt-&gt;queued_cmnds;
+ 
++	if (stgt_sysfs_register_target(target)) {
++		kfree(target);
++		return NULL;
++	}
++
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+ 	spin_unlock(&amp;all_targets_lock);
+@@ -165,7 +178,7 @@
+ 	list_del(&amp;target-&gt;tlist);
+ 	spin_unlock(&amp;all_targets_lock);
+ 
+-	kfree(target);
++	stgt_sysfs_unregister_target(target);
+ 
+ 	return 0;
+ }
+@@ -308,10 +321,78 @@
+ }
+ EXPORT_SYMBOL(stgt_session_destroy);
+ 
+-struct stgt_device *
+-stgt_device_create(struct stgt_target *target, char *path, uint32_t lun,
+-		   unsigned long dflags)
++struct device_type_internal {
++	struct stgt_device_template *sdt;
++	struct list_head list;
++};
++
++static struct stgt_device_template *device_template_get(const char *name)
+ {
++	unsigned long flags;
++	struct device_type_internal *ti;
++
++	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
++
++	list_for_each_entry(ti, &amp;device_tmpl_list, list)
++		if (!strcmp(name, ti-&gt;sdt-&gt;name)) {
++			if (!try_module_get(ti-&gt;sdt-&gt;module))
++				ti = NULL;
++			spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
++			return ti ? ti-&gt;sdt : NULL;
++		}
++
++	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
++
++	return NULL;
++}
++
++static void device_template_put(struct stgt_device_template *sdt)
++{
++	module_put(sdt-&gt;module);
++}
++
++int stgt_device_template_register(struct stgt_device_template *sdt)
++{
++	unsigned long flags;
++	struct device_type_internal *ti;
++
++	ti = kmalloc(sizeof(*ti), GFP_KERNEL);
++	if (!ti)
++		return -ENOMEM;
++	memset(ti, 0, sizeof(*ti));
++	INIT_LIST_HEAD(&amp;ti-&gt;list);
++	ti-&gt;sdt = sdt;
++
++	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
++	list_add_tail(&amp;ti-&gt;list, &amp;device_tmpl_list);
++	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(stgt_device_template_register);
++
++void stgt_device_template_unregister(struct stgt_device_template *sdt)
++{
++	unsigned long flags;
++	struct device_type_internal *ti;
++
++	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
++
++	list_for_each_entry(ti, &amp;device_tmpl_list, list)
++		if (ti-&gt;sdt == sdt) {
++			list_del(&amp;ti-&gt;list);
++			kfree(ti);
++			break;
++		}
++
++	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
++}
++EXPORT_SYMBOL_GPL(stgt_device_template_unregister);
++
++struct stgt_device *stgt_device_create(struct stgt_target *target,
++				       char *device_type, char *path,
++				       uint32_t lun, unsigned long dflags)
++{
+ 	struct stgt_device *device;
+ 	unsigned long flags;
+ 
+@@ -325,20 +406,43 @@
+ 	memset(device, 0, sizeof(*device));
+ 
+ 	device-&gt;lun = lun;
+-	device-&gt;path = kmalloc(strlen(path) + 1, GFP_KERNEL);
++	device-&gt;target = target;
++	device-&gt;path = kstrdup(path, GFP_KERNEL);
+ 	if (!device-&gt;path)
+-		goto out;
+-	strcpy(device-&gt;path, path);
+-	device-&gt;path[strlen(path)] = '\0';
++		goto free_device;
+ 
++	device-&gt;sdt = device_template_get(device_type);
++	if (!device-&gt;sdt)
++		goto free_path;
++
++	device-&gt;sdt_data = kmalloc(sizeof(device-&gt;sdt-&gt;priv_data_size),
++				   GFP_KERNEL);
++	if (!device-&gt;sdt_data)
++		goto put_template;
++
++	if (device-&gt;sdt-&gt;create)
++		if (device-&gt;sdt-&gt;create(device))
++			goto free_priv_sdt_data;
++
++	if (stgt_sysfs_register_device(device))
++		goto sdt_destroy;
++
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	list_add(&amp;device-&gt;dlist, &amp;target-&gt;device_list);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+ 	return device;
+-out:
+-	if (device)
+-		kfree(device-&gt;path);
++
++sdt_destroy:
++	if (device-&gt;sdt-&gt;destroy)
++		device-&gt;sdt-&gt;destroy(device);
++free_priv_sdt_data:
++	kfree(device-&gt;sdt_data);
++put_template:
++	device_template_put(device-&gt;sdt);
++free_path:
++	kfree(device-&gt;path);
++free_device:
+ 	kfree(device);
+ 	return NULL;
+ }
+@@ -356,9 +460,12 @@
+ 	list_del(&amp;device-&gt;dlist);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	kfree(device-&gt;path);
+-	kfree(device);
++	if (device-&gt;sdt-&gt;destroy)
++		device-&gt;sdt-&gt;destroy(device);
+ 
++	device_template_put(device-&gt;sdt);
++	stgt_sysfs_unregister_device(device);
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(stgt_device_destroy);
+@@ -543,12 +650,19 @@
+ 	cmnd_done(cmnd);
+ }
+ 
+-static void virtual_disk_handler(void *data)
++static void queuecommand(void *data)
+ {
+ 	struct stgt_cmnd *cmnd = (struct stgt_cmnd *) data;
+ 
+ 	dprintk(&quot;%x\n&quot;, cmnd-&gt;scb[0]);
+ 
++	/*
++	 * seperate vsd (virtual disk from sd (real sd))
++	 * call scsi_device_temaplte-&gt;prepcommand to see if they want it
++	 * and allow them to setup.
++	 *
++	 * Then call queuecommand
++	 */
+ 	switch (cmnd-&gt;scb[0]) {
+ 	case READ_6:
+ 	case READ_10:
+@@ -585,7 +699,7 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	work = stgt_init_work(session, virtual_disk_handler, cmnd);
++	work = stgt_init_work(session, queuecommand, cmnd);
+ 	if (!work)
+ 		return -ENOMEM;
+ 	stgt_queue_work(session-&gt;target, work);
+@@ -693,6 +807,8 @@
+ 
+ 	if (nls)
+ 		sock_release(nls-&gt;sk_socket);
++
++	stgt_sysfs_exit();
+ }
+ 
+ static int __init stgt_init(void)
+@@ -702,7 +818,12 @@
+ 	spin_lock_init(&amp;all_targets_lock);
+ 	spin_lock_init(&amp;atomic_sessions_lock);
+ 	spin_lock_init(&amp;cmnd_hash_lock);
++	spin_lock_init(&amp;device_tmpl_lock);
+ 
++	err = stgt_sysfs_init();
++	if (err)
++		return err;
++
+ 	cmnd_slab = kmem_cache_create(&quot;stgt_cmnd&quot;, sizeof(struct stgt_cmnd), 0,
+ 				      SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
+ 				      NULL, NULL);
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt.h	2005-08-23 17:11:24 UTC (rev 16)
+@@ -8,19 +8,6 @@
+ 
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ 
+-struct stgt_target {
+-	/* Protects session_list, work_list, device_list */
+-	spinlock_t lock;
+-
+-	struct list_head tlist;
+-
+-	struct list_head device_list;
+-	struct list_head session_list;
+-
+-	struct work_struct work;
+-	struct list_head work_list;
+-};
+-
+ struct stgt_session {
+ 	struct stgt_target *target;
+ 	struct list_head slist;
+@@ -52,19 +39,6 @@
+ 	void *private;
+ };
+ 
+-struct stgt_device {
+-	char *path;
+-	uint32_t lun;
+-	uint32_t blk_shift;
+-	uint64_t blk_count;
+-
+-	struct stgt_target *target;
+-	struct list_head dlist;
+-};
+-
+-extern struct stgt_target *stgt_target_create(void);
+-extern int stgt_target_destroy(struct stgt_target *target);
+-
+ extern struct stgt_session *
+ stgt_session_create(struct stgt_target *target,
+ 		    int max_cmnds,
+@@ -77,10 +51,6 @@
+ 				  void (*done)(struct stgt_cmnd *));
+ extern int stgt_cmnd_queue(struct stgt_cmnd *cmnd,
+ 			   void (*done)(struct stgt_cmnd *));
+-
+-extern struct stgt_device*
+-stgt_device_create(struct stgt_target *target, char *path, uint32_t lun,
+-		   unsigned long dflags);
+-extern int stgt_device_destroy(struct stgt_device *device);
+-
++extern int stgt_sysfs_init(void);
++extern void stgt_sysfs_exit(void);
+ #endif
+
+Added: trunk/kernel/stgt_device.h
+===================================================================
+--- trunk/kernel/stgt_device.h	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt_device.h	2005-08-23 17:11:24 UTC (rev 16)
+@@ -0,0 +1,61 @@
++/*
++ * STGT device
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++#ifndef __SCSI_STGT_DEVICE_H
++#define __SCSI_STGT_DEVICE_H
++
++#include &lt;linux/device.h&gt;
++#include &lt;linux/list.h&gt;
++
++struct stgt_device;
++struct stgt_cmnd;
++
++struct stgt_device_template {
++	const char *name;
++	struct module *module;
++	unsigned priv_data_size;
++
++	int (* create)(struct stgt_device *);
++	void (* destroy)(struct stgt_device *);
++	int (* queuecommand)(struct stgt_device *device, struct stgt_cmnd *cmd);
++	int (* prepcommand)(struct stgt_device *device, struct stgt_cmnd *cmn);
++
++	/*
++	 * Pointer to the sysfs class properties for this host, NULL terminated.
++	 */
++	struct class_device_attribute **device_attrs;
++};
++
++struct stgt_device {
++	struct stgt_device_template *sdt;
++	void *sdt_data;
++
++	struct class_device cdev;
++
++        char *path;
++        uint32_t lun;
++        uint32_t blk_shift;
++        uint64_t blk_count;
++
++        struct stgt_target *target;
++        struct list_head dlist;
++};
++
++#define cdev_to_stgt_device(cdev) \
++        container_of(cdev, struct stgt_device, cdev)
++
++extern struct stgt_device* stgt_device_create(struct stgt_target *target,
++					      char *device_type, char *path,
++					      uint32_t lun,
++					      unsigned long dflags);
++extern int stgt_device_destroy(struct stgt_device *device);
++extern int stgt_sysfs_register_device(struct stgt_device *device);
++extern void stgt_sysfs_unregister_device(struct stgt_device *device);
++extern int stgt_device_template_register(struct stgt_device_template *sdt);
++extern void stgt_device_template_unregister(struct stgt_device_template *sdt);
++
++#endif
+
+Added: trunk/kernel/stgt_sd.c
+===================================================================
+--- trunk/kernel/stgt_sd.c	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt_sd.c	2005-08-23 17:11:24 UTC (rev 16)
+@@ -0,0 +1,137 @@
++/*
++ * STGT passthrough device
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++#include &lt;linux/types.h&gt;
++#include &lt;linux/blkdev.h&gt;
++#include &lt;linux/namei.h&gt;
++
++#include &lt;stgt_device.h&gt;
++
++struct stgt_sd_dev {
++	struct block_device *bdev;
++};
++
++/*
++ * Convert a device path to a dev_t.
++ * from dm-table.c
++ */
++static int lookup_device(const char *path, dev_t *dev)
++{
++	int r;
++	struct nameidata nd;
++	struct inode *inode;
++
++	r = path_lookup(path, LOOKUP_FOLLOW, &amp;nd);
++	if (r)
++		return r;
++
++	inode = nd.dentry-&gt;d_inode;
++	if (!inode) {
++		r = -ENOENT;
++		goto out;
++	}
++
++	if (!S_ISBLK(inode-&gt;i_mode)) {
++		r = -ENOTBLK;
++		goto out;
++	}
++
++	*dev = inode-&gt;i_rdev;
++out:
++	path_release(&amp;nd);
++	return r;
++}
++
++static int open_dev(struct stgt_sd_dev *sddev, dev_t devt)
++{
++        struct block_device *bdev;
++
++        bdev = open_by_devnum(devt, FMODE_WRITE | FMODE_READ);
++        if (IS_ERR(bdev))
++                return PTR_ERR(bdev);
++	sddev-&gt;bdev = bdev;
++        return 0;
++}
++
++/*
++ * Close a device that we've been using.
++ */
++static void close_dev(struct stgt_sd_dev *sddev)
++{
++	blkdev_put(sddev-&gt;bdev);
++}
++
++static int stgt_sd_create(struct stgt_device *device)
++{
++	struct stgt_sd_dev *sddev = device-&gt;sdt_data;
++	dev_t devt;
++	int err;
++
++	err = lookup_device(device-&gt;path, &amp;devt);
++	if (err)
++		return err;
++
++	err = open_dev(sddev, devt);
++	if (err)
++		return err;
++
++	return 0;
++}
++
++static void stgt_sd_destroy(struct stgt_device *device)
++{
++	close_dev(device-&gt;sdt_data);
++}
++
++static int stgt_sd_queue(struct stgt_device *device, struct stgt_cmnd *cmnd)
++{
++	/*
++	struct stgt_sd_dev *sddev = device-&gt;sdt_data;
++	struct request_queue *q = bdev_get_queue(sddev-&gt;bdev);
++	struct request *rq;
++
++	 * format struct request as BLOCK_PC command and do
++	 * elv_add_request or if James's no_wait helper is in
++	 * then use it
++	 *
++	 * Will need some stgt wrappers/helpers though
++	 */
++	return 0;
++}
++
++static int stgt_sd_prep(struct stgt_device *device, struct stgt_cmnd *cmnd)
++{
++	/*
++	 * can we take owner ship? If so return 0 else return a enum
++	 * (TODO define this)
++	 */
++	return 0;
++}
++
++static struct stgt_device_template stgt_sd = {
++	.name = &quot;stgt_sd&quot;,
++	.module = THIS_MODULE,
++	.create = stgt_sd_create,
++	.destroy = stgt_sd_destroy,
++	.queuecommand = stgt_sd_queue,
++	.prepcommand = stgt_sd_prep,
++};
++
++static int __init stgt_sd_init(void)
++{
++	stgt_sd.priv_data_size = sizeof(struct stgt_sd_dev);
++	return stgt_device_template_register(&amp;stgt_sd);
++}
++
++static void __exit stgt_sd_exit(void)
++{
++	stgt_device_template_unregister(&amp;stgt_sd);
++}
++
++module_init(stgt_sd_init);
++module_exit(stgt_sd_exit);
++MODULE_LICENSE(&quot;GPL&quot;);
+
+Added: trunk/kernel/stgt_sysfs.c
+===================================================================
+--- trunk/kernel/stgt_sysfs.c	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt_sysfs.c	2005-08-23 17:11:24 UTC (rev 16)
+@@ -0,0 +1,240 @@
++/*
++ * STGT core sysfs files
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++#include &lt;stgt_target.h&gt;
++#include &lt;stgt_device.h&gt;
++
++/*
++ * Target files
++ */
++#define stgt_target_show_fn(field, format_string)			\
++static ssize_t								\
++show_##field (struct class_device *cdev, char *buf)			\
++{									\
++	struct stgt_target *target = cdev_to_stgt_target(cdev);		\
++	return snprintf (buf, 20, format_string, target-&gt;field);	\
++}
++
++#define stgt_target_rd_attr(field, format_string)		\
++	stgt_target_show_fn(field, format_string)		\
++static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
++
++stgt_target_rd_attr(queued_cmnds, &quot;%u\n&quot;);
++
++static struct class_device_attribute *stgt_target_attrs[] = {
++	&amp;class_device_attr_queued_cmnds,
++	NULL
++};
++
++static void stgt_target_class_release(struct class_device *cdev)
++{
++	struct stgt_target *target = cdev_to_stgt_target(cdev);
++	kfree(target);
++}
++
++static struct class stgt_target_class = {
++	.name = &quot;stgt_target&quot;,
++	.release = stgt_target_class_release,
++};
++
++/*
++ * Tmp: used for unique class_id names. For software we could
++ * push the naming to userspace
++ */
++static int stgt_target_num = 0;
++
++static struct class_device_attribute *class_attr_overridden(
++				struct class_device_attribute **attrs,
++				struct class_device_attribute *attr)
++{
++	int i;
++
++	if (!attrs)
++		return NULL;
++
++	for (i = 0; attrs[i]; i++)
++		if (!strcmp(attrs[i]-&gt;attr.name, attr-&gt;attr.name))
++			return attrs[i];
++	return NULL;
++}
++
++static int class_attr_add(struct class_device *classdev,
++			  struct class_device_attribute *attr)
++{
++	struct class_device_attribute *base_attr;
++
++	/*
++	 * Spare the caller from having to copy things it's not interested in.
++	*/
++	base_attr = class_attr_overridden(stgt_target_attrs, attr);
++	if (base_attr) {
++		/* extend permissions */
++		attr-&gt;attr.mode |= base_attr-&gt;attr.mode;
++
++		/* override null show/store with default */
++		if (!attr-&gt;show)
++			attr-&gt;show = base_attr-&gt;show;
++		if (!attr-&gt;store)
++			attr-&gt;store = base_attr-&gt;store;
++	}
++
++	return class_device_create_file(classdev, attr);
++}
++
++int stgt_sysfs_register_target(struct stgt_target *target)
++{
++	struct class_device *cdev = &amp;target-&gt;cdev;
++	int err, i;
++	
++	cdev-&gt;class = &amp;stgt_target_class;
++	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;target%d&quot;, stgt_target_num);
++
++	err = class_device_register(cdev);
++	if (err)
++		return err;
++
++	if (target-&gt;stt-&gt;target_attrs) {
++		for (i = 0; target-&gt;stt-&gt;target_attrs[i]; i++) {
++			err = class_attr_add(&amp;target-&gt;cdev,
++					     target-&gt;stt-&gt;target_attrs[i]);
++                        if (err)
++                                goto cleanup;
++		}
++	}
++
++	for (i = 0; stgt_target_attrs[i]; i++) {
++		if (!class_attr_overridden(target-&gt;stt-&gt;target_attrs,
++					   stgt_target_attrs[i])) {
++			err = class_device_create_file(&amp;target-&gt;cdev,
++						       stgt_target_attrs[i]);
++			if (err)
++				goto cleanup;
++		}
++	}
++
++	return 0;
++
++cleanup:
++	class_device_unregister(cdev);
++	return err;
++}
++
++void stgt_sysfs_unregister_target(struct stgt_target *target)
++{
++	class_device_unregister(&amp;target-&gt;cdev);
++}
++
++/*
++ * Device files
++ */
++#define stgt_device_show_fn(field, format_string)			\
++static ssize_t								\
++show_##field (struct class_device *cdev, char *buf)			\
++{									\
++	struct stgt_device *device = cdev_to_stgt_device(cdev);		\
++	return sprintf (buf, format_string, device-&gt;field);	\
++}
++
++#define stgt_device_rd_attr(field, format_string)		\
++	stgt_device_show_fn(field, format_string)		\
++static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
++
++stgt_device_rd_attr(path, &quot;%s\n&quot;);
++
++static struct class_device_attribute *stgt_device_attrs[] = {
++	&amp;class_device_attr_path,
++	NULL
++};
++
++
++static void stgt_device_class_release(struct class_device *cdev)
++{
++	struct stgt_device *device = cdev_to_stgt_device(cdev);
++	struct stgt_target *target = device-&gt;target;
++
++	class_device_put(&amp;target-&gt;cdev);
++	kfree(device-&gt;sdt_data);
++	kfree(device-&gt;path);
++	kfree(device);
++}
++
++static struct class stgt_device_class = {
++	.name = &quot;stgt_device&quot;,
++	.release = stgt_device_class_release,
++};
++
++int stgt_sysfs_register_device(struct stgt_device *device)
++{
++	struct stgt_target *target = device-&gt;target;
++	struct class_device *cdev = &amp;device-&gt;cdev;
++	int err, i;
++
++	cdev-&gt;class = &amp;stgt_device_class;
++	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;device%d&quot;, device-&gt;lun);
++	err = class_device_register(cdev);
++	if (err)
++		return err;
++
++	/*
++	 * get handle to target so our parent is never released before
++	 * us
++	 */
++	if (!class_device_get(&amp;target-&gt;cdev))
++		return -EINVAL;
++
++	if (device-&gt;sdt-&gt;device_attrs) {
++		for (i = 0; device-&gt;sdt-&gt;device_attrs[i]; i++) {
++			err = class_attr_add(&amp;device-&gt;cdev,
++					     device-&gt;sdt-&gt;device_attrs[i]);
++                        if (err)
++                                goto cleanup;
++		}
++	}
++
++	for (i = 0; stgt_device_attrs[i]; i++) {
++		if (!class_attr_overridden(device-&gt;sdt-&gt;device_attrs,
++					   stgt_device_attrs[i])) {
++			err = class_device_create_file(&amp;device-&gt;cdev,
++						       stgt_device_attrs[i]);
++			if (err)
++				goto cleanup;
++		}
++	}
++
++	return 0;
++
++cleanup:
++	class_device_put(&amp;target-&gt;cdev);
++	class_device_unregister(cdev);
++	return err;
++
++}
++
++void stgt_sysfs_unregister_device(struct stgt_device *device)
++{
++	class_device_unregister(&amp;device-&gt;cdev);
++}
++
++int stgt_sysfs_init(void)
++{
++	int err;
++
++	err = class_register(&amp;stgt_target_class);
++	if (err)
++		return err;
++
++	err = class_register(&amp;stgt_device_class);
++	if (err)
++		class_unregister(&amp;stgt_target_class);
++	return err;
++}
++
++void stgt_sysfs_exit(void)
++{
++	class_unregister(&amp;stgt_target_class);
++	class_unregister(&amp;stgt_device_class);
++}
+
+Added: trunk/kernel/stgt_target.h
+===================================================================
+--- trunk/kernel/stgt_target.h	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/kernel/stgt_target.h	2005-08-23 17:11:24 UTC (rev 16)
+@@ -0,0 +1,50 @@
++/*
++ * STGT target definitions
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++#ifndef __SCSI_STGT_TARGET_H
++#define __SCSI_STGT_TARGET_H
++
++#include &lt;linux/device.h&gt;
++#include &lt;linux/list.h&gt;
++
++struct stgt_target_template {
++	const char *name;
++
++	int queued_cmnds;
++	/*
++	 * Pointer to the sysfs class properties for this host, NULL terminated.
++	 */
++	struct class_device_attribute **target_attrs;
++};
++
++struct stgt_target {
++	struct stgt_target_template *stt;
++	struct class_device cdev;
++
++	int queued_cmnds;
++
++	/* Protects session_list, work_list, device_list */
++	spinlock_t lock;
++
++	struct list_head tlist;
++
++	struct list_head device_list;
++	struct list_head session_list;
++
++	struct work_struct work;
++	struct list_head work_list;
++};
++
++#define cdev_to_stgt_target(cdev) \
++	container_of(cdev, struct stgt_target, cdev)
++
++extern struct stgt_target *stgt_target_create(struct stgt_target_template *stt);
++extern int stgt_target_destroy(struct stgt_target *target);
++extern int stgt_sysfs_register_target(struct stgt_target *target);
++extern void stgt_sysfs_unregister_target(struct stgt_target *target);
++
++#endif
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2005-08-23 09:32:45 UTC (rev 15)
++++ trunk/usr/Makefile	2005-08-23 17:11:24 UTC (rev 16)
+@@ -1,4 +1,4 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -I../include -DNETLINK_STGT=12
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -I../include -DNETLINK_STGT=20
+ PROGRAMS = stgtd
+ 
+ all: $(PROGRAMS)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000010.html">[Stgt-svn] r15 - trunk/iscsi/usr
+</A></li>
+	<LI>Next message: <A HREF="000012.html">[Stgt-svn] r17 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#11">[ date ]</a>
+              <a href="thread.html#11">[ thread ]</a>
+              <a href="subject.html#11">[ subject ]</a>
+              <a href="author.html#11">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

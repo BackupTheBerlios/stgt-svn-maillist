@@ -1,0 +1,93 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r39 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r39%20-%20trunk/kernel&In-Reply-To=%3C200509031935.j83JZRMT014092%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000031.html">
+   <LINK REL="Next"  HREF="000033.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r39 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r39%20-%20trunk/kernel&In-Reply-To=%3C200509031935.j83JZRMT014092%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r39 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Sep  3 21:35:27 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000031.html">[Stgt-svn] r38 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000033.html">[Stgt-svn] r40 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#32">[ date ]</a>
+              <a href="thread.html#32">[ thread ]</a>
+              <a href="subject.html#32">[ subject ]</a>
+              <a href="author.html#32">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-03 21:35:27 +0200 (Sat, 03 Sep 2005)
+New Revision: 39
+
+Modified:
+   trunk/kernel/stgt.c
+Log:
+fix device destroy bug (need to drop lock)
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-03 13:54:11 UTC (rev 38)
++++ trunk/kernel/stgt.c	2005-09-03 19:35:27 UTC (rev 39)
+@@ -583,14 +583,11 @@
+ 
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	device = stgt_device_find_nolock(target, lun);
+-	if (device) {
+-		list_del(&amp;device-&gt;dlist);
+-		goto found;
+-	}
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
++	if (!device)
++		return -EINVAL;
+ 
+-	return -EINVAL;
+-found:
++	list_del(&amp;device-&gt;dlist);
+ 	if (device-&gt;sdt-&gt;destroy)
+ 		device-&gt;sdt-&gt;destroy(device);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000031.html">[Stgt-svn] r38 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000033.html">[Stgt-svn] r40 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#32">[ date ]</a>
+              <a href="thread.html#32">[ thread ]</a>
+              <a href="subject.html#32">[ subject ]</a>
+              <a href="author.html#32">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

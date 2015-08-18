@@ -1,0 +1,178 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r545 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r545%20-%20trunk/usr&In-Reply-To=%3C200608270838.k7R8c4WX008143%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000531.html">
+   <LINK REL="Next"  HREF="000533.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r545 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r545%20-%20trunk/usr&In-Reply-To=%3C200608270838.k7R8c4WX008143%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r545 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Aug 27 10:38:04 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000531.html">[Stgt-svn] r544 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000533.html">[Stgt-svn] r546 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#532">[ date ]</a>
+              <a href="thread.html#532">[ thread ]</a>
+              <a href="subject.html#532">[ subject ]</a>
+              <a href="author.html#532">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-27 10:38:02 +0200 (Sun, 27 Aug 2006)
+New Revision: 545
+
+Modified:
+   trunk/usr/scsi.c
+Log:
+Split mmap code and scsi protocol code.
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-26 13:26:50 UTC (rev 544)
++++ trunk/usr/scsi.c	2006-08-27 08:38:02 UTC (rev 545)
+@@ -385,13 +385,9 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int mmap_device(uint8_t *scb, int *len, int fd, uint32_t datalen, unsigned long *uaddr,
+-		       uint64_t *offset)
++static uint64_t scsi_cmd_data_offset(uint8_t *scb)
+ {
+-	void *p;
+ 	uint64_t off;
+-	*len = 0;
+-	int err = SAM_STAT_GOOD;
+ 
+ 	switch (scb[0]) {
+ 	case READ_6:
+@@ -412,31 +408,38 @@
+ 		break;
+ 	}
+ 
+-	off &lt;&lt;= BLK_SHIFT;
++	return off &lt;&lt; BLK_SHIFT;
++}
+ 
++static int mmap_device(struct tgt_device *dev, uint32_t datalen,
++		       unsigned long *uaddr, uint64_t offset)
++{
++	int fd = dev-&gt;fd;
++	void *p;
++	int err = SAM_STAT_GOOD;
++
+ 	if (*uaddr)
+-		*uaddr = *uaddr + off;
++		*uaddr = *uaddr + offset;
+ 	else {
+-		p = mmap64(NULL, pgcnt(datalen, off) &lt;&lt; PAGE_SHIFT,
++		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; PAGE_SHIFT,
+ 			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   off &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
++			   offset &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
+ 
+-		*uaddr = (unsigned long) p + (off &amp; ~PAGE_MASK);
++		*uaddr = (unsigned long) p + (offset &amp; ~PAGE_MASK);
+ 		if (p == MAP_FAILED) {
+ 			err = SAM_STAT_CHECK_CONDITION;
+-			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, off);
++			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+ 		}
+ 	}
+-	*offset = off;
+-	*len = datalen;
+-	printf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, off);
+ 
++	printf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
++
+ 	return err;
+ }
+ 
+-static inline int mmap_cmd_init(uint8_t *scb, uint8_t *rw)
++static int scsi_cmd_rw(uint8_t *scb, uint8_t *rw)
+ {
+-	int result = 1;
++	int is_data = 1;
+ 
+ 	switch (scb[0]) {
+ 	case READ_6:
+@@ -451,9 +454,9 @@
+ 		*rw = WRITE;
+ 		break;
+ 	default:
+-		result = 0;
++		is_data = 0;
+ 	}
+-	return result;
++	return is_data;
+ }
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+@@ -496,7 +499,7 @@
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+ 	*offset = 0;
+-	if (!mmap_cmd_init(scb, rw)) {
++	if (!scsi_cmd_rw(scb, rw)) {
+ 		data = valloc(PAGE_SIZE);
+ 		memset(data, 0, PAGE_SIZE);
+ 	}
+@@ -553,11 +556,12 @@
+ 	case WRITE_10:
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+-		result = mmap_device(scb, len, dev-&gt;fd, datalen,
+-				     uaddr, offset);
+-		if (result == SAM_STAT_GOOD)
++		*offset = scsi_cmd_data_offset(scb);
++		result = mmap_device(dev, datalen, uaddr, *offset);
++		if (result == SAM_STAT_GOOD) {
++			*len = datalen;
+ 			*try_map = 1;
+-		else {
++		} else {
+ 			*rw = READ;
+ 			*offset = 0;
+ 			if (!data)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000531.html">[Stgt-svn] r544 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000533.html">[Stgt-svn] r546 - in trunk/usr: . ibmvio
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#532">[ date ]</a>
+              <a href="thread.html#532">[ thread ]</a>
+              <a href="subject.html#532">[ subject ]</a>
+              <a href="author.html#532">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

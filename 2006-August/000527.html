@@ -1,0 +1,104 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r540 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r540%20-%20trunk/usr&In-Reply-To=%3C200608260353.k7Q3rHHf002009%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000526.html">
+   <LINK REL="Next"  HREF="000528.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r540 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r540%20-%20trunk/usr&In-Reply-To=%3C200608260353.k7Q3rHHf002009%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r540 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 26 05:53:17 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000526.html">[Stgt-svn] r539 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000528.html">[Stgt-svn] r541 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#527">[ date ]</a>
+              <a href="thread.html#527">[ thread ]</a>
+              <a href="subject.html#527">[ subject ]</a>
+              <a href="author.html#527">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-26 05:53:16 +0200 (Sat, 26 Aug 2006)
+New Revision: 540
+
+Modified:
+   trunk/usr/tgtd.c
+Log:
+Rename POLL_KI POLL_KERN.
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-24 09:49:55 UTC (rev 539)
++++ trunk/usr/tgtd.c	2006-08-26 03:53:16 UTC (rev 540)
+@@ -39,7 +39,7 @@
+ #include &quot;driver.h&quot;
+ 
+ enum {
+-	POLL_KI, /* kernel interface */
++	POLL_KERN, /* kernel interface */
+ 	POLL_IPC, /* unix domain socket for tgtdadm */
+ 	POLL_END,
+ };
+@@ -118,7 +118,7 @@
+ 		goto retry;
+ 	}
+ 
+-	if (pfd[POLL_KI].revents) {
++	if (pfd[POLL_KERN].revents) {
+ 		kspace_event_handle();
+ 		nevent--;
+ 	}
+@@ -151,8 +151,8 @@
+ 	if (!pfd)
+ 		return NULL;
+ 
+-	pfd[POLL_KI].fd = nl_fd;
+-	pfd[POLL_KI].events = POLLIN;
++	pfd[POLL_KERN].fd = nl_fd;
++	pfd[POLL_KERN].events = POLLIN;
+ 	pfd[POLL_IPC].fd = ud_fd;
+ 	pfd[POLL_IPC].events = POLLIN;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000526.html">[Stgt-svn] r539 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000528.html">[Stgt-svn] r541 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#527">[ date ]</a>
+              <a href="thread.html#527">[ thread ]</a>
+              <a href="subject.html#527">[ subject ]</a>
+              <a href="author.html#527">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

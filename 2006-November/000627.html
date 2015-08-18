@@ -1,0 +1,908 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r640 - in trunk: doc usr usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r640%20-%20in%20trunk%3A%20doc%20usr%20usr/iscsi&In-Reply-To=%3C200611131328.kADDSq35027297%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000626.html">
+   <LINK REL="Next"  HREF="000628.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r640 - in trunk: doc usr usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r640%20-%20in%20trunk%3A%20doc%20usr%20usr/iscsi&In-Reply-To=%3C200611131328.kADDSq35027297%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r640 - in trunk: doc usr usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Nov 13 14:28:52 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000626.html">[Stgt-svn] r639 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000628.html">[Stgt-svn] r641 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#627">[ date ]</a>
+              <a href="thread.html#627">[ thread ]</a>
+              <a href="subject.html#627">[ subject ]</a>
+              <a href="author.html#627">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-13 14:28:51 +0100 (Mon, 13 Nov 2006)
+New Revision: 640
+
+Added:
+   trunk/usr/iscsi/account.c
+   trunk/usr/iscsi/account.h
+Modified:
+   trunk/doc/README.iscsi
+   trunk/usr/Makefile
+   trunk/usr/driver.h
+   trunk/usr/iscsi/chap.c
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/target.c
+   trunk/usr/mgmt.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Add CHAP authentication support to the iSCSI driver.
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/doc/README.iscsi	2006-11-13 13:28:51 UTC (rev 640)
+@@ -132,6 +132,45 @@
+ cid:0 ip:192.168.11.5
+ 
+ 
++Security
++-------------
++Let's create a new account:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode account
++
++You need to set the user, passowrd, type of the account:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode account --aid 1 --name User --value tomo
++host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode account --aid 1 --name Password --value hoge
++host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode account --aid 1 --name Type --value Incoming
++
++
++Just make sure what we have:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op show --mode account
++aid:1 Type:Incoming User:tomo Password:hoge
++
++
++We have one account, however, this account does not be assigned to our target:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op show --mode account --tid 1
++
++
++You can assign this account to your target:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op bind --mode account --tid 1 --aid 1
++
++
++You can see the result:
++
++host:~/tgt# ./usr/tgtadm --lld iscsi --op show --mode account --tid 1
++aid:1 Type:Incoming User:tomo Password:hoge
++
++
++You can assign one account to lots of targets. Each target can have 16
++accounts. We don't support removing or unbinding accounts now.
++
++
+ Status
+ -------------
+ It should work under normal circumstances (good initiator, no network
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/Makefile	2006-11-13 13:28:51 UTC (rev 640)
+@@ -1,4 +1,5 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE -I$(KERNELSRC)/include -I../include -I.
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE \
++	-I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+ TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o sched.o
+ LIBS += -laio
+@@ -11,7 +12,8 @@
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+-TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o chap.o transport.o)
++TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o \
++	account.o chap.o transport.o)
+ TGTD_OBJS += $(addprefix iscsi/, iscsi_tcp.o)
+ LIBS += -lcrypto
+ BD_AIO=1
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/driver.h	2006-11-13 13:28:51 UTC (rev 640)
+@@ -11,6 +11,7 @@
+ 	int (*target_update) (int, char *);
+ 
+ 	int (*show) (int, int, uint64_t, uint32_t, uint64_t, char *, int);
++	int (*account) (uint32_t, int, uint32_t, char *, char *, int);
+ 
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+ 	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+
+Added: trunk/usr/iscsi/account.c
+===================================================================
+--- trunk/usr/iscsi/account.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/account.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -0,0 +1,336 @@
++/*
++ * SCSI target account management functions
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;string.h&gt;
++
++#include &quot;iscsid.h&quot;
++#include &quot;tgtadm.h&quot;
++#include &quot;util.h&quot;
++
++enum {
++	ACCOUNT_INVALID,
++	ACCOUNT_INCOMING,
++	ACCOUNT_OUTGOING,
++};
++
++struct iscsi_account {
++	struct list_head ac_list;
++
++	char *user;
++	char *password;
++
++	int type;
++	uint32_t id;
++
++	struct ac_head ach;
++};
++
++static LIST_HEAD(accounts_list);
++
++static struct iscsi_account *iscsi_lookup_account(uint32_t id)
++{
++	struct iscsi_account *pos;
++
++	list_for_each_entry(pos, &amp;accounts_list, ac_list) {
++		if (pos-&gt;id == id)
++			return pos;
++	}
++	return NULL;
++}
++
++static int iscsi_create_account(void)
++{
++	static uint32_t id;
++	uint32_t new_id;
++	struct iscsi_account *ac;
++
++	for (new_id = id + 1; iscsi_lookup_account(new_id) &amp;&amp; new_id == id;
++	     new_id++)
++		;
++	if (new_id == id) {
++		eprintf(&quot;Too many accounts\n&quot;);
++		return EINVAL;
++	}
++
++	ac = zalloc(sizeof(*ac));
++	if (!ac)
++		return ENOMEM;
++
++	ac-&gt;id = id = new_id;
++	ac-&gt;type = ACCOUNT_INVALID;
++	ac-&gt;ach.first = NULL;
++
++	list_add(&amp;ac-&gt;ac_list, &amp;accounts_list);
++
++	return 0;
++}
++
++static int iscsi_account_update(uint32_t uid, char *name)
++{
++	int err = EINVAL;
++	char *str;
++	struct iscsi_account *ac;
++
++	ac = iscsi_lookup_account(uid);
++	if (!ac)
++		return ENOENT;
++
++	str = name + strlen(name) + 1;
++
++	if (!strcmp(name, &quot;Type&quot;)) {
++		if (ac-&gt;type != ACCOUNT_INVALID)
++			return err;
++
++		if (!strcmp(str, &quot;Incoming&quot;)) {
++			err = 0;
++			ac-&gt;type = ACCOUNT_INCOMING;
++		} else if (!strcmp(str, &quot;Outgoing&quot;)) {
++			err = 0;
++			ac-&gt;type = ACCOUNT_OUTGOING;
++		}
++
++	} else if (!strcmp(name, &quot;User&quot;)) {
++		if (ac-&gt;user)
++			free(ac-&gt;user);
++		ac-&gt;user = strdup(str);
++		if (ac-&gt;user)
++			err = 0;
++		else
++			err = ENOMEM;
++	} else if (!strcmp(name, &quot;Password&quot;)) {
++		if (ac-&gt;password)
++			free(ac-&gt;password);
++		ac-&gt;password = strdup(str);
++		if (ac-&gt;password)
++			err = 0;
++		else
++			err = ENOMEM;
++	}
++
++	return err;
++}
++
++static void __account_bind(struct iscsi_account *ac, struct ac_node *acn)
++{
++	acn-&gt;head = &amp;ac-&gt;ach;
++	acn-&gt;next = ac-&gt;ach.first;
++	ac-&gt;ach.first = acn;
++}
++
++static int iscsi_account_bind(int tid, uint32_t uid)
++{
++	int i, err;
++	struct target* target;
++	struct iscsi_account *ac, *tmp;
++	struct ac_node *acn;
++
++	target = target_find_by_id(tid);
++	if (!target)
++		return ENOENT;
++
++	ac = iscsi_lookup_account(uid);
++	if (!ac)
++		return ENOENT;
++
++	if (!ac-&gt;user || !ac-&gt;password) {
++		eprintf(&quot;You must set user and password first\n&quot;);
++		return EINVAL;
++	}
++
++	err = EINVAL;
++	if (ac-&gt;type == ACCOUNT_INCOMING) {
++		acn = target-&gt;incoming;
++		for (i = 0; i &lt; ARRAY_SIZE(target-&gt;incoming); i++, acn++) {
++			if (acn-&gt;head) {
++				tmp = container_of(acn-&gt;head, struct iscsi_account, ach);
++				if (tmp-&gt;id == ac-&gt;id) {
++					eprintf(&quot;This target already has this account\n&quot;);
++					break;
++				}
++			} else {
++				__account_bind(ac, acn);
++				err = 0;
++				break;
++			}
++		}
++		if (err)
++			eprintf(&quot;This target cannot have any more account\n&quot;);
++
++	} else if (ac-&gt;type == ACCOUNT_OUTGOING) {
++		if (target-&gt;outgoing.head)
++			eprintf(&quot;This target already has the outgoing account\n&quot;);
++		else {
++			__account_bind(ac, &amp;target-&gt;outgoing);
++			err = 0;
++		}
++	} else
++		eprintf(&quot;You must set account type first\n&quot;);
++
++	return err;
++}
++
++#define print_account(buf, rest, ac)				\
++snprintf(buf, rest, &quot;aid:%u Type:%s User:%s Password:%s\n&quot;,	\
++	(ac)-&gt;id, ac_type[(ac)-&gt;type], (ac)-&gt;user ? : &quot;Empty&quot;,	\
++	(ac)-&gt;password ? : &quot;Empty&quot;)
++
++static int iscsi_show_account(int tid, uint32_t uid, char *buf, int rest)
++{
++	int len, i, total = 0;
++	char *ac_type[] = {&quot;Invalid&quot;, &quot;Incoming&quot;, &quot;Outgoing&quot;};
++	struct iscsi_account *ac;
++	struct ac_node *acn;
++
++	if (tid == -1) {
++		list_for_each_entry(ac, &amp;accounts_list, ac_list) {
++			len = print_account(buf, rest, ac);
++			buffer_check(buf, total, len, rest);
++		}
++	} else {
++		struct target* target;
++
++		target = target_find_by_id(tid);
++		if (!target)
++			goto out;
++
++		acn = target-&gt;incoming;
++		for (i = 0; i &lt; ARRAY_SIZE(target-&gt;incoming); i++, acn++) {
++			if (!acn-&gt;head)
++				continue;
++
++			ac = container_of(acn-&gt;head, struct iscsi_account, ach);
++			len = print_account(buf, rest, ac);
++			buffer_check(buf, total, len, rest);
++		}
++
++		acn = &amp;target-&gt;outgoing;
++		if (!acn-&gt;head)
++			goto out;
++		ac = container_of(acn-&gt;head, struct iscsi_account, ach);
++		len = print_account(buf, rest, ac);
++		total += len;
++	}
++out:
++	return total;
++}
++
++int iscsi_mgmt_account(uint32_t op, int tid, uint32_t uid, char *param, char *buf, int len)
++{
++	int err = EINVAL;
++
++	switch (op) {
++	case OP_NEW:
++		err = iscsi_create_account();
++		break;
++	case OP_DELETE:
++		eprintf(&quot;Not implemented yet\n&quot;);
++		break;
++	case OP_UPDATE:
++		err = iscsi_account_update(uid, param);
++		break;
++	case OP_BIND:
++		err = iscsi_account_bind(tid, uid);
++		break;
++	case OP_UNBIND:
++		eprintf(&quot;Not implemented yet\n&quot;);
++		break;
++	case OP_SHOW:
++		err = iscsi_show_account(tid, uid, buf, len);
++		break;
++	default:
++		break;
++	}
++
++	eprintf(&quot;%d\n&quot;, err);
++
++	return err;
++}
++
++int iscsi_account_available(int tid, int dir)
++{
++	int err = 0;
++	struct target* target;
++	struct ac_node *acn;
++
++	target = target_find_by_id(tid);
++	if (!target)
++		return ENOENT;
++
++	if (dir == AUTH_DIR_INCOMING) {
++		int i;
++
++		acn = target-&gt;incoming;
++		for (i = 0;  i &lt; ARRAY_SIZE(target-&gt;incoming); i++, acn++) {
++			if (acn-&gt;head) {
++				err = 1;
++				break;
++			}
++		}
++
++	} else if (dir == AUTH_DIR_OUTGOING) {
++		acn = &amp;target-&gt;outgoing;
++		if (acn-&gt;head)
++			err = 1;
++	}
++
++	return err;
++}
++
++int iscsi_account_lookup(int tid, int dir, char *user, char *pass)
++{
++	int err = ENOENT;
++	struct target* target;
++	struct iscsi_account *ac;
++	struct ac_node *acn;
++
++	target = target_find_by_id(tid);
++	if (!target)
++		return err;
++
++	if (dir == AUTH_DIR_INCOMING) {
++		int i;
++
++		acn = target-&gt;incoming;
++		for (i = 0;  i &lt; ARRAY_SIZE(target-&gt;incoming); i++, acn++) {
++			if (acn-&gt;head) {
++				ac = container_of(acn-&gt;head, struct iscsi_account, ach);
++				if (!strcmp(ac-&gt;user, user)) {
++					strncpy(pass, ac-&gt;password, ISCSI_NAME_LEN);
++					err = 0;
++				}
++			}
++		}
++	} else if (dir == AUTH_DIR_OUTGOING) {
++		acn = &amp;target-&gt;outgoing;
++		if (acn-&gt;head) {
++			ac = container_of(acn-&gt;head, struct iscsi_account, ach);
++			strncpy(user, ac-&gt;user, ISCSI_NAME_LEN);
++			strncpy(pass, ac-&gt;password, ISCSI_NAME_LEN);
++			err = 0;
++		}
++	} else
++		eprintf(&quot;Invalid direction\n&quot;);
++
++	return err;
++}
+
+Added: trunk/usr/iscsi/account.h
+===================================================================
+--- trunk/usr/iscsi/account.h	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/account.h	2006-11-13 13:28:51 UTC (rev 640)
+@@ -0,0 +1,19 @@
++#ifndef ACCOUNT_H
++#define ACCOUNT_H
++
++struct ac_node;
++
++struct ac_head {
++	struct ac_node *first;
++};
++
++struct ac_node {
++	struct ac_node *next;
++	struct ac_head *head;
++};
++
++extern int iscsi_account_lookup(int tid, int dir, char *user, char *pass);
++extern int iscsi_account_available(int tid, int dir);
++
++#endif
++
+
+Modified: trunk/usr/iscsi/chap.c
+===================================================================
+--- trunk/usr/iscsi/chap.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/chap.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -21,6 +21,7 @@
+ #include &lt;openssl/md5.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
++#include &quot;account.h&quot;
+ 
+ #define HEX_FORMAT    0x01
+ #define BASE64_FORMAT 0x02
+@@ -375,30 +376,31 @@
+ {
+ 	char *value;
+ 	uint8_t *his_digest = NULL, *our_digest = NULL;
+-	int digest_len = 0, retval = 0, encoding_format;
++	int digest_len = 0, retval = 0, encoding_format, err;
+ 	char pass[ISCSI_NAME_LEN];
+ 
+ 	memset(pass, 0, sizeof(pass));
+-/* 	if (cops-&gt;account_query(conn-&gt;tid, AUTH_DIR_INCOMING, pass, pass) &lt; 0) { */
+-/* 		log_warning(&quot;CHAP initiator auth.: &quot; */
+-/* 			    &quot;No CHAP credentials configured&quot;); */
+-/* 		retval = CHAP_TARGET_ERROR; */
+-/* 		goto out; */
+-/* 	} */
+ 
++	err = iscsi_account_available(conn-&gt;tid, AUTH_DIR_INCOMING);
++	if (!err) {
++		eprintf(&quot;No CHAP credentials configured\n&quot;);
++		retval = CHAP_TARGET_ERROR;
++		goto out;
++	}
++
+ 	if (!(value = text_key_find(conn, &quot;CHAP_N&quot;))) {
+ 		retval = CHAP_INITIATOR_ERROR;
+ 		goto out;
+ 	}
+ 
+ 	memset(pass, 0, sizeof(pass));
+-/* 	if (cops-&gt;account_query(conn-&gt;tid, AUTH_DIR_INCOMING, value, pass) &lt; 0) { */
+-/* 		log_warning(&quot;CHAP initiator auth.: &quot; */
+-/* 			    &quot;No valid user/pass combination for initiator %s &quot; */
+-/* 			    &quot;found&quot;, conn-&gt;initiator); */
+-/* 		retval = CHAP_AUTH_ERROR; */
+-/* 		goto out; */
+-/* 	} */
++	err = iscsi_account_lookup(conn-&gt;tid, AUTH_DIR_INCOMING, value, pass);
++	if (err) {
++		eprintf(&quot;No valid user/pass combination for initiator %s &quot;
++			    &quot;found\n&quot;, conn-&gt;initiator);
++		retval = CHAP_AUTH_ERROR;
++		goto out;
++	}
+ 
+ 	if (!(value = text_key_find(conn, &quot;CHAP_R&quot;))) {
+ 		retval = CHAP_INITIATOR_ERROR;
+@@ -476,7 +478,7 @@
+ 	char chap_id, *value, *response = NULL;
+ 	uint8_t *challenge = NULL, *digest = NULL;
+ 	int encoding_format, response_len;
+-	int challenge_len = 0, digest_len = 0, retval = 0;
++	int challenge_len = 0, digest_len = 0, retval = 0, err;
+ 	char pass[ISCSI_NAME_LEN], name[ISCSI_NAME_LEN];
+ 
+ 	if (!(value = text_key_find(conn, &quot;CHAP_I&quot;))) {
+@@ -489,13 +491,14 @@
+ 
+ 	memset(pass, 0, sizeof(pass));
+ 	memset(name, 0, sizeof(name));
+-/* 	if (cops-&gt;account_query(conn-&gt;tid, AUTH_DIR_OUTGOING, name, pass) &lt; 0) { */
+-/* 		log_warning(&quot;CHAP target auth.: &quot; */
+-/* 			    &quot;no outgoing credentials configured%s&quot;, */
+-/* 			    conn-&gt;tid ? &quot;.&quot; : &quot; for discovery.&quot;); */
+-/* 		retval = CHAP_AUTH_ERROR; */
+-/* 		goto out; */
+-/* 	} */
++	err = iscsi_account_lookup(conn-&gt;tid, AUTH_DIR_OUTGOING, name, pass);
++	if (err) {
++		log_warning(&quot;CHAP target auth.: &quot;
++			    &quot;no outgoing credentials configured%s&quot;,
++			    conn-&gt;tid ? &quot;.&quot; : &quot; for discovery.&quot;);
++		retval = CHAP_AUTH_ERROR;
++		goto out;
++	}
+ 
+ 	if (!(value = text_key_find(conn, &quot;CHAP_C&quot;))) {
+ 		log_warning(&quot;CHAP target auth.: &quot;
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/iscsi.h	2006-11-13 13:28:51 UTC (rev 640)
+@@ -4,6 +4,8 @@
+ extern int iscsi_target_show(int mode, int tid, uint64_t sid, uint32_t cid,
+ 			     uint64_t lun, char *buf, int rest);
+ extern int iscsi_target_update(int, char *);
++extern int iscsi_mgmt_account(uint32_t op, int tid, uint32_t uid, char *param,
++			      char *buf, int len);
+ extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
+ extern int iscsi_tm_done(int host_no, uint64_t mid, int result);
+@@ -16,6 +18,7 @@
+ 	.target_destroy		= iscsi_target_destroy,
+ 	.target_update		= iscsi_target_update,
+ 	.show			= iscsi_target_show,
++	.account		= iscsi_mgmt_account,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+ 	.bdt			= &amp;aio_bdt,
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/iscsid.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -21,6 +21,7 @@
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtd.h&quot;
++#include &quot;account.h&quot;
+ #include &quot;util.h&quot;
+ 
+ #define MAX_QUEUE_CMD	32
+@@ -120,15 +121,6 @@
+ 	text_key_add(conn, key, &quot;Reject&quot;);
+ }
+ 
+-static int account_empty(int tid, int dir)
+-{
+-	char pass[ISCSI_NAME_LEN];
+-
+-	memset(pass, 0, sizeof(pass));
+-/* 	return cops-&gt;account_query(tid, dir, pass, pass) &lt; 0 ? 1 : 0; */
+-	return 1;
+-}
+-
+ static void text_scan_security(struct connection *conn)
+ {
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+@@ -148,13 +140,13 @@
+ 					*nextValue++ = 0;
+ 
+ 				if (!strcmp(value, &quot;None&quot;)) {
+-					if (!account_empty(conn-&gt;tid, AUTH_DIR_INCOMING))
++					if (iscsi_account_available(conn-&gt;tid, AUTH_DIR_INCOMING))
+ 						continue;
+ 					conn-&gt;auth_method = AUTH_NONE;
+ 					text_key_add(conn, key, &quot;None&quot;);
+ 					break;
+ 				} else if (!strcmp(value, &quot;CHAP&quot;)) {
+-					if (account_empty(conn-&gt;tid, AUTH_DIR_INCOMING))
++					if (!iscsi_account_available(conn-&gt;tid, AUTH_DIR_INCOMING))
+ 						continue;
+ 					conn-&gt;auth_method = AUTH_CHAP;
+ 					text_key_add(conn, key, &quot;CHAP&quot;);
+@@ -505,7 +497,7 @@
+ 			conn-&gt;state = STATE_LOGIN;
+ 
+ 			login_start(conn);
+-			if (!account_empty(conn-&gt;tid, AUTH_DIR_INCOMING))
++			if (iscsi_account_available(conn-&gt;tid, AUTH_DIR_INCOMING))
+ 				goto auth_err;
+ 			if (rsp-&gt;status_class)
+ 				return;
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/iscsid.h	2006-11-13 13:28:51 UTC (rev 640)
+@@ -15,6 +15,7 @@
+ #include &quot;transport.h&quot;
+ #include &quot;list.h&quot;
+ #include &quot;param.h&quot;
++#include &quot;account.h&quot;
+ #include &quot;log.h&quot;
+ 
+ #include &lt;scsi/iscsi_if.h&gt;
+@@ -218,6 +219,10 @@
+ 
+ 	int max_nr_sessions;
+ 	int nr_sessions;
++
++	/* TODO: support various account managements (like RADIUS) */
++	struct ac_node incoming[16];
++	struct ac_node outgoing;
+ };
+ 
+ enum task_flags {
+@@ -266,4 +271,13 @@
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+ 
++#define buffer_check(buf, total, len, rest)	\
++({						\
++	buf += len;				\
++	total += len;				\
++	rest -= len;				\
++	if (!rest)				\
++		break;				\
++})
++
+ #endif	/* ISCSID_H */
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/iscsi/target.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -161,15 +161,6 @@
+ 	return 0;
+ }
+ 
+-#define buffer_check(buf, total, len, rest)	\
+-({						\
+-	buf += len;				\
+-	total += len;				\
+-	rest -= len;				\
+-	if (!rest)				\
+-		break;				\
+-})
+-
+ static int show_iscsi_param(char *buf, struct param *param, int rest)
+ {
+ 	int i, len, total;
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/mgmt.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -147,7 +147,7 @@
+ 		req-&gt;len, lld_no, req-&gt;mode, req-&gt;op,
+ 		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
+ 
+-	if (req-&gt;op == OP_SHOW) {
++	if (req-&gt;op == OP_SHOW &amp;&amp; req-&gt;mode != MODE_ACCOUNT) {
+ 		if (req-&gt;mode == MODE_TARGET &amp;&amp; req-&gt;tid &lt; 0)
+ 			err = tgt_target_show_all((char *)res-&gt;data,
+ 						  len - sizeof(*res));
+@@ -173,6 +173,20 @@
+ 	case MODE_DEVICE:
+ 		err = device_mgmt(lld_no, req, params, res, &amp;len);
+ 		break;
++	case MODE_ACCOUNT:
++		if (tgt_drivers[lld_no]-&gt;account)
++			err = tgt_drivers[lld_no]-&gt;account(req-&gt;op, req-&gt;tid, req-&gt;aid,
++							   params,
++							   (char *)res-&gt;data,
++							   len - sizeof(*res));
++		if (req-&gt;op == OP_SHOW) {
++			set_show_results(res, err);
++			err = 0;
++		} else {
++			res-&gt;err = err;
++			res-&gt;len = sizeof(*res);
++		}
++		break;
+ 	default:
+ 		break;
+ 	}
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/tgtadm.c	2006-11-13 13:28:51 UTC (rev 640)
+@@ -69,6 +69,7 @@
+ 	{&quot;sid&quot;, required_argument, NULL, 's'},
+ 	{&quot;cid&quot;, required_argument, NULL, 'c'},
+ 	{&quot;lun&quot;, required_argument, NULL, 'u'},
++	{&quot;aid&quot;, required_argument, NULL, 'a'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+ 	{&quot;bus&quot;, required_argument, NULL, 'b'},
+ 	{&quot;params&quot;, required_argument, NULL, 'p'},
+@@ -79,7 +80,7 @@
+ 	{NULL, 0, NULL, 0},
+ };
+ 
+-static char *short_options = &quot;l:o:m:t:s:c:u:i:b:p:n:v:dh&quot;;
++static char *short_options = &quot;l:o:m:t:s:c:u:i:a:b:p:n:v:dh&quot;;
+ 
+ static void usage(int status)
+ {
+@@ -231,8 +232,8 @@
+ 		mode = MODE_SESSION;
+ 	else if (!strcmp(&quot;connection&quot;, str) || !strcmp(&quot;conn&quot;, str))
+ 		mode = MODE_CONNECTION;
+-	else if (!strcmp(&quot;user&quot;, str))
+-		mode = MODE_USER;
++	else if (!strcmp(&quot;account&quot;, str))
++		mode = MODE_ACCOUNT;
+ 
+ 	return mode;
+ }
+@@ -262,14 +263,15 @@
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1, len = 0;
+ 	int tid = -1;
+-	uint32_t cid = 0, hostno = 0;
+-	uint64_t sid = 0, lun = 0;
++	uint32_t cid, hostno, aid;
++	uint64_t sid, lun;
+ 	char *params, *lldname;
+ 	struct tgtadm_req *req;
+ 	char buf[BUFSIZE];
+ 	char *name, *value;
+ 	int mode = MODE_SYSTEM;
+ 
++	cid = hostno = aid = sid = lun = 0;
+ 	params = lldname = name = value = NULL;
+ 
+ 	optind = 1;
+@@ -297,6 +299,9 @@
+ 		case 'u':
+ 			lun = strtoull(optarg, NULL, 10);
+ 			break;
++		case 'a':
++			aid = strtol(optarg, NULL, 10);
++			break;
+ 		case 'i':
+ 			hostno = strtol(optarg, NULL, 10);
+ 			break;
+@@ -334,6 +339,11 @@
+ 		usage(-1);
+ 	}
+ 
++	if (mode &lt; 0) {
++		fprintf(stderr, &quot;unknown mode\n&quot;);
++		usage(-1);
++	}
++
+ 	memset(buf, 0, sizeof(buf));
+ 
+ 	req = (struct tgtadm_req *) buf;
+@@ -344,6 +354,7 @@
+ 	req-&gt;tid = tid;
+ 	req-&gt;sid = sid;
+ 	req-&gt;lun = lun;
++	req-&gt;aid = aid;
+ 	req-&gt;host_no = hostno;
+ 
+ 	if (params) {
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-11-12 09:40:44 UTC (rev 639)
++++ trunk/usr/tgtadm.h	2006-11-13 13:28:51 UTC (rev 640)
+@@ -9,6 +9,7 @@
+ 	OP_DELETE,
+ 	OP_SHOW,
+ 	OP_BIND,
++	OP_UNBIND,
+ 	OP_UPDATE,
+ };
+ 
+@@ -19,7 +20,7 @@
+ 
+ 	MODE_SESSION,
+ 	MODE_CONNECTION,
+-	MODE_USER,
++	MODE_ACCOUNT,
+ };
+ 
+ struct tgtadm_req {
+@@ -31,6 +32,7 @@
+ 	uint64_t sid;
+ 	uint32_t cid;
+ 	uint64_t lun;
++	uint32_t aid;
+ 	char lld[TGT_LLD_NAME_LEN];
+ 	uint32_t host_no;
+ 	uint64_t data[0];
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000626.html">[Stgt-svn] r639 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000628.html">[Stgt-svn] r641 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#627">[ date ]</a>
+              <a href="thread.html#627">[ thread ]</a>
+              <a href="subject.html#627">[ subject ]</a>
+              <a href="author.html#627">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

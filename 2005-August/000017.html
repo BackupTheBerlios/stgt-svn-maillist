@@ -1,0 +1,749 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r23 - in trunk/iscsi: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r23%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508271553.j7RFr8LW009610%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000016.html">
+   <LINK REL="Next"  HREF="000018.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r23 - in trunk/iscsi: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r23%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508271553.j7RFr8LW009610%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r23 - in trunk/iscsi: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Aug 27 17:53:08 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000016.html">[Stgt-svn] r22 - in trunk: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000018.html">[Stgt-svn] r24 - in trunk: iscsi/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#17">[ date ]</a>
+              <a href="thread.html#17">[ thread ]</a>
+              <a href="subject.html#17">[ subject ]</a>
+              <a href="author.html#17">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-27 17:53:08 +0200 (Sat, 27 Aug 2005)
+New Revision: 23
+
+Modified:
+   trunk/iscsi/include/iet_u.h
+   trunk/iscsi/kernel/config.c
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/iscsi/usr/Makefile
+   trunk/iscsi/usr/ctldev.c
+   trunk/iscsi/usr/iscsid.c
+   trunk/iscsi/usr/iscsid.h
+   trunk/iscsi/usr/plain.c
+   trunk/iscsi/usr/target.c
+Log:
+IET configures devices through stgt (all IET device code has gone).
+
+Modified: trunk/iscsi/include/iet_u.h
+===================================================================
+--- trunk/iscsi/include/iet_u.h	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/include/iet_u.h	2005-08-27 15:53:08 UTC (rev 23)
+@@ -15,13 +15,6 @@
+ 	char name[ISCSI_NAME_LEN];
+ };
+ 
+-struct volume_info {
+-	u32 tid;
+-
+-	u32 lun;
+-	char args[ISCSI_ARGS_LEN]; /* FIXME */
+-};
+-
+ struct session_info {
+ 	u32 tid;
+ 
+@@ -118,8 +111,6 @@
+ #define DEL_TARGET _IOW('i', 1, struct target_info)
+ #define START_TARGET _IO('i', 2)
+ #define STOP_TARGET _IO('i', 3)
+-#define ADD_VOLUME _IOW('i', 4, struct volume_info)
+-#define DEL_VOLUME _IOW('i', 5, struct volume_info)
+ #define ADD_SESSION _IOW('i', 6, struct session_info)
+ #define DEL_SESSION _IOW('i', 7, struct session_info)
+ #define GET_SESSION_INFO _IOWR('i', 8, struct session_info)
+
+Modified: trunk/iscsi/kernel/config.c
+===================================================================
+--- trunk/iscsi/kernel/config.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/kernel/config.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -162,28 +162,6 @@
+ 	return session_del(target, info.sid);
+ }
+ 
+-static int add_volume(struct iscsi_target *target, unsigned long ptr)
+-{
+-	int err;
+-	struct volume_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	return volume_add(target, &amp;info);
+-}
+-
+-static int del_volume(struct iscsi_target *target, unsigned long ptr)
+-{
+-	int err;
+-	struct volume_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	return volume_del(target, &amp;info);
+-}
+-
+ static int iscsi_param_config(struct iscsi_target *target, unsigned long ptr, int set)
+ {
+ 	int err;
+@@ -230,18 +208,11 @@
+ 		goto done;
+ 	}
+ 
+-	target = target_lookup_by_id(id);
++	if (cmd != ADD_TARGET)
++		target = target_lookup_by_id(id);
+ 
+-	if (cmd == ADD_TARGET)
+-		if (target) {
+-			err = -EEXIST;
+-			eprintk(&quot;Target %u already exist!\n&quot;, id);
+-			goto done;
+-		}
+-
+ 	switch (cmd) {
+ 	case ADD_TARGET:
+-		assert(!target);
+ 		err = add_target(arg);
+ 		goto done;
+ 	}
+@@ -258,14 +229,6 @@
+ 	}
+ 
+ 	switch (cmd) {
+-	case ADD_VOLUME:
+-		err = add_volume(target, arg);
+-		break;
+-
+-	case DEL_VOLUME:
+-		err = del_volume(target, arg);
+-		break;
+-
+ 	case ADD_SESSION:
+ 		err = add_session(target, arg);
+ 		break;
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/kernel/iscsi.h	2005-08-27 15:53:08 UTC (rev 23)
+@@ -232,8 +232,6 @@
+ struct iscsi_target *target_lookup_by_id(u32);
+ extern int target_add(struct target_info *);
+ extern int target_del(u32 id);
+-extern int volume_del(struct iscsi_target *target, struct volume_info *info);
+-extern int volume_add(struct iscsi_target *target, struct volume_info *info);
+ 
+ /* config.c */
+ extern int iet_procfs_init(void);
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/kernel/target.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -17,7 +17,6 @@
+ 
+ static LIST_HEAD(target_list);
+ static DECLARE_MUTEX(target_list_sem);
+-static u32 next_target_id;
+ static u32 nr_targets;
+ 
+ static struct iscsi_sess_param default_session_param = {
+@@ -118,21 +117,21 @@
+ 	.queued_cmnds = DEFAULT_NR_QUEUED_CMNDS,
+ };
+ 
+-static int iscsi_target_create(struct target_info *info, u32 tid)
++static int iscsi_target_create(struct target_info *info)
+ {
+ 	int err = -EINVAL, len;
+ 	char *name = info-&gt;name;
+ 	struct iscsi_target *target;
+ 
+-	dprintk(D_SETUP, &quot;%u %s\n&quot;, tid, name);
++	dprintk(D_SETUP, &quot;%s\n&quot;, name);
+ 
+ 	if (!(len = strlen(name))) {
+-		eprintk(&quot;The length of the target name is zero %u\n&quot;, tid);
++		eprintk(&quot;%s&quot;, &quot;The length of the target name is zero&quot;);
+ 		return err;
+ 	}
+ 
+ 	if (!try_module_get(THIS_MODULE)) {
+-		eprintk(&quot;Fail to get module %u\n&quot;, tid);
++		eprintk(&quot;%s\n&quot;, &quot;Fail to get module&quot;);
+ 		return err;
+ 	}
+ 
+@@ -142,8 +141,6 @@
+ 	}
+ 	memset(target, 0, sizeof(*target));
+ 
+-	target-&gt;tid = info-&gt;tid = tid;
+-
+ 	memcpy(&amp;target-&gt;sess_param, &amp;default_session_param, sizeof(default_session_param));
+ 	memcpy(&amp;target-&gt;trgt_param, &amp;default_target_param, sizeof(default_target_param));
+ 
+@@ -165,6 +162,9 @@
+ 	target-&gt;stt = stgt_target_create(&amp;iet_stgt_target_template);
+ 	assert(target-&gt;stt);
+ 
++	/* FIXME: We shouldn't access stt inside. */
++	target-&gt;tid = info-&gt;tid = target-&gt;stt-&gt;tid;
++
+ 	return 0;
+ out:
+ 	kfree(target);
+@@ -176,7 +176,6 @@
+ int target_add(struct target_info *info)
+ {
+ 	int err = -EEXIST;
+-	u32 tid = info-&gt;tid;
+ 
+ 	down(&amp;target_list_sem);
+ 
+@@ -188,19 +187,10 @@
+ 	if (__target_lookup_by_name(info-&gt;name))
+ 		goto out;
+ 
+-	if (tid &amp;&amp; __target_lookup_by_id(tid))
++	if (info-&gt;tid)
+ 		goto out;
+ 
+-	if (!tid) {
+-		do {
+-			if (!++next_target_id)
+-				++next_target_id;
+-		} while (__target_lookup_by_id(next_target_id));
+-
+-		tid = next_target_id;
+-	}
+-
+-	if (!(err = iscsi_target_create(info, tid)))
++	if (!(err = iscsi_target_create(info)))
+ 		nr_targets++;
+ out:
+ 	up(&amp;target_list_sem);
+@@ -279,81 +269,3 @@
+ 
+ 	return 0;
+ }
+-
+-/*
+- * Temporary device code
+- */
+-
+-struct iscsi_device {
+-	uint64_t lun;
+-	struct list_head list;
+-	struct stgt_device *sd;
+-};
+-
+-struct iscsi_device *volume_lookup(struct iscsi_target *target, u32 lun)
+-{
+-	struct iscsi_device *device;
+-	list_for_each_entry(device, &amp;target-&gt;device_list, list) {
+-		if (device-&gt;lun == lun)
+-			return device;
+-	}
+-	return NULL;
+-}
+-
+-int volume_add(struct iscsi_target *target, struct volume_info *info)
+-{
+-	char key_path[] = &quot;Path=&quot;, key_type[] = &quot;Type=&quot;;
+-	char *p, *path = NULL, *type = NULL;
+-	struct iscsi_device *device;
+-	struct stgt_device *sd;
+-	char *args = info-&gt;args;
+-
+-	while ((p = strsep(&amp;args, &quot;,&quot;)) != NULL) {
+-		if (!*p) continue;
+-
+-		if (!strncmp(p, key_path, strlen(key_path)))
+-			path = p + strlen(key_path);
+-		else if (!strncmp(p, key_type, strlen(key_type)))
+-			type = p + strlen(key_type);
+-	}
+-
+-	if (volume_lookup(target, info-&gt;lun)) {
+-		eprintk(&quot;%u\n&quot;, info-&gt;lun);
+-		return -EEXIST;
+-	}
+-
+-	if (!path)
+-		return -EINVAL;
+-
+-	device = kmalloc(sizeof(*device), GFP_KERNEL);
+-	if (!device)
+-		return -ENOMEM;
+-
+-	eprintk(&quot;%u %s %s\n&quot;, info-&gt;lun, path, type);
+-	sd = stgt_device_create(target-&gt;stt, type ? : &quot;stgt_sd&quot;,
+-				path, info-&gt;lun, 0);
+-	if (!sd)
+-		goto out;
+-
+-	device-&gt;sd = sd;
+-	device-&gt;lun = info-&gt;lun;
+-	list_add(&amp;device-&gt;list, &amp;target-&gt;device_list);
+-	return 0;
+-out:
+-	kfree(device);
+-	return -EINVAL;
+-}
+-
+-int volume_del(struct iscsi_target *target, struct volume_info *info)
+-{
+-	struct iscsi_device *device;
+-
+-	device = volume_lookup(target, info-&gt;lun);
+-	if (!device)
+-		return -ENOENT;
+-
+-	stgt_device_destroy(device-&gt;sd);
+-	list_del(&amp;device-&gt;list);
+-	kfree(device);
+-	return 0;
+-}
+
+Modified: trunk/iscsi/usr/Makefile
+===================================================================
+--- trunk/iscsi/usr/Makefile	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/Makefile	2005-08-27 15:53:08 UTC (rev 23)
+@@ -1,4 +1,4 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -I../include
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -I../include -I../../include
+ PROGRAMS = ietd ietadm
+ LIBS = -lcrypto
+ 
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/ctldev.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -103,45 +103,6 @@
+ 	return ioctl(ctrl_fd, DEL_TARGET, &amp;info);
+ }
+ 
+-static int iscsi_lunit_create(u32 tid, u32 lun, char *args)
+-{
+-	int err;
+-	struct volume_info info;
+-	char *p;
+-
+-	memset(&amp;info, 0, sizeof(info));
+-
+-	info.tid = tid;
+-	info.lun = lun;
+-
+-	while (isspace(*args))
+-		args++;
+-	if ((p = strchr(args, '\n')))
+-		*p = '\0';
+-
+-	strncpy(info.args, args, sizeof(info.args) - 1);
+-
+-	if ((err = ioctl(ctrl_fd, ADD_VOLUME, &amp;info)) &lt; 0)
+-		fprintf(stderr, &quot;%s %d %d&quot;, __FUNCTION__, errno, err);
+-
+-	return err;
+-}
+-
+-static int iscsi_lunit_destroy(u32 tid, u32 lun)
+-{
+-	int err;
+-	struct volume_info info;
+-
+-	memset(&amp;info, 0, sizeof(info));
+-	info.tid = tid;
+-	info.lun = lun;
+-
+-	if ((err = ioctl(ctrl_fd, DEL_VOLUME, &amp;info)) &lt; 0)
+-		fprintf(stderr, &quot;%s %d %d&quot;, __FUNCTION__, errno, err);
+-
+-	return err;
+-}
+-
+ static int iscsi_conn_destroy(u32 tid, u64 sid, u32 cid)
+ {
+ 	int err;
+@@ -371,8 +332,6 @@
+ 
+ struct iscsi_kernel_interface ioctl_ki = {
+ 	.ctldev_open = ctrdev_open,
+-	.lunit_create = iscsi_lunit_create,
+-	.lunit_destroy = iscsi_lunit_destroy,
+ 	.param_get = iscsi_param_get,
+ 	.param_set = iscsi_param_set,
+ 	.target_create = iscsi_target_create,
+
+Modified: trunk/iscsi/usr/iscsid.c
+===================================================================
+--- trunk/iscsi/usr/iscsid.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/iscsid.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -356,7 +356,7 @@
+ 			return;
+ 		}
+ 
+-		if (!(conn-&gt;tid = target_find_by_name(target_name)) ||
++		if (target_find_by_name(target_name, &amp;conn-&gt;tid) &lt; 0 ||
+ 		    cops-&gt;initiator_access(conn-&gt;tid, conn-&gt;fd) &lt; 0) {
+ 			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
+ 			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/iscsid.h	2005-08-27 15:53:08 UTC (rev 23)
+@@ -191,7 +191,7 @@
+ /* target.c */
+ extern int target_add(u32 *, char *);
+ extern int target_del(u32);
+-extern u32 target_find_by_name(const char *name);
++extern int target_find_by_name(const char *name, u32 *tid);
+ struct target * target_find_by_id(u32);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
+@@ -202,8 +202,6 @@
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+ 	int (*ctldev_open) (void);
+-	int (*lunit_create) (u32 tid, u32 lun, char *args);
+-	int (*lunit_destroy) (u32 tid, u32 lun);
+ 	int (*param_get) (u32, u64, struct iscsi_param *);
+ 	int (*param_set) (u32, u64, int, u32, struct iscsi_param *);
+ 	int (*target_create) (u32 *, char *);
+
+Modified: trunk/iscsi/usr/plain.c
+===================================================================
+--- trunk/iscsi/usr/plain.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/plain.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -10,10 +10,13 @@
+ #include &lt;errno.h&gt;
+ #include &lt;netdb.h&gt;
+ #include &lt;stdio.h&gt;
++#include &lt;unistd.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/socket.h&gt;
++#include &lt;sys/un.h&gt;
++#include &lt;linux/netlink.h&gt;
+ 
+ #include &lt;netinet/in.h&gt;
+ #include &lt;netinet/tcp.h&gt;
+@@ -21,6 +24,7 @@
+ #include &lt;arpa/inet.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
++#include &quot;stgt_if.h&quot;
+ 
+ #define BUFSIZE		4096
+ #define CONFIG_FILE	&quot;/etc/ietd.conf&quot;
+@@ -108,10 +112,10 @@
+ 			continue;
+ 
+ 		if (!strcasecmp(p, &quot;Target&quot;)) {
+-			tid = 0;
+ 			if (!(p = target_sep_string(&amp;q)))
+ 				continue;
+-			tid = target_find_by_name(p);
++			if (target_find_by_name(p, &amp;tid) &lt; 0)
++				continue;
+ 		} else if (!((idx = param_index_by_name(p, user_keys)) &lt; 0)) {
+ 			char *name, *pass;
+ 			name = target_sep_string(&amp;q);
+@@ -374,7 +378,7 @@
+ 
+ static int initiator_match(u32 tid, int fd, char *filename)
+ {
+-	int err = 0;
++	int err = 0, tmp;
+ 	FILE *fp;
+ 	char buf[BUFSIZE], *p;
+ 
+@@ -398,7 +402,7 @@
+ 			continue;
+ 		*(p++) = '\0';
+ 
+-		if (target_find_by_name(buf) != tid)
++		if (target_find_by_name(buf, &amp;tmp) &lt; 0)
+ 			continue;
+ 
+ 		err = __initiator_match(fd, p);
+@@ -424,15 +428,7 @@
+ 
+ static int __plain_target_create(u32 *tid, char *name, int update)
+ {
+-	int err;
+-
+-	if ((err = target_add(tid, name)) &lt; 0)
+-		return err;
+-
+-	if (update)
+-		; /* Update the config file here. */
+-
+-	return err;
++	return target_add(tid, name);
+ }
+ 
+ static int plain_target_create(u32 *tid, char *name)
+@@ -451,27 +447,119 @@
+ 	return err;
+ }
+ 
+-static int __plain_lunit_create(u32 tid, u32 lun, char *args, int update)
++#define STGT_IPC_NAMESPACE &quot;STGT_IPC_ABSTRACT_NAMESPACE&quot;
++
++static int ipc_connect(void)
+ {
+-	int err;
++	int fd, err;
++	struct sockaddr_un addr;
+ 
+-	if ((err = ki-&gt;lunit_create(tid, lun, args)) &lt; 0)
+-		return err;
++	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (fd &lt; 0)
++		return fd;
+ 
+-	if (update)
+-		;
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.sun_family = AF_LOCAL;
++	memcpy((char *) &amp;addr.sun_path + 1, STGT_IPC_NAMESPACE,
++	       strlen(STGT_IPC_NAMESPACE));
+ 
+-	return err;
++	if ((err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
++		fd = err;
++
++	return fd;
+ }
+ 
+ static int plain_lunit_create(u32 tid, u32 lun, char *args)
+ {
+-	return __plain_lunit_create(tid, lun, args, 1);
++	int fd, err;
++	char nlm_ev[8912], *p, *q, *type = NULL, *path = NULL;
++	char dtype[] = &quot;stgt_vsd&quot;;
++	struct stgt_event *ev;
++	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++
++	fprintf(stderr, &quot;%s %d %s\n&quot;, __FUNCTION__, __LINE__, args);
++
++	fd = ipc_connect();
++	if (fd &lt; 0) {
++		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, fd);
++		return fd;
++	}
++
++	if (isspace(*args))
++		args++;
++	if ((p = strchr(args, '\n')))
++		*p = '\0';
++
++	while ((p = strsep(&amp;args, &quot;,&quot;))) {
++		if (!p)
++			continue;
++
++		if (!(q = strchr(p, '=')))
++			continue;
++		*q++ = '\0';
++
++		if (!strcmp(p, &quot;Path&quot;))
++			path = q;
++		else if (!strcmp(p, &quot;Type&quot;))
++			type = q;
++	}
++
++	if (!type)
++		type = dtype;
++	if (!path) {
++		fprintf(stderr, &quot;%s %d NULL path\n&quot;, __FUNCTION__, __LINE__);
++		return -EINVAL;
++	}
++
++	fprintf(stderr, &quot;%s %d %s %s %d %d\n&quot;,
++		__FUNCTION__, __LINE__, type, path, strlen(path), sizeof(*ev));
++
++	memset(nlm_ev, 0, sizeof(nlm_ev));
++	nlh-&gt;nlmsg_len = NLMSG_SPACE(sizeof(*ev) + strlen(path));
++	nlh-&gt;nlmsg_type = STGT_UEVENT_DEVICE_CREATE;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_pid = getpid();
++
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.c_device.tid = tid;
++	ev-&gt;u.c_device.lun = lun;
++	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
++	memcpy((char *) ev + sizeof(*ev), path, strlen(path));
++
++	err = write(fd, nlm_ev, nlh-&gt;nlmsg_len);
++	if (err &lt; 0)
++		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, err);
++
++	return err;
+ }
+ 
+ static int plain_lunit_destroy(u32 tid, u32 lun)
+ {
+-	return ki-&gt;lunit_destroy(tid, lun);
++	int fd, err;
++	char nlm_ev[8912];
++	struct stgt_event *ev;
++	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++
++	fd = ipc_connect();
++	if (fd &lt; 0) {
++		fprintf(stderr, &quot;%s %d %d\n&quot;, __FUNCTION__, __LINE__, fd);
++		return fd;
++	}
++
++	memset(nlm_ev, 0, sizeof(nlm_ev));
++
++	nlh-&gt;nlmsg_len = NLMSG_SPACE(sizeof(*ev));
++	nlh-&gt;nlmsg_type = STGT_UEVENT_DEVICE_CREATE;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_pid = getpid();
++
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.d_device.tid = tid;
++	ev-&gt;u.d_device.lun = lun;
++
++	err = write(fd, nlm_ev, nlh-&gt;nlmsg_len);
++
++	return err;
+ }
+ 
+ static int __plain_param_set(u32 tid, u64 sid, int type,
+@@ -515,13 +603,13 @@
+ 	FILE *config;
+ 	char buf[BUFSIZE];
+ 	char *p, *q;
+-	int idx;
+-	u32 tid, val;
++	int idx, tid;
++	u32 val;
+ 
+ 	if (!(config = fopen(filename, &quot;r&quot;)))
+ 		return -errno;
+ 
+-	tid = 0;
++	tid = -1;
+ 	while (fgets(buf, BUFSIZE, config)) {
+ 		q = buf;
+ 		p = target_sep_string(&amp;q);
+@@ -531,21 +619,22 @@
+ 			tid = 0;
+ 			if (!(p = target_sep_string(&amp;q)))
+ 				continue;
+-			if (__plain_target_create(&amp;tid, p, 0))
+-				log_debug(1, &quot;creaing target %s&quot;, p);
+-		} else if (!strcasecmp(p, &quot;Alias&quot;) &amp;&amp; tid) {
++			log_debug(1, &quot;creaing target %s&quot;, p);
++			if (__plain_target_create(&amp;tid, p, 0) &lt; 0)
++				tid = -1;
++		} else if (!strcasecmp(p, &quot;Alias&quot;) &amp;&amp; tid &gt;= 0) {
+ 			;
+-		} else if (!strcasecmp(p, &quot;MaxSessions&quot;) &amp;&amp; tid) {
++		} else if (!strcasecmp(p, &quot;MaxSessions&quot;) &amp;&amp; tid &gt;= 0) {
+ 			/* target-&gt;max_sessions = strtol(q, &amp;q, 0); */
+-		} else if (!strcasecmp(p, &quot;Lun&quot;) &amp;&amp; tid) {
++		} else if (!strcasecmp(p, &quot;Lun&quot;) &amp;&amp; tid &gt;= 0) {
+ 			u32 lun = strtol(q, &amp;q, 10);
+-			__plain_lunit_create(tid, lun, q, 0);
+-		} else if (!((idx = param_index_by_name(p, target_keys)) &lt; 0) &amp;&amp; tid) {
++			plain_lunit_create(tid, lun, q);
++		} else if (!((idx = param_index_by_name(p, target_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+ 			val = strtol(q, &amp;q, 0);
+ 			if (param_check_val(target_keys, idx, &amp;val) &lt; 0)
+ 				log_warning(&quot;%s, %u\n&quot;, target_keys[idx].name, val);
+ 			iscsi_param_partial_set(tid, 0, key_target, idx, val);
+-		} else if (!((idx = param_index_by_name(p, session_keys)) &lt; 0) &amp;&amp; tid) {
++		} else if (!((idx = param_index_by_name(p, session_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+ 			char *str = target_sep_string(&amp;q);
+ 			if (param_str_to_val(session_keys, idx, str, &amp;val) &lt; 0)
+ 				continue;
+
+Modified: trunk/iscsi/usr/target.c
+===================================================================
+--- trunk/iscsi/usr/target.c	2005-08-27 15:51:13 UTC (rev 22)
++++ trunk/iscsi/usr/target.c	2005-08-27 15:53:08 UTC (rev 23)
+@@ -31,16 +31,18 @@
+ 	}
+ }
+ 
+-u32 target_find_by_name(const char *name)
++int target_find_by_name(const char *name, u32 *tid)
+ {
+ 	struct target *target;
+ 
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+-		if (!strcmp(target-&gt;name, name))
+-			return target-&gt;tid;
++		if (!strcmp(target-&gt;name, name)) {
++			*tid = target-&gt;tid;
++			return 0;
++		}
+ 	}
+ 
+-	return 0;
++	return -ENOENT;
+ }
+ 
+ struct target* target_find_by_id(u32 tid)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000016.html">[Stgt-svn] r22 - in trunk: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000018.html">[Stgt-svn] r24 - in trunk: iscsi/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#17">[ date ]</a>
+              <a href="thread.html#17">[ thread ]</a>
+              <a href="subject.html#17">[ subject ]</a>
+              <a href="author.html#17">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,333 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r446 - branches/use-scsi-ml/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r446%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605040714.k447ETun017663%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000432.html">
+   <LINK REL="Next"  HREF="000434.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r446 - branches/use-scsi-ml/istgt/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r446%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605040714.k447ETun017663%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r446 - branches/use-scsi-ml/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu May  4 09:14:29 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000432.html">[Stgt-svn] r445 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000434.html">[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#433">[ date ]</a>
+              <a href="thread.html#433">[ thread ]</a>
+              <a href="subject.html#433">[ subject ]</a>
+              <a href="author.html#433">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-04 09:13:26 +0200 (Thu, 04 May 2006)
+New Revision: 446
+
+Added:
+   branches/use-scsi-ml/istgt/usr/log.c
+   branches/use-scsi-ml/istgt/usr/log.h
+Modified:
+   branches/use-scsi-ml/istgt/usr/Makefile
+   branches/use-scsi-ml/istgt/usr/iscsid.h
+   branches/use-scsi-ml/istgt/usr/istgt.c
+Log:
+Daemonize istgtd.
+
+
+Modified: branches/use-scsi-ml/istgt/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 03:05:11 UTC (rev 445)
++++ branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 07:13:26 UTC (rev 446)
+@@ -1,8 +1,12 @@
+ CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../include -I../../include -I../../usr
+ #LIBS = -lcrypto
+-OBJS = istgt.o conn.o param.o iscsid.o session.o target.o chap.o ctldev.o
++OBJS = conn.o param.o iscsid.o session.o target.o chap.o ctldev.o
+ SHAREDLIB = istgt.so
++DAEMON = istgtd
+ 
++$(DAEMON): istgt.o log.c
++	$(CC) $^ -o $@
++
+ $(SHAREDLIB): $(OBJS)
+ 	$(CC) -shared -o $@ $(OBJS)
+ 
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-04 03:05:11 UTC (rev 445)
++++ branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-04 07:13:26 UTC (rev 446)
+@@ -12,13 +12,14 @@
+ #include &lt;linux/types.h&gt;
+ 
+ #include &quot;types.h&quot;
+-#include &quot;istgt_u.h&quot;
+ #include &quot;param.h&quot;
+ #include &quot;misc.h&quot;
+ #include &quot;log.h&quot;
+ 
+ #include &lt;scsi/iscsi_proto.h&gt;
+ 
++#define ISCSI_NAME_LEN 255
++
+ #define sid64(isid, tsih)					\
+ ({								\
+ 	(uint64_t) isid[0] &lt;&lt;  0 | (uint64_t) isid[1] &lt;&lt;  8 |	\
+@@ -60,7 +61,7 @@
+ 	struct session *session;
+ 
+ 	int tid;
+-	struct iscsi_param session_param[session_key_last];
++/* 	struct iscsi_param session_param[session_key_last]; */
+ 
+ 	char *initiator;
+ 	uint8_t isid[6];
+
+Modified: branches/use-scsi-ml/istgt/usr/istgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-04 03:05:11 UTC (rev 445)
++++ branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-04 07:13:26 UTC (rev 446)
+@@ -32,6 +32,7 @@
+ #include &lt;netinet/ip.h&gt;
+ #include &lt;arpa/inet.h&gt;
+ 
++#include &quot;log.h&quot;
+ #include &quot;iscsid.h&quot;
+ 
+ #define ISCSI_LISTEN_PORT	3260
+@@ -41,11 +42,14 @@
+ 
+ enum {
+ 	POLL_LISTEN,
+-	POLL_INCOMING = POLL_LISTEN + LISTEN_MAX,
++	POLL_NL = POLL_LISTEN + LISTEN_MAX,
++	POLL_INCOMING,
+ 	POLL_MAX = POLL_INCOMING + INCOMING_MAX,
+ };
+ 
++static struct pollfd pfd[POLL_MAX];
+ static struct connection *incoming[INCOMING_MAX];
++static char program_name[] = &quot;istgt&quot;;
+ 
+ static void set_non_blocking(int fd)
+ {
+@@ -54,9 +58,9 @@
+ 	if (res != -1) {
+ 		res = fcntl(fd, F_SETFL, res | O_NONBLOCK);
+ 		if (res)
+-			log_warning(&quot;unable to set fd flags (%s)!&quot;, strerror(errno));
++			dprintf(&quot;unable to set fd flags (%s)!&quot;, strerror(errno));
+ 	} else
+-		log_warning(&quot;unable to get fd flags (%s)!&quot;, strerror(errno));
++		dprintf(&quot;unable to get fd flags (%s)!&quot;, strerror(errno));
+ }
+ 
+ static void listen_socket_create(struct pollfd *pfds)
+@@ -73,14 +77,14 @@
+ 	hints.ai_flags = AI_PASSIVE;
+ 
+ 	if (getaddrinfo(NULL, servname, &amp;hints, &amp;res0)) {
+-		log_error(&quot;unable to get address info (%s)!&quot;, strerror(errno));
++		eprintf(&quot;unable to get address info (%s)!&quot;, strerror(errno));
+ 		exit(1);
+ 	}
+ 
+ 	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
+ 		sock = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 		if (sock &lt; 0) {
+-			log_error(&quot;unable to create server socket (%s) %d %d %d!&quot;,
++			eprintf(&quot;unable to create server socket (%s) %d %d %d!&quot;,
+ 				  strerror(errno), res-&gt;ai_family,
+ 				  res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 			continue;
+@@ -88,7 +92,7 @@
+ 
+ 		opt = 1;
+ 		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &amp;opt, sizeof(opt)))
+-			log_warning(&quot;unable to set SO_REUSEADDR on server socket (%s)!&quot;,
++			dprintf(&quot;unable to set SO_REUSEADDR on server socket (%s)!&quot;,
+ 				    strerror(errno));
+ 		opt = 1;
+ 		if (res-&gt;ai_family == AF_INET6 &amp;&amp;
+@@ -96,12 +100,12 @@
+ 			continue;
+ 
+ 		if (bind(sock, res-&gt;ai_addr, res-&gt;ai_addrlen)) {
+-			log_error(&quot;unable to bind server socket (%s)!&quot;, strerror(errno));
++			eprintf(&quot;unable to bind server socket (%s)!&quot;, strerror(errno));
+ 			continue;
+ 		}
+ 
+ 		if (listen(sock, INCOMING_MAX)) {
+-			log_error(&quot;unable to listen to server socket (%s)!&quot;, strerror(errno));
++			eprintf(&quot;unable to listen to server socket (%s)!&quot;, strerror(errno));
+ 			continue;
+ 		}
+ 
+@@ -114,11 +118,6 @@
+ 	freeaddrinfo(res0);
+ }
+ 
+-void poll_init(struct pollfd *pfds)
+-{
+-	listen_socket_create(pfds + POLL_LISTEN);
+-}
+-
+ static void accept_connection(struct pollfd *pfds, int afd)
+ {
+ 	struct sockaddr_storage from;
+@@ -132,7 +131,7 @@
+ 	namesize = sizeof(from);
+ 	if ((fd = accept(afd, (struct sockaddr *) &amp;from, &amp;namesize)) &lt; 0) {
+ 		if (errno != EINTR &amp;&amp; errno != EAGAIN) {
+-			log_error(&quot;accept(incoming_socket)&quot;);
++			eprintf(&quot;accept(incoming_socket)&quot;);
+ 			exit(1);
+ 		}
+ 		return;
+@@ -143,13 +142,13 @@
+ 			break;
+ 	}
+ 	if (i &gt;= INCOMING_MAX) {
+-		log_error(&quot;unable to find incoming slot? %d\n&quot;, i);
++		eprintf(&quot;unable to find incoming slot? %d\n&quot;, i);
+ 		goto out;
+ 	}
+ 
+ 	conn = conn_alloc();
+ 	if (!conn) {
+-		log_error(&quot;fail to allocate %s&quot;, &quot;conn\n&quot;);
++		eprintf(&quot;fail to allocate %s&quot;, &quot;conn\n&quot;);
+ 		goto out;
+ 	}
+ 	conn-&gt;fd = fd;
+@@ -168,7 +167,7 @@
+ 	return;
+ }
+ 
+-void poll_event(struct pollfd *pfds, int nr)
++static void poll_event(struct pollfd *pfds)
+ {
+ 	struct connection *conn;
+ 	struct pollfd *pfd;
+@@ -296,7 +295,7 @@
+ 
+ 			break;
+ 		default:
+-			log_error(&quot;illegal iostate %d for port %d!\n&quot;, conn-&gt;iostate, i);
++			eprintf(&quot;illegal iostate %d for port %d!\n&quot;, conn-&gt;iostate, i);
+ 			exit(1);
+ 		}
+ 
+@@ -310,3 +309,66 @@
+ 		}
+ 	}
+ }
++
++static void event_loop(void)
++{
++	int i, err;
++
++	listen_socket_create(pfd + POLL_LISTEN);
++
++	for (i = 0; i &lt; INCOMING_MAX; i++) {
++		pfd[POLL_INCOMING + i].fd = -1;
++		pfd[POLL_INCOMING + i].events = 0;
++		incoming[i] = NULL;
++	}
++
++retry:
++	err = poll(pfd, POLL_MAX, -1);
++	if (err &lt; 0) {
++		if (errno != EINTR) {
++			eprintf(&quot;%d %d\n&quot;, err, errno);
++			exit(1);
++		} else
++			goto retry;
++	}
++
++	poll_event(pfd);
++	goto retry;
++}
++
++static int daemon_init(void)
++{
++	pid_t pid;
++
++	pid = fork();
++	if (pid &lt; 0)
++		return -ENOMEM;
++	else if (pid)
++		exit(0);
++
++	setsid();
++	chdir(&quot;/&quot;);
++	close(0);
++	open(&quot;/dev/null&quot;, O_RDWR);
++	dup2(0, 1);
++	dup2(0, 2);
++
++	return 0;
++}
++
++int main(int argc, char **argv)
++{
++	int is_daemon = 1, is_debug = 1;
++
++	if (is_daemon &amp;&amp; daemon_init())
++		exit(1);
++
++	if (log_init(program_name, LOG_SPACE_SIZE, is_daemon, is_debug))
++		exit(1);
++
++	/* init nl socket here. */
++
++	event_loop();
++
++	return 0;
++}
+
+Copied: branches/use-scsi-ml/istgt/usr/log.c (from rev 445, branches/use-scsi-ml/usr/log.c)
+
+Copied: branches/use-scsi-ml/istgt/usr/log.h (from rev 445, branches/use-scsi-ml/usr/log.h)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000432.html">[Stgt-svn] r445 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000434.html">[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#433">[ date ]</a>
+              <a href="thread.html#433">[ thread ]</a>
+              <a href="subject.html#433">[ subject ]</a>
+              <a href="author.html#433">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

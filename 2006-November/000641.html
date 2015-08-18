@@ -1,0 +1,278 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r654 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r654%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611170234.kAH2YGvI018351%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000640.html">
+   <LINK REL="Next"  HREF="000642.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r654 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r654%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611170234.kAH2YGvI018351%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r654 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 17 03:34:16 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000640.html">[Stgt-svn] r653 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000642.html">[Stgt-svn] r655 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#641">[ date ]</a>
+              <a href="thread.html#641">[ thread ]</a>
+              <a href="subject.html#641">[ subject ]</a>
+              <a href="author.html#641">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-17 03:34:15 +0100 (Fri, 17 Nov 2006)
+New Revision: 654
+
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+Log:
+Rename struct session iscsi_session.
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-11-17 02:25:05 UTC (rev 653)
++++ trunk/usr/iscsi/conn.c	2006-11-17 02:34:15 UTC (rev 654)
+@@ -16,7 +16,7 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;util.h&quot;
+ 
+-void conn_add_to_session(struct connection *conn, struct session *session)
++void conn_add_to_session(struct connection *conn, struct iscsi_session *session)
+ {
+ 	if (!list_empty(&amp;conn-&gt;clist)) {
+ 		eprintf(&quot;%&quot; PRIx64 &quot; %u\n&quot;,
+@@ -62,7 +62,7 @@
+ 
+ static void conn_free(struct connection *conn)
+ {
+-	struct session *session = conn-&gt;session;
++	struct iscsi_session *session = conn-&gt;session;
+ 
+ 	dprintf(&quot;freeing connection\n&quot;);
+ 	list_del(&amp;conn-&gt;clist);
+@@ -142,7 +142,7 @@
+ 	return 0;
+ }
+ 
+-struct connection *conn_find(struct session *session, uint32_t cid)
++struct connection *conn_find(struct iscsi_session *session, uint32_t cid)
+ {
+ 	struct connection *conn;
+ 
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-17 02:25:05 UTC (rev 653)
++++ trunk/usr/iscsi/iscsid.c	2006-11-17 02:34:15 UTC (rev 654)
+@@ -170,7 +170,7 @@
+ {
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *) &amp;conn-&gt;rsp.bhs;
+-	struct session *session;
++	struct iscsi_session *session;
+ 
+ 	if (!conn-&gt;tid)
+ 		return;
+@@ -874,7 +874,7 @@
+ int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
+ 			uint64_t tag)
+ {
+-	struct session *session;
++	struct iscsi_session *session;
+ 	struct iscsi_task *task;
+ 
+ 	dprintf(&quot;%u %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, host_no, len, result,
+@@ -1116,7 +1116,7 @@
+ 
+ static int iscsi_task_queue(struct iscsi_task *task)
+ {
+-	struct session *session = task-&gt;conn-&gt;session;
++	struct iscsi_session *session = task-&gt;conn-&gt;session;
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;task-&gt;req;
+ 	uint32_t cmd_sn;
+ 	struct iscsi_task *ent;
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-17 02:25:05 UTC (rev 653)
++++ trunk/usr/iscsi/iscsid.h	2006-11-17 02:34:15 UTC (rev 654)
+@@ -54,7 +54,7 @@
+ #define KEY_STATE_REQUEST	1
+ #define KEY_STATE_DONE		2
+ 
+-struct session {
++struct iscsi_session {
+ 	int refcount;
+ 
+ 	/* linked to target-&gt;sessions_list */
+@@ -121,7 +121,7 @@
+ 	int refcount;
+ 
+ 	struct list_head clist;
+-	struct session *session;
++	struct iscsi_session *session;
+ 
+ 	int tid;
+ 	struct param session_param[ISCSI_PARAM_MAX];
+@@ -241,11 +241,11 @@
+ extern void conn_close(struct connection *conn, int fd);
+ extern void conn_put(struct connection *conn);
+ extern int conn_get(struct connection *conn);
+-extern struct connection * conn_find(struct session *session, uint32_t cid);
++extern struct connection * conn_find(struct iscsi_session *session, uint32_t cid);
+ extern int conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+ extern void conn_write_pdu(struct connection *conn);
+-extern void conn_add_to_session(struct connection *conn, struct session *session);
++extern void conn_add_to_session(struct connection *conn, struct iscsi_session *session);
+ 
+ /* iscsid.c */
+ extern void iscsi_event_handler(int fd, int events, void *data);
+@@ -256,12 +256,12 @@
+ extern void iscsi_free_task(struct iscsi_task *task);
+ 
+ /* session.c */
+-extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
++extern struct iscsi_session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern int session_create(struct connection *conn);
+-extern void session_destroy(struct session *session);
+-extern struct session *session_lookup(uint16_t tsih);
+-extern void session_get(struct session *session);
+-extern void session_put(struct session *session);
++extern void session_destroy(struct iscsi_session *session);
++extern struct iscsi_session *session_lookup(uint16_t tsih);
++extern void session_get(struct iscsi_session *session);
++extern void session_put(struct iscsi_session *session);
+ 
+ /* target.c */
+ struct iscsi_target * target_find_by_name(const char *name);
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-11-17 02:25:05 UTC (rev 653)
++++ trunk/usr/iscsi/session.c	2006-11-17 02:34:15 UTC (rev 654)
+@@ -19,9 +19,9 @@
+ 
+ static LIST_HEAD(sessions_list);
+ 
+-struct session *session_find_name(int tid, const char *iname, uint8_t *isid)
++struct iscsi_session *session_find_name(int tid, const char *iname, uint8_t *isid)
+ {
+-	struct session *session;
++	struct iscsi_session *session;
+ 	struct iscsi_target *target;
+ 
+ 	if (!(target = target_find_by_id(tid)))
+@@ -38,9 +38,9 @@
+ 	return NULL;
+ }
+ 
+-struct session *session_lookup(uint16_t tsih)
++struct iscsi_session *session_lookup(uint16_t tsih)
+ {
+-	struct session *session;
++	struct iscsi_session *session;
+ 	list_for_each_entry(session, &amp;sessions_list, hlist) {
+ 		if (session-&gt;tsih == tsih)
+ 			return session;
+@@ -50,7 +50,7 @@
+ 
+ int session_create(struct connection *conn)
+ {
+-	struct session *session = NULL;
++	struct iscsi_session *session = NULL;
+ 	static uint16_t tsih, last_tsih = 0;
+ 	struct iscsi_target *target;
+ 
+@@ -102,7 +102,7 @@
+ 	return 0;
+ }
+ 
+-void session_destroy(struct session *session)
++void session_destroy(struct iscsi_session *session)
+ {
+ 	eprintf(&quot;%d\n&quot;, session-&gt;tsih);
+ 
+@@ -122,12 +122,12 @@
+ 	free(session);
+ }
+ 
+-void session_get(struct session *session)
++void session_get(struct iscsi_session *session)
+ {
+ 	session-&gt;refcount++;
+ }
+ 
+-void session_put(struct session *session)
++void session_put(struct iscsi_session *session)
+ {
+ 	session-&gt;refcount--;
+ 	if (session-&gt;refcount == 0)
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-17 02:25:05 UTC (rev 653)
++++ trunk/usr/iscsi/target.c	2006-11-17 02:34:15 UTC (rev 654)
+@@ -180,7 +180,7 @@
+ 					uint32_t cid, char *buf, int rest)
+ {
+ 	int len, total = 0;
+-	struct session *session;
++	struct iscsi_session *session;
+ 	struct connection *conn;
+ 
+ 	session = session_lookup(sid_to_tsih(sid));
+@@ -216,7 +216,7 @@
+ 				     char *buf, int rest)
+ {
+ 	int len, total = 0;
+-	struct session *session;
++	struct iscsi_session *session;
+ 
+ 	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
+ 		if (sid64(session-&gt;isid, session-&gt;tsih) == sid || !sid) {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000640.html">[Stgt-svn] r653 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000642.html">[Stgt-svn] r655 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#641">[ date ]</a>
+              <a href="thread.html#641">[ thread ]</a>
+              <a href="subject.html#641">[ subject ]</a>
+              <a href="author.html#641">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

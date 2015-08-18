@@ -1,0 +1,279 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r648 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r648%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611150814.kAF8E5mH032309%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000634.html">
+   <LINK REL="Next"  HREF="000636.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r648 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r648%20-%20trunk/usr/iscsi&In-Reply-To=%3C200611150814.kAF8E5mH032309%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r648 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov 15 09:14:05 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000634.html">[Stgt-svn] r647 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000636.html">[Stgt-svn] r649 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#635">[ date ]</a>
+              <a href="thread.html#635">[ thread ]</a>
+              <a href="subject.html#635">[ subject ]</a>
+              <a href="author.html#635">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-15 09:14:04 +0100 (Wed, 15 Nov 2006)
+New Revision: 648
+
+Modified:
+   trunk/usr/iscsi/account.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+Log:
+Rename struct target struct iscsi_target
+
+
+Modified: trunk/usr/iscsi/account.c
+===================================================================
+--- trunk/usr/iscsi/account.c	2006-11-15 03:38:48 UTC (rev 647)
++++ trunk/usr/iscsi/account.c	2006-11-15 08:14:04 UTC (rev 648)
+@@ -141,7 +141,7 @@
+ static int iscsi_account_bind(int tid, uint32_t uid)
+ {
+ 	int i, err;
+-	struct target* target;
++	struct iscsi_target* target;
+ 	struct iscsi_account *ac, *tmp;
+ 	struct ac_node *acn;
+ 
+@@ -208,7 +208,7 @@
+ 			buffer_check(buf, total, len, rest);
+ 		}
+ 	} else {
+-		struct target* target;
++		struct iscsi_target* target;
+ 
+ 		target = target_find_by_id(tid);
+ 		if (!target)
+@@ -270,7 +270,7 @@
+ int iscsi_account_available(int tid, int dir)
+ {
+ 	int err = 0;
+-	struct target* target;
++	struct iscsi_target* target;
+ 	struct ac_node *acn;
+ 
+ 	target = target_find_by_id(tid);
+@@ -300,7 +300,7 @@
+ int iscsi_account_lookup(int tid, int dir, char *user, char *pass)
+ {
+ 	int err = ENOENT;
+-	struct target* target;
++	struct iscsi_target* target;
+ 	struct iscsi_account *ac;
+ 	struct ac_node *acn;
+ 
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-15 03:38:48 UTC (rev 647)
++++ trunk/usr/iscsi/iscsid.c	2006-11-15 08:14:04 UTC (rev 648)
+@@ -313,7 +313,7 @@
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	char *name, *alias, *session_type, *target_name;
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	conn-&gt;cid = be16_to_cpu(req-&gt;cid);
+ 	memcpy(conn-&gt;isid, req-&gt;isid, sizeof(req-&gt;isid));
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-15 03:38:48 UTC (rev 647)
++++ trunk/usr/iscsi/iscsid.h	2006-11-15 08:14:04 UTC (rev 648)
+@@ -64,7 +64,7 @@
+ 	struct list_head hlist;
+ 
+ 	char *initiator;
+-	struct target *target;
++	struct iscsi_target *target;
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+ 
+@@ -206,7 +206,7 @@
+ 
+ #define INCOMING_BUFSIZE	8192
+ 
+-struct target {
++struct iscsi_target {
+ 	struct list_head tlist;
+ 
+ 	struct list_head sessions_list;
+@@ -264,8 +264,8 @@
+ extern void session_put(struct session *session);
+ 
+ /* target.c */
+-struct target * target_find_by_name(const char *name);
+-struct target * target_find_by_id(int tid);
++struct iscsi_target * target_find_by_name(const char *name);
++struct iscsi_target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
+ /* param.c */
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-11-15 03:38:48 UTC (rev 647)
++++ trunk/usr/iscsi/session.c	2006-11-15 08:14:04 UTC (rev 648)
+@@ -22,7 +22,7 @@
+ struct session *session_find_name(int tid, const char *iname, uint8_t *isid)
+ {
+ 	struct session *session;
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	if (!(target = target_find_by_id(tid)))
+ 		return NULL;
+@@ -52,7 +52,7 @@
+ {
+ 	struct session *session = NULL;
+ 	static uint16_t tsih, last_tsih = 0;
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	target = target_find_by_id(conn-&gt;tid);
+ 	if (!target)
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-15 03:38:48 UTC (rev 647)
++++ trunk/usr/iscsi/target.c	2006-11-15 08:14:04 UTC (rev 648)
+@@ -22,7 +22,7 @@
+ 
+ void target_list_build(struct connection *conn, char *addr, char *name)
+ {
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+ 		if (name &amp;&amp; strcmp(target-&gt;name, name))
+@@ -35,9 +35,9 @@
+ 	}
+ }
+ 
+-struct target *target_find_by_name(const char *name)
++struct iscsi_target *target_find_by_name(const char *name)
+ {
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+ 		if (!strcmp(target-&gt;name, name))
+@@ -47,9 +47,9 @@
+ 	return NULL;
+ }
+ 
+-struct target* target_find_by_id(int tid)
++struct iscsi_target* target_find_by_id(int tid)
+ {
+-	struct target *target;
++	struct iscsi_target *target;
+ 
+ 	list_for_each_entry(target, &amp;targets_list, tlist) {
+ 		if (target-&gt;tid == tid)
+@@ -61,7 +61,7 @@
+ 
+ int iscsi_target_destroy(int tid)
+ {
+-	struct target* target;
++	struct iscsi_target* target;
+ 
+ 	if (!(target = target_find_by_id(tid)))
+ 		return -ENOENT;
+@@ -83,7 +83,7 @@
+ 
+ int iscsi_target_create(int tid, char *name)
+ {
+-	struct target *target;
++	struct iscsi_target *target;
+ 	struct param default_tgt_session_param[] = {
+ 		{0, 8192},
+ 		{0, 8192},
+@@ -134,7 +134,7 @@
+ 	int idx, err;
+ 	unsigned int val;
+ 	char *str;
+-	struct target* target;
++	struct iscsi_target* target;
+ 
+ 	target = target_find_by_id(tid);
+ 	if (!target)
+@@ -176,7 +176,7 @@
+ 	return total;
+ }
+ 
+-static int iscsi_target_show_connection(struct target* target, uint64_t sid,
++static int iscsi_target_show_connection(struct iscsi_target* target, uint64_t sid,
+ 					uint32_t cid, char *buf, int rest)
+ {
+ 	int len, total = 0;
+@@ -212,7 +212,7 @@
+ 	return total;
+ }
+ 
+-static int iscsi_target_show_session(struct target* target, uint64_t sid,
++static int iscsi_target_show_session(struct iscsi_target* target, uint64_t sid,
+ 				     char *buf, int rest)
+ {
+ 	int len, total = 0;
+@@ -236,7 +236,7 @@
+ int iscsi_target_show(int mode, int tid, uint64_t sid, uint32_t cid, uint64_t lun,
+ 		      char *buf, int rest)
+ {
+-	struct target* target;
++	struct iscsi_target* target;
+ 	int len, total = 0;
+ 
+ 	target = target_find_by_id(tid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000634.html">[Stgt-svn] r647 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000636.html">[Stgt-svn] r649 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#635">[ date ]</a>
+              <a href="thread.html#635">[ thread ]</a>
+              <a href="subject.html#635">[ subject ]</a>
+              <a href="author.html#635">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

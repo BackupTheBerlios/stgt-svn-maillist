@@ -1,0 +1,85 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r137 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r137%20-%20trunk/kernel&In-Reply-To=%3C200510290915.j9T9Fh79012009%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000130.html">
+   <LINK REL="Next"  HREF="000132.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r137 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r137%20-%20trunk/kernel&In-Reply-To=%3C200510290915.j9T9Fh79012009%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r137 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Oct 29 11:15:43 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000130.html">[Stgt-svn] r136 - in trunk: . istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000132.html">[Stgt-svn] r138 - in trunk: . ibmvstgt
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#131">[ date ]</a>
+              <a href="thread.html#131">[ thread ]</a>
+              <a href="subject.html#131">[ subject ]</a>
+              <a href="author.html#131">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-29 11:15:41 +0200 (Sat, 29 Oct 2005)
+New Revision: 137
+
+Modified:
+   trunk/kernel/tgt.h
+Log:
+Improve dprintk and eprintk macro slightly.
+
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-10-28 15:50:57 UTC (rev 136)
++++ trunk/kernel/tgt.h	2005-10-29 09:15:41 UTC (rev 137)
+@@ -86,7 +86,7 @@
+ 
+ #define eprintk(fmt, args...)					\
+ do {								\
+-	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
++	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
+ 
+ #ifdef DEBUG_TGT
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000130.html">[Stgt-svn] r136 - in trunk: . istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000132.html">[Stgt-svn] r138 - in trunk: . ibmvstgt
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#131">[ date ]</a>
+              <a href="thread.html#131">[ thread ]</a>
+              <a href="subject.html#131">[ subject ]</a>
+              <a href="author.html#131">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

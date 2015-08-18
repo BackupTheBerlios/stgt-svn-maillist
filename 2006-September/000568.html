@@ -1,0 +1,221 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r581 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r581%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609010913.k819D3nj022634%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000567.html">
+   <LINK REL="Next"  HREF="000569.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r581 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r581%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609010913.k819D3nj022634%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r581 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Sep  1 11:13:03 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000567.html">[Stgt-svn] r580 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000569.html">[Stgt-svn] r582 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#568">[ date ]</a>
+              <a href="thread.html#568">[ thread ]</a>
+              <a href="subject.html#568">[ subject ]</a>
+              <a href="author.html#568">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-01 11:13:02 +0200 (Fri, 01 Sep 2006)
+New Revision: 581
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Rename __iscsi_cmd_rx_done iscsi_scsi_cmd_execute.
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-01 08:37:42 UTC (rev 580)
++++ trunk/usr/iscsi/iscsid.c	2006-09-01 09:13:02 UTC (rev 581)
+@@ -685,7 +685,7 @@
+ 	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ }
+ 
+-int cmnd_execute(struct connection *conn)
++static int cmnd_execute(struct connection *conn)
+ {
+ 	int res = 0;
+ 
+@@ -714,7 +714,7 @@
+ 	return res;
+ }
+ 
+-void cmnd_finish(struct connection *conn)
++static void cmnd_finish(struct connection *conn)
+ {
+ 	switch (conn-&gt;state) {
+ 	case STATE_EXIT:
+@@ -932,7 +932,7 @@
+ 	return 0;
+ }
+ 
+-int cmd_attr(struct iscsi_ctask *ctask)
++static int cmd_attr(struct iscsi_ctask *ctask)
+ {
+ 	int attr;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;ctask-&gt;req;
+@@ -952,7 +952,7 @@
+ 	return attr;
+ }
+ 
+-static int __iscsi_cmd_rx_done(struct iscsi_ctask *ctask)
++static int iscsi_scsi_cmd_execute(struct iscsi_ctask *ctask)
+ {
+ 	struct connection *conn = ctask-&gt;conn;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;ctask-&gt;req;
+@@ -981,16 +981,45 @@
+ 	return err;
+ }
+ 
+-int iscsi_task_queue(struct iscsi_ctask *ctask)
++static int iscsi_task_execute(struct iscsi_ctask *task)
+ {
++	struct iscsi_hdr *hdr = (struct iscsi_hdr *) &amp;task-&gt;req;
++	uint8_t op = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
++	int err;
++
++	switch (op) {
++	case ISCSI_OP_NOOP_OUT:
++/* 		noop_out_exec(cmnd); */
++		break;
++	case ISCSI_OP_SCSI_CMD:
++		err = iscsi_scsi_cmd_execute(task);
++		break;
++	case ISCSI_OP_SCSI_TMFUNC:
++/* 		execute_task_management(cmnd); */
++		break;
++	case ISCSI_OP_LOGOUT:
++/* 		logout_exec(cmnd); */
++		break;
++	case ISCSI_OP_TEXT:
++	case ISCSI_OP_SNACK:
++		break;
++	default:
++		break;
++	}
++
++	return 0;
++}
++
++static int iscsi_task_queue(struct iscsi_ctask *ctask)
++{
+ 	struct session *session = ctask-&gt;conn-&gt;session;
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;ctask-&gt;req;
+ 	uint32_t cmd_sn;
+ 	struct iscsi_ctask *ent;
++	int err;
+ 
+ 	if (req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE) {
+-		__iscsi_cmd_rx_done(ctask);
+-		return 0;
++		return iscsi_task_execute(ctask);
+ 	}
+ 
+ 	dprintf(&quot;%x %x\n&quot;, be32_to_cpu(req-&gt;statsn), session-&gt;exp_cmd_sn);
+@@ -999,7 +1028,8 @@
+ 	retry:
+ 		session-&gt;exp_cmd_sn = ++cmd_sn;
+ 
+-		__iscsi_cmd_rx_done(ctask);
++		/* Should we close the connection... */
++		err = iscsi_task_execute(ctask);
+ 
+ 		if (list_empty(&amp;session-&gt;pending_cmd_list))
+ 			return 0;
+@@ -1031,7 +1061,7 @@
+ 	return 0;
+ }
+ 
+-int iscsi_cmd_rx_done(struct connection *conn)
++static int iscsi_cmd_rx_done(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	struct iscsi_ctask *ctask = conn-&gt;rx_ctask;
+@@ -1070,7 +1100,7 @@
+ 	return err;
+ }
+ 
+-int iscsi_cmd_rx_start(struct connection *conn)
++static int iscsi_cmd_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+ 	uint8_t op;
+@@ -1104,7 +1134,7 @@
+ 	return 0;
+ }
+ 
+-int iscsi_cmd_tx_done(struct connection *conn)
++static int iscsi_cmd_tx_done(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_ctask *ctask = conn-&gt;tx_ctask;
+@@ -1134,7 +1164,7 @@
+ 	return 0;
+ }
+ 
+-int iscsi_cmd_tx_start(struct connection *conn)
++static int iscsi_cmd_tx_start(struct connection *conn)
+ {
+ 	struct iscsi_ctask *ctask;
+ 	struct iscsi_cmd *req;
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-09-01 08:37:42 UTC (rev 580)
++++ trunk/usr/iscsi/iscsid.h	2006-09-01 09:13:02 UTC (rev 581)
+@@ -230,8 +230,6 @@
+ extern void conn_add_to_session(struct connection *conn, struct session *session);
+ 
+ /* iscsid.c */
+-extern int cmnd_execute(struct connection *conn);
+-extern void cmnd_finish(struct connection *conn);
+ extern char *text_key_find(struct connection *conn, char *searchKey);
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000567.html">[Stgt-svn] r580 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000569.html">[Stgt-svn] r582 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#568">[ date ]</a>
+              <a href="thread.html#568">[ thread ]</a>
+              <a href="subject.html#568">[ subject ]</a>
+              <a href="author.html#568">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

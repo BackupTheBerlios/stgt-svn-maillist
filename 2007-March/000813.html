@@ -1,0 +1,169 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r826 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r826%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703150205.l2F25lSE030626%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000812.html">
+   <LINK REL="Next"  HREF="000814.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r826 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r826%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703150205.l2F25lSE030626%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r826 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Mar 15 03:05:47 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000812.html">[Stgt-svn] r825 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000814.html">[Stgt-svn] r827 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#813">[ date ]</a>
+              <a href="thread.html#813">[ thread ]</a>
+              <a href="subject.html#813">[ subject ]</a>
+              <a href="author.html#813">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-15 03:05:46 +0100 (Thu, 15 Mar 2007)
+New Revision: 826
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Add extdata to iscsi_task struct.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-14 10:06:46 UTC (rev 825)
++++ trunk/usr/iscsi/iscsid.c	2007-03-15 02:05:46 UTC (rev 826)
+@@ -865,12 +865,12 @@
+ }
+ 
+ static inline struct iscsi_task *
+-iscsi_alloc_task(struct iscsi_connection *conn)
++iscsi_alloc_task(struct iscsi_connection *conn, int ext_len)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+ 
+-	task = zalloc(sizeof(*task));
++	task = zalloc(sizeof(*task) + ext_len);
+ 	if (!task)
+ 		return NULL;
+ 
+@@ -1205,25 +1205,16 @@
+ 	return 0;
+ }
+ 
+-static struct iscsi_task *__iscsi_task_rx_start(struct iscsi_connection *conn)
+-{
+-	struct iscsi_task *task;
+-
+-	task = iscsi_alloc_task(conn);
+-	if (!task)
+-		return NULL;
+-	conn-&gt;rx_task = task;
+-	return task;
+-}
+-
+ static int iscsi_scsi_cmd_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+ 	int len;
+ 
+-	task = __iscsi_task_rx_start(conn);
+-	if (!task)
++	task = iscsi_alloc_task(conn, 0);
++	if (task)
++		conn-&gt;rx_task = task;
++	else
+ 		return -ENOMEM;
+ 	task-&gt;tag = req-&gt;itt;
+ 
+@@ -1283,8 +1274,10 @@
+ 
+ 	conn-&gt;exp_stat_sn = be32_to_cpu(req-&gt;exp_statsn);
+ 
+-	task = __iscsi_task_rx_start(conn);
+-	if (!task)
++	task = iscsi_alloc_task(conn, 0);
++	if (task)
++		conn-&gt;rx_task = task;
++	else
+ 		goto out;
+ 
+ 	len = ntoh24(req-&gt;dlength);
+@@ -1335,6 +1328,7 @@
+ static int iscsi_task_rx_start(struct iscsi_connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
++	struct iscsi_task *task;
+ 	uint8_t op;
+ 	int err = 0;
+ 
+@@ -1355,7 +1349,10 @@
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		if (!__iscsi_task_rx_start(conn))
++		task = iscsi_alloc_task(conn, 0);
++		if (task)
++			conn-&gt;rx_task = task;
++		else
+ 			err = -ENOMEM;
+ 		break;
+ 	case ISCSI_OP_TEXT:
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-03-14 10:06:46 UTC (rev 825)
++++ trunk/usr/iscsi/iscsid.h	2007-03-15 02:05:46 UTC (rev 826)
+@@ -115,6 +115,8 @@
+ 	void *c_buffer;
+ 
+ 	struct scsi_cmd scmd;
++
++	unsigned long extdata[0];
+ };
+ 
+ struct iscsi_connection {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000812.html">[Stgt-svn] r825 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000814.html">[Stgt-svn] r827 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#813">[ date ]</a>
+              <a href="thread.html#813">[ thread ]</a>
+              <a href="subject.html#813">[ subject ]</a>
+              <a href="author.html#813">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

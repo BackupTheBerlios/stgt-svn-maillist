@@ -1,0 +1,155 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r595 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r595%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200610190800.k9J80m0t028683%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000583.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r595 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r595%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200610190800.k9J80m0t028683%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r595 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Oct 19 10:00:48 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000583.html">[Stgt-svn] r596 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#582">[ date ]</a>
+              <a href="thread.html#582">[ thread ]</a>
+              <a href="subject.html#582">[ subject ]</a>
+              <a href="author.html#582">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-10-19 10:00:48 +0200 (Thu, 19 Oct 2006)
+New Revision: 595
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/util.h
+Log:
+linux's scsi.h uses u32 and u8, which are not defined in user space.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/iscsi/iscsid.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -16,13 +16,14 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+ #include &lt;sys/epoll.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;util.h&quot;
+ 
++#include &lt;scsi/scsi.h&gt;
++
+ #define MAX_QUEUE_CMD	32
+ 
+ static struct iscsi_key login_keys[] = {
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/scsi.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -21,13 +21,14 @@
+ #include &lt;unistd.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+ #include &lt;linux/fs.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;driver.h&quot;
+ 
++#include &lt;scsi/scsi.h&gt;
++
+ #define BLK_SHIFT	9
+ 
+ int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/target.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -27,7 +27,6 @@
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/socket.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+@@ -35,6 +34,8 @@
+ #include &quot;driver.h&quot;
+ #include &quot;target.h&quot;
+ 
++#include &lt;scsi/scsi.h&gt;
++
+ static struct target *hostt[MAX_NR_HOST];
+ static struct list_head target_hash_list[1 &lt;&lt; HASH_ORDER];
+ 
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/util.h	2006-10-19 08:00:48 UTC (rev 595)
+@@ -1,8 +1,13 @@
+ #ifndef __UTIL_H__
+ #define __UTIL_H__
+ 
++#include &lt;stdint.h&gt;
+ #include &lt;sys/user.h&gt;
+ 
++typedef uint8_t u8;
++typedef uint16_t u16;
++typedef uint32_t u32;
++
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ #define ALIGN(x,a) (((x)+(a)-1)&amp;~((a)-1))
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000583.html">[Stgt-svn] r596 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#582">[ date ]</a>
+              <a href="thread.html#582">[ thread ]</a>
+              <a href="subject.html#582">[ subject ]</a>
+              <a href="author.html#582">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

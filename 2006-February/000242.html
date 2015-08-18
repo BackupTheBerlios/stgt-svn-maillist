@@ -1,0 +1,1352 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r255 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r255%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602021227.k12CRM92024935%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000241.html">
+   <LINK REL="Next"  HREF="000243.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r255 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r255%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602021227.k12CRM92024935%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r255 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb  2 13:27:22 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000241.html">[Stgt-svn] r254 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000243.html">[Stgt-svn] r256 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#242">[ date ]</a>
+              <a href="thread.html#242">[ thread ]</a>
+              <a href="subject.html#242">[ subject ]</a>
+              <a href="author.html#242">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-02 13:27:10 +0100 (Thu, 02 Feb 2006)
+New Revision: 255
+
+Modified:
+   branches/use-scsi-ml/usr/Makefile
+   branches/use-scsi-ml/usr/dl.c
+   branches/use-scsi-ml/usr/dl.h
+   branches/use-scsi-ml/usr/ipc.c
+   branches/use-scsi-ml/usr/mgmt.c
+   branches/use-scsi-ml/usr/netlink.c
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgt_sysfs.h
+   branches/use-scsi-ml/usr/tgtadm.c
+   branches/use-scsi-ml/usr/tgtadm.h
+   branches/use-scsi-ml/usr/tgtd.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Seems the bind operation works only with ibmvstgt (needs more work for istgt).
+
+
+Modified: branches/use-scsi-ml/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/usr/Makefile	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/Makefile	2006-02-02 12:27:10 UTC (rev 255)
+@@ -1,16 +1,13 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../include -DNETLINK_TGT=20
+-PROGRAMS = tgtd tgtadm scsi.so
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../include
++PROGRAMS = tgtd tgtadm
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o netlink.o ipc.o dl.o mgmt.o target.o log.o
++tgtd: tgtd.o netlink.o ipc.o dl.o mgmt.o target.o scsi.o log.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+ tgtadm: tgtadm.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+-scsi.so: scsi.o
+-	$(CC) -shared -o $@ $^
+-
+ clean:
+ 	rm -f *.o $(PROGRAMS)
+
+Modified: branches/use-scsi-ml/usr/dl.c
+===================================================================
+--- branches/use-scsi-ml/usr/dl.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/dl.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -1,5 +1,5 @@
+ /*
+- * Dynamic library
++ * LLD dynamic library
+  *
+  * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+  * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+@@ -7,8 +7,6 @@
+  * This code is licenced under the GPL.
+  */
+ 
+-/* TODO : better handling of dynamic library. */
+-
+ #include &lt;string.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;dlfcn.h&gt;
+@@ -25,88 +23,52 @@
+ #include &quot;dl.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
+-struct driver_info dlinfo[MAX_DL_HANDLES];
++/*
++ * Software LLDs needs to set up a target (that means tgtd must load
++ * thier libraries) before a scsi_host is created in kernel space. In
++ * short, tgtd needs to load LLD libraries before it knows what
++ * libraries are avilable (through sysfs). I chose the easiest way.
++ */
+ 
+-char *typeid_to_name(struct driver_info *dinfo, int typeid)
+-{
+-	return dinfo[typeid].name;
+-}
++struct driver_info dlinfo[] = {
++	{&quot;istgt&quot;, }, {&quot;ibmvstgt&quot;,},
++};
+ 
+-static char *dlname(char *d_name, char *entry)
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++
++int dl_init(struct driver_info *dinfo)
+ {
+-	int fd, err;
+-	char *p, path[PATH_MAX], buf[PATH_MAX];
++	int i, fd, err;
++	char path[PATH_MAX];
++	mode_t fmode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
++	mode_t dmode = S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
+ 
+-	snprintf(path, sizeof(path),
+-		 TGT_TYPE_SYSFSDIR &quot;/%s/%s&quot;, d_name, entry);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;%s\n&quot;, path);
+-		return NULL;
+-	}
+-	memset(buf, 0, sizeof(buf));
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
++	system(&quot;rm -rf &quot; TGT_LLD_SYSFSDIR);
++	err = mkdir(TGT_LLD_SYSFSDIR, dmode);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;%s %d\n&quot;, path, errno);
+-		return NULL;
++		perror(&quot;Cannot create &quot; TGT_LLD_SYSFSDIR);
++		return err;
+ 	}
+ 
+-	p = strchr(buf, '\n');
+-	if (p)
+-		*p = '\0';
++	for (i = 0; i &lt; ARRAY_SIZE(dlinfo); i++) {
++		snprintf(path, sizeof(path), &quot;%s.so&quot;, dlinfo[i].name);
++		dlinfo[i].dl = dlopen(path, RTLD_LAZY);
++		if (dlinfo[i].dl)
++			eprintf(&quot;%s library was loaded.\n&quot;, dlinfo[i].name);
++		else
++			eprintf(&quot;%s library is not loaded.\n&quot;, dlinfo[i].name);
+ 
+-	return strdup(buf);
+-}
++		snprintf(path, sizeof(path), TGT_LLD_SYSFSDIR &quot;/%d-%s&quot;,
++			 i, dlinfo[i].name);
+ 
+-static int filter(const struct dirent *dir)
+-{
+-	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
+-}
+-
+-int dl_init(struct driver_info *dinfo)
+-{
+-	int i, nr, idx;
+-	char path[PATH_MAX], *p;
+-	struct dirent **namelist;
+-	struct driver_info *di;
+-
+-	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	for (i = 0; i &lt; nr; i++) {
+-		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-			;
+-		idx = atoi(p);
+-		if (idx &gt; MAX_DL_HANDLES) {
+-			eprintf(&quot;Too large dl idx %s %d\n&quot;,
+-				namelist[i]-&gt;d_name, idx);
+-			continue;
++		fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++		if (fd &lt; 0) {
++			eprintf(&quot;Cannot create %s.\n&quot;, path);
++			exit(-1);
+ 		}
+-		di = &amp;dinfo[idx];
+-
+-		di-&gt;name = dlname(namelist[i]-&gt;d_name, &quot;name&quot;);
+-		if (!di-&gt;name)
+-			continue;
+-
+-		snprintf(path, sizeof(path), &quot;%s.so&quot;, di-&gt;name);
+-		di-&gt;dl = dlopen(path, RTLD_LAZY);
+-		if (!di-&gt;dl)
+-			eprintf(&quot;%s %s\n&quot;, path, dlerror());
+-
+-		di-&gt;proto = dlname(namelist[i]-&gt;d_name, &quot;protocol&quot;);
+-		if (!di-&gt;proto)
+-			continue;
+-
+-		snprintf(path, sizeof(path), &quot;%s.so&quot;, di-&gt;proto);
+-		di-&gt;pdl = dlopen(path, RTLD_LAZY);
+-		if (!di-&gt;pdl)
+-			eprintf(&quot;%s %s\n&quot;, path, dlerror());
+ 	}
+ 
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return 0;
++	return ARRAY_SIZE(dlinfo);
+ }
+ 
+ void *dl_poll_init_fn(struct driver_info *dinfo, int idx)
+@@ -131,22 +93,6 @@
+ 	return NULL;
+ }
+ 
+-void *dl_proto_cmd_process(struct driver_info *dinfo, int tid, int typeid)
+-{
+-	if (dinfo[typeid].pdl)
+-		return dlsym(dinfo[typeid].pdl, &quot;cmd_process&quot;);
+-
+-	return NULL;
+-}
+-
+-void *dl_proto_get_devid(struct driver_info *dinfo, int tid, int typeid)
+-{
+-	if (dinfo[typeid].pdl)
+-		return dlsym(dinfo[typeid].pdl, &quot;get_devid&quot;);
+-
+-	return NULL;
+-}
+-
+ void *dl_event_fn(struct driver_info *dinfo, int tid, int typeid)
+ {
+ 	if (dinfo[typeid].dl)
+@@ -154,11 +100,3 @@
+ 
+ 	return NULL;
+ }
+-
+-void *dl_cmd_done_fn(struct driver_info *dinfo, int typeid)
+-{
+-	if (dinfo[typeid].pdl)
+-		return dlsym(dinfo[typeid].pdl, &quot;cmd_done&quot;);
+-
+-	return NULL;
+-}
+
+Modified: branches/use-scsi-ml/usr/dl.h
+===================================================================
+--- branches/use-scsi-ml/usr/dl.h	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/dl.h	2006-02-02 12:27:10 UTC (rev 255)
+@@ -5,12 +5,10 @@
+ 
+ struct driver_info {
+ 	char *name;
+-	char *proto;
+ 	void *dl;
+-	void *pdl;
+ };
+ 
+-extern struct driver_info dlinfo[MAX_DL_HANDLES];
++extern struct driver_info dlinfo[];
+ 
+ extern int dl_init(struct driver_info *);
+ extern struct pollfd * dl_poll_init(struct driver_info *, int *nr);
+@@ -19,9 +17,5 @@
+ extern void *dl_poll_fn(struct driver_info *, int idx);
+ extern void *dl_ipc_fn(struct driver_info *, int typeid);
+ extern void *dl_event_fn(struct driver_info *, int tid, int typeid);
+-extern void *dl_proto_cmd_process(struct driver_info *, int tid, int typeid);
+-extern void *dl_proto_get_devid(struct driver_info *, int tid, int typeid);
+-extern void *dl_cmd_done_fn(struct driver_info *, int typeid);
+-extern char *typeid_to_name(struct driver_info *, int typeid);
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/usr/ipc.c
+===================================================================
+--- branches/use-scsi-ml/usr/ipc.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/ipc.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -161,9 +161,8 @@
+ 
+ 	switch (req-&gt;mode) {
+ 	case MODE_DEVICE:
+-		dprintf(&quot;%d %d %d %d %lx\n&quot;,
+-			req-&gt;tid, req-&gt;typeid, err, nlh-&gt;nlmsg_len,
+-			(unsigned long) task);
++		dprintf(&quot;%d %d %d %lx\n&quot;,
++			req-&gt;tid, err, nlh-&gt;nlmsg_len, (unsigned long) task);
+ 		req-&gt;addr = (unsigned long) task;
+ 		write(poll_array[POLLS_PER_DRV + req-&gt;tid].fd,
+ 		      sbuf, NLMSG_ALIGN(nlh-&gt;nlmsg_len));
+
+Modified: branches/use-scsi-ml/usr/mgmt.c
+===================================================================
+--- branches/use-scsi-ml/usr/mgmt.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/mgmt.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -21,7 +21,7 @@
+ #include &lt;linux/types.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+-#include &lt;tgt_if.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+ #include &quot;dl.h&quot;
+ #include &quot;log.h&quot;
+@@ -71,48 +71,66 @@
+ 	return err;
+ }
+ 
+-static void __ktarget_create(struct tgt_event *ev, struct tgtadm_req *req)
++static void __bind(struct tgt_event *ev, struct tgtadm_req *req)
+ {
+-	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, typeid_to_name(dlinfo, req-&gt;typeid));
+-	ev-&gt;u.c_target.pid = req-&gt;pid;
++	char path[PATH_MAX], buf[32];
++	int err, fd, pid;
++
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/pid&quot;,
++		 req-&gt;tid);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot open %s\n&quot;, path);
++		return;
++	}
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot read\n&quot;);
++		return;
++	}
++	sscanf(buf, &quot;%d\n&quot;, &amp;pid);
++
++	ev-&gt;u.target_bind.host_no = req-&gt;host_no;
++	ev-&gt;u.target_bind.pid = pid;
+ }
+ 
++int ktarget_bind(int tid, int host_no)
++{
++	struct tgtadm_req req;
++
++	dprintf(&quot;%d %d\n&quot;, tid, host_no);
++
++	req.tid = tid;
++	req.host_no = host_no;
++	return tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_BIND, __bind);
++}
++
+ int ktarget_create(int typeid)
+ {
+ 	struct tgtadm_req req;
+-	int fd, err;
++	int fd, tid;
+ 
+ 	req.typeid = typeid;
+-	req.pid = target_thread_create(&amp;fd);
+-	err = tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_CREATE,
+-				__ktarget_create);
+-	if (err &gt;= 0) {
+-		dprintf(&quot;%d %d\n&quot;, err, fd);
++	tid = target_thread_create(&amp;fd);
++	if (tid &gt;= 0) {
++		dprintf(&quot;%d %d\n&quot;, tid, fd);
+ 
+ 		/* FIXME */
+-		if (err &gt; POLLS_PER_DRV)
+-			eprintf(&quot;too large tid %d\n&quot;, err);
++		if (tid &gt; POLLS_PER_DRV)
++			eprintf(&quot;too large tid %d\n&quot;, tid);
+ 		else {
+-			poll_array[POLLS_PER_DRV + err].fd = fd;
+-			poll_array[POLLS_PER_DRV + err].events = POLLIN;
++			poll_array[POLLS_PER_DRV + tid].fd = fd;
++			poll_array[POLLS_PER_DRV + tid].events = POLLIN;
+ 		}
+ 	}
+ 
+-	return err;
++	return tid;
+ }
+ 
+-static void __ktarget_destroy(struct tgt_event *ev, struct tgtadm_req *req)
+-{
+-	ev-&gt;u.d_target.tid = req-&gt;tid;
+-}
+-
+ int ktarget_destroy(int tid)
+ {
+-	struct tgtadm_req req;
+-	req.tid = tid;
+-
+-	return tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_DESTROY,
+-				 __ktarget_destroy);
++	return 0;
+ }
+ 
+ static void kdevice_create_parser(char *args, char **path, char **devtype)
+@@ -200,6 +218,9 @@
+ 	case OP_DELETE:
+ 		err = ktarget_destroy(req-&gt;tid);
+ 		break;
++	case OP_BIND:
++		err = ktarget_bind(req-&gt;tid, req-&gt;host_no);
++		break;
+ 	default:
+ 		break;
+ 	}
+
+Modified: branches/use-scsi-ml/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/usr/netlink.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/netlink.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -22,7 +22,7 @@
+ #include &lt;asm/types.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+-#include &lt;tgt_if.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+ #include &quot;dl.h&quot;
+ 
+@@ -99,7 +99,6 @@
+ 	struct tgt_event *ev;
+ 	char rbuf[NL_BUFSIZE];
+ 	int err;
+-	void (*fn) (char *);
+ 
+ 	err = nl_read(fd, rbuf);
+ 	if (err &lt; 0)
+@@ -111,15 +110,6 @@
+ 	dprintf(&quot;%d %d\n&quot;, getpid(), nlh-&gt;nlmsg_type);
+ 
+ 	switch (nlh-&gt;nlmsg_type) {
+-	case TGT_KEVENT_TARGET_PASSTHRU:
+-		fn = dl_event_fn(dinfo, ev-&gt;k.tgt_passthru.tid,
+-				 ev-&gt;k.tgt_passthru.typeid);
+-		if (fn)
+-			fn(NLMSG_DATA(rbuf));
+-		else
+-			eprintf(&quot;Cannot handle async event %d\n&quot;,
+-				ev-&gt;k.tgt_passthru.tid);
+-		break;
+ 	default:
+ 		/* kernel module bug */
+ 		eprintf(&quot;unknown event %u\n&quot;, nlh-&gt;nlmsg_type);
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -11,29 +11,40 @@
+  *   licensed under the terms of the GNU GPL v2.0,
+  */
+ 
++#include &lt;errno.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;dirent.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+-#include &lt;scsi/iscsi_proto.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+ #include &lt;asm/page.h&gt;
++#include &lt;scsi/iscsi_proto.h&gt;
++#include &lt;scsi/scsi.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
+-#include &lt;fcntl.h&gt;
++
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
+-#include &quot;tgt_scsi_if.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
++/*
++ * FIXME: in some architectures (e.g., powerpc) don't export PAGE_* to
++ * user space by asm/page.h. How should we handle this?
++ */
++#ifndef PAGE_SHIFT
++#define	PAGE_SHIFT	12
++#define	PAGE_SIZE	(1UL &lt;&lt; PAGE_SHIFT)
++#define	PAGE_MASK	(~(PAGE_SIZE-1))
++#endif
++
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+ #define cpu_to_be64 __cpu_to_be64
+@@ -604,10 +615,8 @@
+ 	return result;
+ }
+ 
+-uint64_t get_devid(uint8_t *pdu)
++uint64_t scsi_get_devid(uint8_t *p)
+ {
+-	struct tgt_scsi_cmd *scmd = (struct tgt_scsi_cmd *) pdu;
+-	uint8_t *p = scmd-&gt;lun;
+ 	uint64_t lun = TGT_INVALID_DEV_ID;
+ 
+ 	switch (*p &gt;&gt; 6) {
+@@ -626,13 +635,12 @@
+ 	return lun;
+ }
+ 
+-int cmd_process(int tid, uint8_t *pdu, int *len,
+-		uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-		uint8_t *try_map, uint64_t *offset, uint64_t lun)
++int scsi_cmd_process(int tid, uint8_t *pdu, int *len,
++		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
++		     uint8_t *try_map, uint64_t *offset, uint64_t lun)
+ {
+ 	int fd, result = SAM_STAT_GOOD;
+-	struct tgt_scsi_cmd *scmd = (struct tgt_scsi_cmd *) pdu;
+-	uint8_t *data = NULL, *scb = scmd-&gt;scb;
++	uint8_t *data = NULL, *scb = pdu;
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot; %x %u\n&quot;, tid, lun, scb[0], datalen);
+ 
+@@ -726,7 +734,7 @@
+ 	return result;
+ }
+ 
+-int cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	int err = 0;
+ 
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/target.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -13,6 +13,7 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
++#include &lt;search.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/mman.h&gt;
+@@ -21,8 +22,8 @@
+ #include &lt;sys/stat.h&gt;
+ #include &lt;linux/fs.h&gt;
+ #include &lt;linux/netlink.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+-#include &lt;tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+ #include &quot;dl.h&quot;
+@@ -47,6 +48,7 @@
+ 
+ struct target {
+ 	struct pollfd pfd[2];
++	int tid;
+ 
+ 	struct device **devt;
+ 	uint64_t max_device;
+@@ -209,11 +211,18 @@
+ {
+ 	int err;
+ 
++	system(&quot;rm -rf &quot; TGT_TARGET_SYSFSDIR);
+ 	system(&quot;rm -rf &quot; TGT_DEVICE_SYSFSDIR);
+ 
++	err = mkdir(TGT_TARGET_SYSFSDIR, dmode);
++	if (err &lt; 0) {
++		perror(&quot;Cannot create &quot; TGT_TARGET_SYSFSDIR);
++		return err;
++	}
++
+ 	err = mkdir(TGT_DEVICE_SYSFSDIR, dmode);
+ 	if (err &lt; 0)
+-		perror(&quot;Cannot create&quot; TGT_DEVICE_SYSFSDIR);
++		perror(&quot;Cannot create &quot; TGT_DEVICE_SYSFSDIR);
+ 
+ 	return err;
+ }
+@@ -279,8 +288,62 @@
+ 	return nlh-&gt;nlmsg_len;
+ }
+ 
+-static int cmd_queue(struct driver_info *dinfo, int fd, char *reqbuf)
++/* FIXME */
++
++#undef offsetof
++#ifdef __compiler_offsetof
++#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
++#else
++#define offsetof(TYPE, MEMBER) ((size_t) &amp;((TYPE *)0)-&gt;MEMBER)
++#endif
++
++#define LIST_HEAD_INIT(name) { &amp;(name), &amp;(name) }
++
++#define INIT_LIST_HEAD(ptr) do { \
++	(ptr)-&gt;q_forw = (ptr); (ptr)-&gt;q_back = (ptr); \
++} while (0)
++
++#define container_of(ptr, type, member) ({			\
++        const typeof( ((type *)0)-&gt;member ) *__mptr = (ptr);	\
++        (type *)( (char *)__mptr - offsetof(type,member) );})
++
++#define list_entry(ptr, type, member) \
++	container_of(ptr, type, member)
++
++#define list_for_each_entry(pos, head, member)				\
++	for (pos = list_entry((head)-&gt;q_forw, typeof(*pos), member);	\
++	     &amp;pos-&gt;member != (head); 	\
++	     pos = list_entry(pos-&gt;member.q_forw, typeof(*pos), member))
++
++struct qelem {
++	struct qelem *q_forw;
++	struct qelem *q_back;
++};
++
++static struct qelem cqueue = LIST_HEAD_INIT(cqueue);
++
++struct cmd {
++	struct qelem clist;
++	uint32_t cid;
++	uint64_t devid;
++	uint64_t uaddr;
++	uint32_t len;
++	int mmap;
++};
++
++static struct cmd *find_cmd(uint32_t cid)
+ {
++	struct cmd *cmd;
++
++	list_for_each_entry(cmd, &amp;cqueue, clist) {
++		if (cmd-&gt;cid == cid)
++			return cmd;
++	}
++	return NULL;
++}
++
++static int cmd_queue(int fd, char *reqbuf)
++{
+ 	int result, len = 0;
+ 	struct tgt_event *ev_req = (struct tgt_event *) reqbuf;
+ 	char resbuf[NLMSG_SPACE(sizeof(struct tgt_event))];
+@@ -288,46 +351,34 @@
+ 	uint64_t offset, cid = ev_req-&gt;k.cmd_req.cid, devid;
+ 	uint8_t *pdu, rw = 0, try_map = 0;
+ 	unsigned long uaddr = 0;
+-	static int (*fn) (int, uint8_t *, int *, uint32_t,
+-			  unsigned long *, uint8_t *, uint8_t *, uint64_t *, uint64_t);
+-	static uint64_t (*get_devid) (uint8_t *pdu);
+-	int tid = ev_req-&gt;k.cmd_req.tid;
+-	int typeid = ev_req-&gt;k.cmd_req.typeid;
++	int host_no = ev_req-&gt;k.cmd_req.host_no;
++	struct cmd *cmd;
+ 
+ 	memset(resbuf, 0, sizeof(resbuf));
+ 	pdu = (uint8_t *) ev_req-&gt;data;
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, pdu[0]);
+ 
+-	if (!get_devid)
+-		get_devid = dl_proto_get_devid(dinfo, tid, typeid);
++	devid = scsi_get_devid(pdu);
+ 
+-	if (get_devid)
+-		devid = get_devid(pdu);
+-	else {
+-		eprintf(&quot;Cannot find get_devid\n&quot;);
+-		devid = TGT_INVALID_DEV_ID;
+-	}
+-
+ 	if (target-&gt;max_device &gt; devid &amp;&amp; target-&gt;devt[devid])
+ 		uaddr = target-&gt;devt[devid]-&gt;addr;
+ 
+-	if (!fn)
+-		fn = dl_proto_cmd_process(dinfo, tid, typeid);
+-	if (fn)
+-		result = fn(tid,
+-			    pdu,
+-			    &amp;len,
+-			    ev_req-&gt;k.cmd_req.data_len,
+-			    &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset, devid);
+-	else {
+-		result = -EINVAL;
+-		eprintf(&quot;Cannot process cmd %d %&quot; PRIu64 &quot;\n&quot;,
+-			tid, cid);
+-	}
++	/* FIXME */
++	result = scsi_cmd_process(target-&gt;tid, pdu, &amp;len,
++				  ev_req-&gt;k.cmd_req.data_len,
++				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset, devid);
+ 
+-	ev_res-&gt;u.cmd_res.tid = tid;
++	cmd = malloc(sizeof(*cmd));
++	cmd-&gt;cid = cid;
++	cmd-&gt;devid = devid;
++	cmd-&gt;uaddr = uaddr;
++	cmd-&gt;len = len;
++	cmd-&gt;mmap = try_map;
++
++	insque(&amp;cmd-&gt;clist, &amp;cqueue);
++
++	ev_res-&gt;u.cmd_res.host_no = host_no;
+ 	ev_res-&gt;u.cmd_res.cid = cid;
+-	ev_res-&gt;u.cmd_res.devid = devid;
+ 	ev_res-&gt;u.cmd_res.len = len;
+ 	ev_res-&gt;u.cmd_res.result = result;
+ 	ev_res-&gt;u.cmd_res.uaddr = uaddr;
+@@ -341,44 +392,46 @@
+ 			  NLMSG_SPACE(sizeof(*ev_res)));
+ }
+ 
+-static void cmd_done(struct driver_info *dinfo, char *buf)
++static void cmd_done(char *buf)
+ {
+-	static int (*done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ 	struct tgt_event *ev = (struct tgt_event *) buf;
+ 	int err = 0;
+-	int do_munmap = ev-&gt;k.cmd_done.mmapped;
++	uint32_t cid = ev-&gt;k.cmd_done.cid;
++	struct cmd *cmd;
++	int do_munmap;
+ 
+-	if (!done)
+-		done = dl_cmd_done_fn(dinfo, ev-&gt;k.cmd_done.typeid);
++	cmd = find_cmd(cid);
++	if (!cmd) {
++		eprintf(&quot;Cannot find cmd %u\n&quot;, cid);
++		return;
++	}
++	remque(&amp;cmd-&gt;clist);
++	do_munmap = cmd-&gt;mmap;
+ 
+-	if (done) {
+-		if (do_munmap) {
+-			uint64_t devid = ev-&gt;k.cmd_done.devid;
++	if (do_munmap) {
++		if (cmd-&gt;devid &gt;= target-&gt;max_device) {
++			eprintf(&quot;%&quot; PRIu64 &quot; %&quot; PRIu64 &quot;\n&quot;,
++				cmd-&gt;devid, target-&gt;max_device);
++			exit(1);
++		}
+ 
+-			if (devid &gt;= target-&gt;max_device) {
+-				eprintf(&quot;%&quot; PRIu64 &quot; %&quot; PRIu64 &quot;\n&quot;,
+-					devid, target-&gt;max_device);
+-				exit(1);
+-			}
+-
+-			if (target-&gt;devt[devid]) {
+-				if (target-&gt;devt[devid]-&gt;addr)
+-					do_munmap = 0;
+-			} else {
+-				eprintf(&quot;%&quot; PRIu64 &quot; is null\n&quot;, devid);
+-				exit(1);
+-			}
++		if (target-&gt;devt[cmd-&gt;devid]) {
++			if (target-&gt;devt[cmd-&gt;devid]-&gt;addr)
++				do_munmap = 0;
++		} else {
++			eprintf(&quot;%&quot; PRIu64 &quot; is null\n&quot;, cmd-&gt;devid);
++			exit(1);
+ 		}
+-		err = done(do_munmap, !ev-&gt;k.cmd_done.mmapped,
+-			 ev-&gt;k.cmd_done.uaddr, ev-&gt;k.cmd_done.len);
+-	} else
+-		eprintf(&quot;Cannot handle cmd done\n&quot;);
++	}
+ 
+-	dprintf(&quot;%d %lx %u %d\n&quot;, ev-&gt;k.cmd_done.mmapped,
+-		ev-&gt;k.cmd_done.uaddr, ev-&gt;k.cmd_done.len, err);
++	err = scsi_cmd_done(do_munmap, !cmd-&gt;mmap, cmd-&gt;uaddr, cmd-&gt;len);
++
++	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmap, cmd-&gt;uaddr, cmd-&gt;len, err);
++
++	free(cmd);
+ }
+ 
+-static void nl_cmd(struct driver_info *dinfo, int fd)
++static void nl_cmd(int fd)
+ {
+ 	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
+@@ -401,10 +454,10 @@
+ 
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_KEVENT_CMD_REQ:
+-		cmd_queue(dinfo, fd, NLMSG_DATA(buf));
++		cmd_queue(fd, NLMSG_DATA(buf));
+ 		break;
+ 	case TGT_KEVENT_CMD_DONE:
+-		cmd_done(dinfo, NLMSG_DATA(buf));
++		cmd_done(NLMSG_DATA(buf));
+ 		break;
+ 	default:
+ 		eprintf(&quot;unknown event %u\n&quot;, nlh-&gt;nlmsg_type);
+@@ -427,7 +480,6 @@
+ 
+ static void tthread_event_loop(struct target *target)
+ {
+-	struct driver_info d[MAX_DL_HANDLES];
+ 	struct pollfd *pfd = target-&gt;pfd;
+ 	int fd, err;
+ 
+@@ -439,9 +491,6 @@
+ 	target-&gt;pfd[POLL_NL_CMD].fd = fd;
+ 	target-&gt;pfd[POLL_NL_CMD].events = POLLIN;
+ 
+-	err = dl_init(d);
+-	dprintf(&quot;%d\n&quot;, err);
+-
+ 	dprintf(&quot;Target thread started %u %d\n&quot;, getpid(), fd);
+ 
+ 	while (1) {
+@@ -459,29 +508,58 @@
+ 			ipc_ctrl(pfd[POLL_IPC_CTRL].fd);
+ 
+ 		if (pfd[POLL_NL_CMD].revents)
+-			nl_cmd(d, pfd[POLL_NL_CMD].fd);
++			nl_cmd(pfd[POLL_NL_CMD].fd);
+ 	}
+ 
+ 	free(target);
+ }
+ 
++static int target_dir_create(int tid, int pid)
++{
++	char path[PATH_MAX], buf[32];
++	int err, fd;
++
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
++	err = mkdir(path, dmode);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot create %s\n&quot;, path);
++		return err;
++	}
++
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/pid&quot;, tid);
++	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot create %s\n&quot;, path);
++		return err;
++	}
++	snprintf(buf, sizeof(buf), &quot;%d&quot;, pid);
++	err = write(fd, buf, strlen(buf));
++	close(fd);
++
++	return 0;
++}
++
+ int target_thread_create(int *sfd)
+ {
+ 	pid_t pid;
+ 	int fd[2];
++	static int tid = 0;
+ 
+ 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, fd) &lt; 0) {
+ 		eprintf(&quot;Cannot create socketpair %d\n&quot;, errno);
+ 		return -1;
+ 	}
+ 
++	tid++;
++
+ 	pid = fork();
+ 	if (pid &lt; 0)
+ 		return -ENOMEM;
+ 	else if (pid) {
+ 		*sfd = fd[0];
+ 		close(fd[1]);
+-		return pid;
++		target_dir_create(tid, pid);
++		return tid;
+ 	}
+ 
+ 	target = malloc(sizeof(*target));
+@@ -492,6 +570,7 @@
+ 
+ 	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct device *));
+ 	target-&gt;max_device = DEFAULT_NR_DEVICE;
++	target-&gt;tid = tid;
+ 
+ 	close(fd[0]);
+ 	target-&gt;pfd[POLL_IPC_CTRL].fd = fd[1];
+
+Modified: branches/use-scsi-ml/usr/tgt_sysfs.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgt_sysfs.h	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/tgt_sysfs.h	2006-02-02 12:27:10 UTC (rev 255)
+@@ -1,8 +1,8 @@
+ #ifndef	__TGT_SYSFS_H
+ #define	__TGT_SYSFS_H
+ 
+-#define	TGT_TYPE_SYSFSDIR	&quot;/sys/class/tgt_type&quot;
+-#define	TGT_TARGET_SYSFSDIR	&quot;/sys/class/tgt_target&quot;
++#define	TGT_LLD_SYSFSDIR	&quot;/var/run/tgt_lld&quot;
++#define	TGT_TARGET_SYSFSDIR	&quot;/var/run/tgt_target&quot;
+ #define	TGT_DEVICE_SYSFSDIR	&quot;/var/run/tgt_device&quot;
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/usr/tgtadm.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtadm.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/tgtadm.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -53,6 +53,7 @@
+ 	{&quot;lun&quot;, required_argument, NULL, 'l'},
+ 	{&quot;params&quot;, required_argument, NULL, 'p'},
+ 	{&quot;user&quot;, no_argument, NULL, 'u'},
++	{&quot;hostno&quot;, required_argument, NULL, 'b'},
+ 	{&quot;version&quot;, no_argument, NULL, 'v'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+@@ -146,125 +147,87 @@
+ 	free(namelist);
+ }
+ 
+-static int system_mgmt(struct tgtadm_req *req)
++static int tid_to_hostno(int tid)
+ {
+-	int err = -EINVAL, i, nr, fd;
+-	struct dirent **namelist;
+-	char path[PATH_MAX], buf[PATH_MAX], cmd[PATH_MAX], *p;
++	int fd, hostno, err;
++	char path[PATH_MAX], buf[32];
+ 
+-	if (req-&gt;op != OP_DELETE)
+-		return err;
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/hostno&quot;, tid);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot open %s\n&quot;, path);
++		return -EINVAL;
++	}
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot read\n&quot;);
++		return -EINVAL;
++	}
+ 
+-	nr = scandir(TGT_TARGET_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -ENOENT;
++	sscanf(buf, &quot;%d\n&quot;, &amp;hostno);
+ 
+-	for (i = 0; i &lt; nr; i++) {
+-		snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/%s/typeid&quot;,
+-			 namelist[i]-&gt;d_name);
++	return hostno;
++}
+ 
+-		fd = open(path, O_RDONLY);
+-		if (fd &lt; 0)
+-			continue;
+-		err = read(fd, buf, sizeof(buf));
+-		close(fd);
+-		if (err &lt; 0)
+-			continue;
++static int hostno_to_name(int hostno, char *buf, int len)
++{
++	int fd, err;
++	char path[PATH_MAX];
+ 
+-		if (req-&gt;typeid == atoi(buf)) {
+-			int tid;
++	snprintf(path, sizeof(path), &quot;/sys/class/scsi_host/host%d/proc_name&quot;,
++		 hostno);
+ 
+-			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-				;
+-			tid = atoi(p);
+-			all_devices_destroy(tid);
+-
+-			snprintf(cmd, sizeof(cmd),
+-				 &quot;./usr/tgtadm --driver %s --op delete --tid %d&quot;,
+-				 driver, tid);
+-			err = system(cmd);
+-		}
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot open %s\n&quot;, path);
++		return -EINVAL;
+ 	}
++	err = read(fd, buf, len);
++	close(fd);
+ 
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return 0;
++	return strlen(buf);
+ }
+ 
+-static int driver_to_typeid(char *name)
++static int system_mgmt(struct tgtadm_req *req, char *lld)
+ {
+-	int i, nr, err, fd, id = -ENOENT;
+-	char *p, path[PATH_MAX], buf[PATH_MAX];
++	int err = -EINVAL, i, nr, hostno;
+ 	struct dirent **namelist;
++	char cmd[PATH_MAX], buf[64], *p;
+ 
+-	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	for (i = 0; i &lt; nr; i++) {
+-		snprintf(path, sizeof(path), TGT_TYPE_SYSFSDIR &quot;/%s/name&quot;,
+-			 namelist[i]-&gt;d_name);
++	if (req-&gt;op != OP_DELETE)
++		return err;
+ 
+-		fd = open(path, O_RDONLY);
+-		if (fd &lt; 0) {
+-			eprintf(&quot;%s %d\n&quot;, path, errno);
+-			continue;
+-		}
++	nr = scandir(TGT_TARGET_SYSFSDIR, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return -ENOENT;
+ 
+-		err = read(fd, buf, sizeof(buf));
+-		close(fd);
+-		if (err &lt; 0) {
+-			eprintf(&quot;%s %d\n&quot;, path, err);
++	for (i = 0; i &lt; nr; i++) {
++		int tid;
++		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++			;
++		tid = atoi(p);
++		hostno = tid_to_hostno(tid);
++		if (hostno &lt; 0)
+ 			continue;
+-		}
+-
+-		if (strncmp(name, buf, strlen(name)))
++		hostno_to_name(hostno, buf, sizeof(buf));
++		if (strcmp(buf, lld))
+ 			continue;
+ 
+-		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-			;
+-		id = atoi(p);
+-		break;
++		all_devices_destroy(tid);
++		snprintf(cmd, sizeof(cmd),
++			 &quot;./usr/tgtadm --driver %s --op delete --tid %d&quot;,
++			 lld, tid);
++		err = system(cmd);
+ 	}
+ 
+ 	for (i = 0; i &lt; nr; i++)
+ 		free(namelist[i]);
+ 	free(namelist);
+ 
+-	return id;
++	return 0;
+ }
+ 
+-static int driver_dl_init(int argc, char **argv)
+-{
+-	int ch, longindex, id;
+-	char *name = NULL;
+-
+-	while ((ch = getopt_long(argc, argv, &quot;n:&quot;, long_options,
+-				 &amp;longindex)) &gt;= 0) {
+-		switch (ch) {
+-		case 'n':
+-			name = optarg;
+-			break;
+-		}
+-	}
+-
+-	if (!name) {
+-		eprintf(&quot;You must specify the driver name\n&quot;);
+-		goto out;
+-	}
+-
+-	id = driver_to_typeid(name);
+-	if (id &lt; 0) {
+-		eprintf(&quot;Invalid driver name %s\n&quot;, name);
+-		goto out;
+-	}
+-
+-	driver = name;
+-
+-	return id;
+-out:
+-	exit(0);
+-}
+-
+ static int ipc_mgmt_connect(void)
+ {
+ 	int fd, err;
+@@ -373,8 +336,8 @@
+ 		op = OP_NEW;
+ 	else if (!strcmp(&quot;delete&quot;, str))
+ 		op = OP_DELETE;
+-	else if (!strcmp(&quot;update&quot;, str))
+-		op = OP_UPDATE;
++	else if (!strcmp(&quot;bind&quot;, str))
++		op = OP_BIND;
+ 	else if (!strcmp(&quot;show&quot;, str))
+ 		op = OP_SHOW;
+ 	else
+@@ -383,26 +346,78 @@
+ 	return op;
+ }
+ 
++static int lldname_to_id(char *name)
++{
++	struct dirent **namelist;
++	int i, nr, id = -EINVAL;
++	char *p;
++
++	nr = scandir(TGT_LLD_SYSFSDIR, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return -EINVAL;
++
++	for (i = 0; i &lt; nr; i++) {
++		p = strchr(namelist[i]-&gt;d_name, '-');
++		if (p &amp;&amp; !strcmp(name, p + 1)) {
++			*p='\0';
++			id = atoi(namelist[i]-&gt;d_name);
++			break;
++		}
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return id;
++}
++
++static int lld_id_get(int argc, char **argv)
++{
++	int ch, longindex, id = -EINVAL;
++	char *name = NULL;
++
++	while ((ch = getopt_long(argc, argv, &quot;n:&quot;, long_options,
++				 &amp;longindex)) &gt;= 0) {
++		switch (ch) {
++		case 'n':
++			name = optarg;
++			break;
++		}
++	}
++
++	if (name)
++		id = lldname_to_id(name);
++
++	if (id &lt; 0) {
++		eprintf(&quot;You must specify the driver name\n&quot;);
++		exit(-1);
++	}
++
++	return id;
++}
++
+ int main(int argc, char **argv)
+ {
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1, len;
+-	int tid = -1, typeid;
+-	uint32_t cid = 0, set = 0;
++	int tid = -1;
++	uint32_t cid = 0, set = 0, hostno = 0, lld_id;
+ 	uint64_t sid = 0, lun = 0;
+-	char *params = NULL;
++	char *params = NULL, *lld_name = NULL;
+ 	struct tgtadm_req *req;
+ 	char sbuf[8192], rbuf[8912];
+ 
+-	typeid = driver_dl_init(argc, argv);
+-	if (typeid &lt; 0)
++	lld_id = lld_id_get(argc, argv);
++	if (lld_id &lt; 0)
+ 		goto out;
+ 
+ 	optind = 1;
+-	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvh&quot;,
++	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:b:p:uvh&quot;,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'n':
++			lld_name = optarg;
+ 			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+@@ -423,6 +438,9 @@
+ 			lun = strtoull(optarg, NULL, 10);
+ 			set |= (1 &lt;&lt; MODE_DEVICE);
+ 			break;
++		case 'b':
++			hostno = strtol(optarg, NULL, 10);
++			break;
+ 		case 'p':
+ 			params = optarg;
+ 			break;
+@@ -457,12 +475,13 @@
+ 	memset(rbuf, 0, sizeof(rbuf));
+ 
+ 	req = (struct tgtadm_req *) sbuf;
+-	req-&gt;typeid = typeid;
++	req-&gt;typeid = lld_id;
+ 	req-&gt;mode = set_to_mode(set);
+ 	req-&gt;op = op;
+ 	req-&gt;tid = tid;
+ 	req-&gt;sid = sid;
+ 	req-&gt;lun = lun;
++	req-&gt;host_no = hostno;
+ 
+ 	len = sizeof(struct tgtadm_req);
+ 	if (params) {
+@@ -471,7 +490,7 @@
+ 	}
+ 
+ 	if (req-&gt;mode == MODE_SYSTEM)
+-		err = system_mgmt(req);
++		err = system_mgmt(req, lld_name);
+ 	else {
+ 		err = ipc_mgmt_call(sbuf, len, rbuf);
+ 		ipc_mgmt_result(rbuf);
+
+Modified: branches/use-scsi-ml/usr/tgtadm.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtadm.h	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/tgtadm.h	2006-02-02 12:27:10 UTC (rev 255)
+@@ -6,8 +6,8 @@
+ enum tgtadm_op {
+ 	OP_NEW,
+ 	OP_DELETE,
+-	OP_UPDATE,
+ 	OP_SHOW,
++	OP_BIND,
+ };
+ 
+ enum tgtadm_mode {
+@@ -21,8 +21,6 @@
+ };
+ 
+ struct tgtadm_req {
+-	int typeid;
+-
+ 	enum tgtadm_mode mode;
+ 	enum tgtadm_op op;
+ 
+@@ -30,8 +28,8 @@
+ 	uint64_t sid;
+ 	int cid;
+ 	uint64_t lun;
+-	int pid;
+-
++	int typeid;
++	int host_no;
+ 	unsigned long addr;
+ };
+ 
+
+Modified: branches/use-scsi-ml/usr/tgtd.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.c	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/tgtd.c	2006-02-02 12:27:10 UTC (rev 255)
+@@ -22,7 +22,7 @@
+ #include &lt;sys/stat.h&gt;
+ #include &lt;dirent.h&gt;
+ 
+-#include &lt;tgt_if.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+ #include &quot;dl.h&quot;
+ 
+@@ -225,11 +225,12 @@
+ 
+ 	ipc_fd = ipc_open();
+ 	if (ipc_fd &lt; 0)
+-		exit(ipc_fd);
++		exit(1);
+ 
+-	dl_init(dlinfo);
++	nr = dl_init(dlinfo);
++	if (nr &lt; nr)
++		exit(1);
+ 
+-	nr = MAX_DL_HANDLES;
+ 	poll_array = poll_init(nr);
+ 
+ 	event_loop(nr, poll_array);
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-02 12:24:02 UTC (rev 254)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-02 12:27:10 UTC (rev 255)
+@@ -28,4 +28,10 @@
+ extern int tgt_device_create(int tid, uint64_t lun, int dfd);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ 
++extern uint64_t scsi_get_devid(uint8_t *pdu);
++extern int scsi_cmd_process(int tid, uint8_t *pdu, int *len,
++			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
++			    uint8_t *try_map, uint64_t *offset, uint64_t lun);
++extern int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000241.html">[Stgt-svn] r254 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000243.html">[Stgt-svn] r256 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#242">[ date ]</a>
+              <a href="thread.html#242">[ thread ]</a>
+              <a href="subject.html#242">[ subject ]</a>
+              <a href="author.html#242">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

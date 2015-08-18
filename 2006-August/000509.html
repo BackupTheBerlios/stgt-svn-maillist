@@ -1,0 +1,251 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r522 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r522%20-%20trunk/usr&In-Reply-To=%3C200608120849.k7C8nNOw026676%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000508.html">
+   <LINK REL="Next"  HREF="000510.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r522 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r522%20-%20trunk/usr&In-Reply-To=%3C200608120849.k7C8nNOw026676%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r522 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 12 10:49:23 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000508.html">[Stgt-svn] r521 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000510.html">[Stgt-svn] r523 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#509">[ date ]</a>
+              <a href="thread.html#509">[ thread ]</a>
+              <a href="subject.html#509">[ subject ]</a>
+              <a href="author.html#509">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-12 10:49:22 +0200 (Sat, 12 Aug 2006)
+New Revision: 522
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/target.h
+Log:
+Kill MAX_NR_TARGET
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-12 06:43:30 UTC (rev 521)
++++ trunk/usr/target.c	2006-08-12 08:49:22 UTC (rev 522)
+@@ -42,18 +42,31 @@
+ #include &quot;driver.h&quot;
+ #include &quot;target.h&quot;
+ 
+-static struct target *tgtt[MAX_NR_TARGET];
+ static struct target *hostt[MAX_NR_HOST];
+ 
+-static struct target *target_get(int tid)
++static struct list_head target_list[1 &lt;&lt; HASH_ORDER];
++
++static struct target *target_lookup(int tid)
+ {
+-	if (tid &gt;= MAX_NR_TARGET) {
+-		eprintf(&quot;Too larget target id %d\n&quot;, tid);
+-		return NULL;
+-	}
+-	return tgtt[tid];
++	struct target *target;
++
++	list_for_each_entry(target, &amp;target_list[hashfn(tid)], tlist)
++		if (target-&gt;tid == tid)
++			return target;
++	return NULL;
+ }
+ 
++static void target_list_insert(struct target *target)
++{
++	struct list_head *list = &amp;target_list[hashfn(target-&gt;tid)];
++	list_add(&amp;target-&gt;tlist, list);
++}
++
++static void target_list_remove(struct target *target)
++{
++	list_del(&amp;target-&gt;tlist);
++}
++
+ static struct tgt_device *device_get(struct target *target, uint64_t dev_id)
+ {
+ 	if (dev_id &lt; target-&gt;max_device || dev_id &lt; MAX_NR_DEVICE)
+@@ -114,7 +127,7 @@
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot; %s\n&quot;, tid, dev_id, path);
+ 
+-	target = target_get(tid);
++	target = target_lookup(tid);
+ 	if (!target)
+ 		return -ENOENT;
+ 
+@@ -187,7 +200,7 @@
+ 
+ 	dprintf(&quot;%u %&quot; PRIu64 &quot;\n&quot;, tid, dev_id);
+ 
+-	target = target_get(tid);
++	target = target_lookup(tid);
+ 	if (!target)
+ 		return -ENOENT;
+ 
+@@ -312,7 +325,7 @@
+ 	cmd-&gt;attribute = ev_req-&gt;k.cmd_req.attribute;
+ 	cmd-&gt;tag = ev_req-&gt;k.cmd_req.tag;
+ 	list_add(&amp;cmd-&gt;clist, &amp;target-&gt;cmd_list);
+-	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cmd-&gt;cid)]);
++	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[hashfn(cmd-&gt;cid)]);
+ 
+ 	dev_id = scsi_get_devid(target-&gt;lid, ev_req-&gt;k.cmd_req.lun);
+ 	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
+@@ -398,7 +411,7 @@
+ static struct cmd *find_cmd(struct target *target, uint32_t cid)
+ {
+ 	struct cmd *cmd;
+-	struct list_head *head = &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)];
++	struct list_head *head = &amp;target-&gt;cmd_hash_list[hashfn(cid)];
+ 
+ 	list_for_each_entry(cmd, head, hlist) {
+ 		if (cmd-&gt;cid == cid)
+@@ -630,11 +643,14 @@
+ 
+ int tgt_target_bind(int tid, int host_no, int lid)
+ {
+-	if (!tgtt[tid]) {
++	struct target *target;
++
++	target = target_lookup(tid);
++	if (!target) {
+ 		eprintf(&quot;target is not found %d\n&quot;, tid);
+ 		return -EINVAL;
+ 	}
+-	tgtt[tid]-&gt;lid = lid;
++	target-&gt;lid = lid;
+ 
+ 	if (hostt[host_no]) {
+ 		eprintf(&quot;host is already binded %d %d\n&quot;, tid, host_no);
+@@ -643,7 +659,7 @@
+ 
+ 	eprintf(&quot;Succeed to bind the target %d to the scsi host %d\n&quot;,
+ 		tid, host_no);
+-	hostt[host_no] = tgtt[tid];
++	hostt[host_no] = target;
+ 	return 0;
+ }
+ 
+@@ -652,12 +668,8 @@
+ 	int err, i;
+ 	struct target *target;
+ 
+-	if (tid &gt;= MAX_NR_TARGET) {
+-		eprintf(&quot;Too larget target id %d\n&quot;, tid);
+-		return -EINVAL;
+-	}
+-
+-	if (tgtt[tid]) {
++	target = target_lookup(tid);
++	if (target) {
+ 		eprintf(&quot;Target id %d already exists\n&quot;, tid);
+ 		return -EINVAL;
+ 	}
+@@ -686,7 +698,8 @@
+ 	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
+ 
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+-	tgtt[tid] = target;
++	target_list_insert(target);
++
+ 	return 0;
+ 
+ free_target:
+@@ -696,8 +709,9 @@
+ 
+ int tgt_target_destroy(int tid)
+ {
+-	struct target *target = target_get(tid);
++	struct target *target;
+ 
++	target = target_lookup(tid);
+ 	if (!target)
+ 		return -ENOENT;
+ 
+@@ -711,7 +725,7 @@
+ 
+ 	free(target-&gt;devt);
+ 
+-	tgtt[tid] = NULL;
++	target_list_remove(target);
+ 	free(target);
+ 
+ 	return 0;
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-08-12 06:43:30 UTC (rev 521)
++++ trunk/usr/target.h	2006-08-12 08:49:22 UTC (rev 522)
+@@ -6,13 +6,12 @@
+ #define	MSG_HEAD_TAG	0x21
+ #define	MSG_ORDERED_TAG	0x22
+ 
+-#define	MAX_NR_TARGET		1024
+ #define	MAX_NR_HOST		1024
+ #define	DEFAULT_NR_DEVICE	64
+ #define	MAX_NR_DEVICE		(1 &lt;&lt; 20)
+ 
+ #define	HASH_ORDER	4
+-#define	cmd_hashfn(cid)	hash_long((cid), HASH_ORDER)
++#define	hashfn(cid)	hash_long((cid), HASH_ORDER)
+ 
+ struct mgmt_req {
+ 	uint64_t mid;
+@@ -45,6 +44,8 @@
+ 	int tid;
+ 	int lid;
+ 
++	struct list_head tlist;
++
+ 	uint64_t max_device;
+ 	struct tgt_device **devt;
+ 	struct list_head device_list;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000508.html">[Stgt-svn] r521 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000510.html">[Stgt-svn] r523 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#509">[ date ]</a>
+              <a href="thread.html#509">[ thread ]</a>
+              <a href="subject.html#509">[ subject ]</a>
+              <a href="author.html#509">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

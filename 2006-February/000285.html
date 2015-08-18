@@ -1,0 +1,129 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r298 - in branches/use-scsi-ml: . patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r298%20-%20in%20branches/use-scsi-ml%3A%20.%20patchset&In-Reply-To=%3C200602140913.k1E9DGGq008351%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000284.html">
+   <LINK REL="Next"  HREF="000286.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r298 - in branches/use-scsi-ml: . patchset</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r298%20-%20in%20branches/use-scsi-ml%3A%20.%20patchset&In-Reply-To=%3C200602140913.k1E9DGGq008351%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r298 - in branches/use-scsi-ml: . patchset">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 14 10:13:16 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000284.html">[Stgt-svn] r297 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000286.html">[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#285">[ date ]</a>
+              <a href="thread.html#285">[ thread ]</a>
+              <a href="subject.html#285">[ subject ]</a>
+              <a href="author.html#285">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-14 10:13:11 +0100 (Tue, 14 Feb 2006)
+New Revision: 298
+
+Modified:
+   branches/use-scsi-ml/initd
+   branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt
+Log:
+Update tgt-core patch again.
+
+Modified: branches/use-scsi-ml/initd
+===================================================================
+--- branches/use-scsi-ml/initd	2006-02-14 08:59:41 UTC (rev 297)
++++ branches/use-scsi-ml/initd	2006-02-14 09:13:11 UTC (rev 298)
+@@ -22,7 +22,7 @@
+ 		insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
+ 	fi
+ 
+-	${PWD}/usr/tgtd -d1
++	${PWD}/usr/tgtd -d0
+ 
+ 	sleep 1
+ 
+
+Modified: branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt	2006-02-14 08:59:41 UTC (rev 297)
++++ branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt	2006-02-14 09:13:11 UTC (rev 298)
+@@ -3,14 +3,14 @@
+ ---
+ 
+  drivers/scsi/scsi_tgt_if.c   |  214 ++++++++++++++++
+- drivers/scsi/scsi_tgt_lib.c  |  551 ++++++++++++++++++++++++++++++++++++++++++
++ drivers/scsi/scsi_tgt_lib.c  |  550 ++++++++++++++++++++++++++++++++++++++++++
+  drivers/scsi/scsi_tgt_priv.h |   25 ++
+- 3 files changed, 790 insertions(+), 0 deletions(-)
++ 3 files changed, 789 insertions(+), 0 deletions(-)
+  create mode 100644 drivers/scsi/scsi_tgt_if.c
+  create mode 100644 drivers/scsi/scsi_tgt_lib.c
+  create mode 100644 drivers/scsi/scsi_tgt_priv.h
+ 
+-0e2ea12891c6e55ae21b8824ca0488342f083f50
++de47d09f27130e7847b2012f9c8a7a05f32e90c4
+ diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
+ new file mode 100644
+ index 0000000..38b35da
+@@ -233,10 +233,10 @@
+ +}
+ diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+ new file mode 100644
+-index 0000000..9f50e4e
++index 0000000..8746236
+ --- /dev/null
+ +++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -0,0 +1,551 @@
++@@ -0,0 +1,550 @@
+ +/*
+ + * SCSI target lib functions
+ + *
+@@ -559,7 +559,6 @@
+ +			err = PTR_ERR(bio);
+ +			dprintk(&quot;fail to map %lx %u %d %x\n&quot;,
+ +				(unsigned long) uaddr, len, err, cmd-&gt;cmnd[0]);
+-+			BUG();
+ +			goto unmap_bios;
+ +		}
+ +
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000284.html">[Stgt-svn] r297 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000286.html">[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#285">[ date ]</a>
+              <a href="thread.html#285">[ thread ]</a>
+              <a href="subject.html#285">[ subject ]</a>
+              <a href="author.html#285">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

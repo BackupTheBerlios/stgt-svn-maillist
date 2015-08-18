@@ -1,0 +1,205 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r454 - branches/use-scsi-ml/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r454%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605051503.k45F3wik031817%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000440.html">
+   <LINK REL="Next"  HREF="000442.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r454 - branches/use-scsi-ml/istgt/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r454%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605051503.k45F3wik031817%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r454 - branches/use-scsi-ml/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri May  5 17:03:58 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000440.html">[Stgt-svn] r453 - branches/use-scsi-ml/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000442.html">[Stgt-svn] r455 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#441">[ date ]</a>
+              <a href="thread.html#441">[ thread ]</a>
+              <a href="subject.html#441">[ subject ]</a>
+              <a href="author.html#441">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-05 17:03:57 +0200 (Fri, 05 May 2006)
+New Revision: 454
+
+Modified:
+   branches/use-scsi-ml/istgt/usr/iscsid.h
+   branches/use-scsi-ml/istgt/usr/session.c
+   branches/use-scsi-ml/istgt/usr/target.c
+Log:
+When istgt creates a session, it tries to bind it to a target.
+
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-05 13:59:59 UTC (rev 453)
++++ branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-05 15:03:57 UTC (rev 454)
+@@ -194,6 +194,7 @@
+ extern int target_find_by_name(const char *name, int *tid);
+ struct target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
++extern int target_bind(int tid, int hostno);
+ 
+ extern void ipc_event(void);
+ extern int ipc_init(void);
+
+Modified: branches/use-scsi-ml/istgt/usr/session.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/session.c	2006-05-05 13:59:59 UTC (rev 453)
++++ branches/use-scsi-ml/istgt/usr/session.c	2006-05-05 15:03:57 UTC (rev 454)
+@@ -101,7 +101,7 @@
+ 	ki-&gt;create_session(thandle, conn-&gt;exp_cmd_sn, &amp;session-&gt;ksid,
+ 			   &amp;session-&gt;hostno);
+ 
+-	/* FIXME: we need to bind host to target here */
++	target_bind(session-&gt;target-&gt;tid, session-&gt;hostno);
+ }
+ 
+ void session_remove(struct session *session)
+
+Modified: branches/use-scsi-ml/istgt/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/target.c	2006-05-05 13:59:59 UTC (rev 453)
++++ branches/use-scsi-ml/istgt/usr/target.c	2006-05-05 15:03:57 UTC (rev 454)
+@@ -18,6 +18,7 @@
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
++#include &quot;tgt_sysfs.h&quot;
+ 
+ struct qelem targets_list = LIST_HEAD_INIT(targets_list);
+ 
+@@ -238,3 +239,91 @@
+ 
+ 	return 0;
+ }
++
++static int filter(const struct dirent *dir)
++{
++	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
++}
++
++static int lldname_to_id(char *name)
++{
++	struct dirent **namelist;
++	int i, nr, id = -EINVAL;
++	char *p;
++
++	nr = scandir(TGT_LLD_SYSFSDIR, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return -EINVAL;
++
++	for (i = 0; i &lt; nr; i++) {
++		p = strchr(namelist[i]-&gt;d_name, '-');
++		if (p &amp;&amp; !strcmp(name, p + 1)) {
++			*p='\0';
++			id = atoi(namelist[i]-&gt;d_name);
++			break;
++		}
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return id;
++}
++
++static int ipc_mgmt_connect(void)
++{
++	int fd, err;
++	struct sockaddr_un addr;
++
++	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (fd &lt; 0)
++		return fd;
++
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.sun_family = AF_LOCAL;
++	memcpy((char *) &amp;addr.sun_path + 1, TGT_IPC_NAMESPACE, strlen(TGT_IPC_NAMESPACE));
++
++	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
++	if (err &lt; 0)
++		return err;
++
++	return fd;
++}
++
++int target_bind(int tid, int hostno)
++{
++	struct tgtadm_req *req;
++	struct nlmsghdr *nlh;
++	char buf[1024];
++	int fd, err;
++
++	nlh = (struct nlmsghdr *) buf;
++	req = NLMSG_DATA(nlh);
++
++	req-&gt;mode = MODE_TARGET;
++	req-&gt;op = OP_BIND;
++	req-&gt;tid = tid;
++	req-&gt;host_no = hostno;
++	req-&gt;typeid = lldname_to_id(&quot;istgt&quot;);
++
++	nlh-&gt;nlmsg_len = NLMSG_LENGTH(sizeof(*req));
++	nlh-&gt;nlmsg_type = 0;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_pid = getpid();
++
++	fd = ipc_mgmt_connect();
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot connect tgtd\n&quot;);
++		return fd;
++	}
++
++	err = write(fd, buf, nlh-&gt;nlmsg_len);
++	if (err &lt; 0)
++		eprintf(&quot;Cannot send to tgtd %d\n&quot;, err);
++
++	err = read(fd, buf, sizeof(buf));
++
++	close(fd);
++	return 0;
++}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000440.html">[Stgt-svn] r453 - branches/use-scsi-ml/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000442.html">[Stgt-svn] r455 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#441">[ date ]</a>
+              <a href="thread.html#441">[ thread ]</a>
+              <a href="subject.html#441">[ subject ]</a>
+              <a href="author.html#441">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

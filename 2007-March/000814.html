@@ -1,0 +1,217 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r827 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r827%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703150405.l2F45Dcm004809%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000813.html">
+   <LINK REL="Next"  HREF="000815.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r827 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r827%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703150405.l2F45Dcm004809%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r827 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Mar 15 05:05:13 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000813.html">[Stgt-svn] r826 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000815.html">[Stgt-svn] r828 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#814">[ date ]</a>
+              <a href="thread.html#814">[ thread ]</a>
+              <a href="subject.html#814">[ subject ]</a>
+              <a href="author.html#814">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-15 05:05:12 +0100 (Thu, 15 Mar 2007)
+New Revision: 827
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Kill iscsi_task::c_buffer to simplify the buffer management.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-15 02:05:46 UTC (rev 826)
++++ trunk/usr/iscsi/iscsid.c	2007-03-15 04:05:12 UTC (rev 827)
+@@ -879,6 +879,9 @@
+ 	INIT_LIST_HEAD(&amp;task-&gt;c_hlist);
+ 	INIT_LIST_HEAD(&amp;task-&gt;c_list);
+ 
++	if (ext_len)
++		task-&gt;data = task-&gt;extdata;
++
+ 	conn_get(conn);
+ 	return task;
+ }
+@@ -887,10 +890,7 @@
+ {
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 
+-	if (task-&gt;c_buffer)
+-		free(task-&gt;c_buffer);
+ 	free(task);
+-
+ 	/* from alloc */
+ 	conn_put(conn);
+ }
+@@ -905,8 +905,8 @@
+ 	target_cmd_done(&amp;task-&gt;scmd);
+ 
+ 	list_del(&amp;task-&gt;c_hlist);
+-	if (task-&gt;c_buffer) {
+-		if ((unsigned long) task-&gt;c_buffer != task-&gt;addr)
++	if (task-&gt;data) {
++		if ((unsigned long) task-&gt;data != task-&gt;addr)
+ 			free((void *) (unsigned long) task-&gt;addr);
+ 	}
+ 	iscsi_free_task(task);
+@@ -963,7 +963,7 @@
+ 	struct scsi_cmd *scmd = &amp;task-&gt;scmd;
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+-	unsigned long uaddr = (unsigned long) task-&gt;c_buffer;
++	unsigned long uaddr = (unsigned long) task-&gt;data;
+ 
+ 	scmd-&gt;cmd_nexus_id = conn-&gt;session-&gt;iscsi_nexus_id;
+ 	/* tmp hack */
+@@ -1141,7 +1141,7 @@
+ 		task-&gt;r2t_count,
+ 		ntoh24(req-&gt;dlength), be32_to_cpu(req-&gt;offset));
+ 
+-	conn-&gt;rx_buffer = (void *) (unsigned long) task-&gt;c_buffer;
++	conn-&gt;rx_buffer = task-&gt;data;
+ 	conn-&gt;rx_buffer += be32_to_cpu(req-&gt;offset);
+ 	conn-&gt;rx_size = ntoh24(req-&gt;dlength);
+ 
+@@ -1209,32 +1209,22 @@
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+-	int len;
+ 
+-	task = iscsi_alloc_task(conn, 0);
++	dprintf(&quot;%u %x %d %d %x\n&quot;, conn-&gt;session-&gt;tsih,
++		req-&gt;cdb[0], ntohl(req-&gt;data_length),
++		req-&gt;flags &amp; ISCSI_FLAG_CMD_ATTR_MASK, req-&gt;itt);
++
++	task = iscsi_alloc_task(conn, ntohl(req-&gt;data_length));
+ 	if (task)
+ 		conn-&gt;rx_task = task;
+ 	else
+ 		return -ENOMEM;
++
+ 	task-&gt;tag = req-&gt;itt;
+ 
+-	dprintf(&quot;%u %x %d %d %x\n&quot;, conn-&gt;session-&gt;tsih,
+-		req-&gt;cdb[0], ntohl(req-&gt;data_length),
+-		req-&gt;flags &amp; ISCSI_FLAG_CMD_ATTR_MASK, req-&gt;itt);
+-
+-	len = ntohl(req-&gt;data_length);
+-	if (len) {
+-		task-&gt;c_buffer = valloc(len);
+-		if (!task-&gt;c_buffer) {
+-			iscsi_free_task(task);
+-			return -ENOMEM;
+-		}
+-		dprintf(&quot;%p\n&quot;, task-&gt;c_buffer);
+-	}
+-
+ 	if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
+ 		conn-&gt;rx_size = ntoh24(req-&gt;dlength);
+-		conn-&gt;rx_buffer = task-&gt;c_buffer;
++		conn-&gt;rx_buffer = task-&gt;data;
+ 		task-&gt;r2t_count = ntohl(req-&gt;data_length) - conn-&gt;rx_size;
+ 		task-&gt;unsol_count = !(req-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL);
+ 		task-&gt;offset = conn-&gt;rx_size;
+@@ -1274,23 +1264,17 @@
+ 
+ 	conn-&gt;exp_stat_sn = be32_to_cpu(req-&gt;exp_statsn);
+ 
+-	task = iscsi_alloc_task(conn, 0);
++	len = ntoh24(req-&gt;dlength);
++	task = iscsi_alloc_task(conn, len);
+ 	if (task)
+ 		conn-&gt;rx_task = task;
+ 	else
+ 		goto out;
+ 
+-	len = ntoh24(req-&gt;dlength);
+ 	if (len) {
+ 		conn-&gt;rx_size = len;
+ 		task-&gt;len = len;
+-		task-&gt;c_buffer = malloc(len);
+-		if (!task-&gt;c_buffer) {
+-			iscsi_free_task(task);
+-			goto out;
+-		}
+-
+-		conn-&gt;rx_buffer = task-&gt;c_buffer;
++		conn-&gt;rx_buffer = task-&gt;data;
+ 	}
+ out:
+ 	return err;
+@@ -1436,7 +1420,7 @@
+ 		/* TODO: honor max_burst */
+ 		conn-&gt;rsp.datasize = task-&gt;len;
+ 		hton24(rsp-&gt;dlength, task-&gt;len);
+-		conn-&gt;rsp.data = task-&gt;c_buffer;
++		conn-&gt;rsp.data = task-&gt;data;
+ 	}
+ 
+ 	return 0;
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-03-15 02:05:46 UTC (rev 826)
++++ trunk/usr/iscsi/iscsid.h	2007-03-15 04:05:12 UTC (rev 827)
+@@ -112,7 +112,7 @@
+ 	int unsol_count;
+ 	int exp_r2tsn;
+ 
+-	void *c_buffer;
++	void *data;
+ 
+ 	struct scsi_cmd scmd;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000813.html">[Stgt-svn] r826 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000815.html">[Stgt-svn] r828 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#814">[ date ]</a>
+              <a href="thread.html#814">[ thread ]</a>
+              <a href="subject.html#814">[ subject ]</a>
+              <a href="author.html#814">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,701 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r509 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r509%20-%20trunk/kernel&In-Reply-To=%3C200607260538.k6Q5cuhK005862%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000495.html">
+   <LINK REL="Next"  HREF="000497.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r509 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r509%20-%20trunk/kernel&In-Reply-To=%3C200607260538.k6Q5cuhK005862%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r509 - trunk/kernel">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Jul 26 07:38:56 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000495.html">[Stgt-svn] r508 - trunk/patchset
+</A></li>
+        <LI>Next message: <A HREF="000497.html">[Stgt-svn] r510 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#496">[ date ]</a>
+              <a href="thread.html#496">[ thread ]</a>
+              <a href="subject.html#496">[ subject ]</a>
+              <a href="author.html#496">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-26 07:38:50 +0200 (Wed, 26 Jul 2006)
+New Revision: 509
+
+Modified:
+   trunk/kernel/scsi_tgt_if.c
+   trunk/kernel/scsi_tgt_lib.c
+   trunk/kernel/scsi_tgt_priv.h
+Log:
+Sigh, sync with patchset.
+
+
+Modified: trunk/kernel/scsi_tgt_if.c
+===================================================================
+--- trunk/kernel/scsi_tgt_if.c	2006-07-26 05:06:00 UTC (rev 508)
++++ trunk/kernel/scsi_tgt_if.c	2006-07-26 05:38:50 UTC (rev 509)
+@@ -21,7 +21,6 @@
+  */
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/file.h&gt;
+-#include &lt;linux/netlink.h&gt;
+ #include &lt;net/tcp.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
+@@ -32,87 +31,129 @@
+ 
+ #include &quot;scsi_tgt_priv.h&quot;
+ 
+-static int tgtd_pid;
+-static struct sock *nl_sk;
++struct rbuf {
++	u32 idx;
++	u32 nr_entry;
++	int entry_size;
++	char *buf;
++	int buf_size;
++	spinlock_t lock;
++};
+ 
+-static int send_event_rsp(uint16_t type, struct tgt_event *p, gfp_t flags,
+-			  pid_t pid)
++static int chrdev;
++static struct rbuf txbuf, rxbuf;
++static DECLARE_WAIT_QUEUE_HEAD(tgt_poll_wait);
++
++static inline struct rbuf_hdr *head_rbuf_hdr(struct rbuf *rbuf, u32 idx)
+ {
++	u32 offset = (idx &amp; (rbuf-&gt;nr_entry - 1)) * rbuf-&gt;entry_size;
++	return (struct rbuf_hdr *) (rbuf-&gt;buf + offset);
++}
++
++static void rbuf_init(struct rbuf *rbuf, char *buf, int bsize, int esize)
++{
++	int i;
++
++	esize += sizeof(struct rbuf_hdr);
++	rbuf-&gt;idx = 0;
++	rbuf-&gt;entry_size = esize;
++	rbuf-&gt;buf = buf;
++	spin_lock_init(&amp;rbuf-&gt;lock);
++
++	bsize /= esize;
++	for (i = 0; (1 &lt;&lt; i) &lt; bsize &amp;&amp; (1 &lt;&lt; (i + 1)) &lt;= bsize; i++)
++		;
++	rbuf-&gt;nr_entry = 1 &lt;&lt; i;
++}
++
++static int send_event_rsp(u32 type, struct tgt_event *p)
++{
+ 	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len;
++	struct rbuf_hdr *hdr;
++	struct page *sp, *ep;
++	unsigned long flags;
++	int err = 0;
+ 
+-	len = NLMSG_SPACE(sizeof(*ev));
+-	skb = alloc_skb(len, flags);
+-	if (!skb)
+-		return -ENOMEM;
++	spin_lock_irqsave(&amp;txbuf.lock, flags);
+ 
+-	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
++	hdr = head_rbuf_hdr(&amp;txbuf, txbuf.idx);
++	if (hdr-&gt;status)
++		err = 1;
++	else
++		txbuf.idx++;
+ 
+-	ev = NLMSG_DATA(nlh);
++	spin_unlock_irqrestore(&amp;txbuf.lock, flags);
++
++	if (err)
++		return err;
++
++	ev = (struct tgt_event *) hdr-&gt;data;
+ 	memcpy(ev, p, sizeof(*ev));
++	ev-&gt;type = type;
++	hdr-&gt;status = 1;
++	mb();
+ 
+-	return netlink_unicast(nl_sk, skb, pid, 0);
++	sp = virt_to_page(hdr);
++	ep = virt_to_page((char *) hdr-&gt;data + sizeof(*ev));
++	for (;sp &lt;= ep; sp++)
++		flush_dcache_page(sp);
++
++	wake_up_interruptible(&amp;tgt_poll_wait);
++
++	return 0;
+ }
+ 
+-int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, u64 tag,
+-			 gfp_t flags)
++int scsi_tgt_uspace_send_cmd(struct scsi_cmnd *cmd, struct scsi_lun *lun, u64 tag)
+ {
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-	struct sk_buff *skb;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-	int err, len;
++	struct tgt_event ev;
++	int err;
+ 
+-	len = NLMSG_SPACE(sizeof(*ev));
+-	/*
+-	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+-	 */
+-	skb = alloc_skb(NLMSG_SPACE(len), flags);
+-	if (!skb)
+-		return -ENOMEM;
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.cmd_req.host_no = shost-&gt;host_no;
++	ev.k.cmd_req.cid = cmd-&gt;request-&gt;tag;
++	ev.k.cmd_req.data_len = cmd-&gt;request_bufflen;
++	memcpy(ev.k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev.k.cmd_req.scb));
++	memcpy(ev.k.cmd_req.lun, lun, sizeof(ev.k.cmd_req.lun));
++	ev.k.cmd_req.attribute = cmd-&gt;tag;
++	ev.k.cmd_req.tag = tag;
+ 
+-	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
+-			  len - sizeof(*nlh), 0);
++	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev.k.cmd_req.cid,
++		ev.k.cmd_req.data_len, cmd-&gt;tag,
++		(unsigned long long) ev.k.cmd_req.tag);
+ 
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+-	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+-	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+-	memcpy(ev-&gt;k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev-&gt;k.cmd_req.scb));
+-	memcpy(ev-&gt;k.cmd_req.lun, lun, sizeof(ev-&gt;k.cmd_req.lun));
+-	ev-&gt;k.cmd_req.attribute = cmd-&gt;tag;
+-	ev-&gt;k.cmd_req.tag = tag;
+-
+-	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev-&gt;k.cmd_req.cid,
+-		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag,
+-		(unsigned long long) ev-&gt;k.cmd_req.tag);
+-
+-	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+-	if (err &lt; 0)
+-		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb %d\n&quot;,
+-		       err);
++	err = send_event_rsp(TGT_KEVENT_CMD_REQ, &amp;ev);
++	if (err)
++		eprintk(&quot;tx buf is full, could not send\n&quot;);
+ 	return err;
+ }
+ 
+-int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
++int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd)
+ {
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+ 	struct tgt_event ev;
++	int err;
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 	ev.k.cmd_done.host_no = shost-&gt;host_no;
+ 	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+ 	ev.k.cmd_done.result = cmd-&gt;result;
+ 
+-	return send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev, gfp_mask, tgtd_pid);
++	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev.k.cmd_req.cid,
++		ev.k.cmd_req.data_len, cmd-&gt;tag,
++		(unsigned long long) ev.k.cmd_req.tag);
++
++	err = send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev);
++	if (err)
++		eprintk(&quot;tx buf is full, could not send\n&quot;);
++	return err;
+ }
+ 
+ int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+ 				  struct scsi_lun *scsilun, void *data)
+ {
+ 	struct tgt_event ev;
++	int err;
+ 
+ 	memset(&amp;ev, 0, sizeof(ev));
+ 	ev.k.tsk_mgmt_req.host_no = host_no;
+@@ -124,23 +165,18 @@
+ 	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
+ 		(unsigned long long) ev.k.tsk_mgmt_req.mid);
+ 
+-	return send_event_rsp(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev, GFP_KERNEL, tgtd_pid);
++	err = send_event_rsp(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev);
++	if (err)
++		eprintk(&quot;tx buf is full, could not send\n&quot;);
++	return err;
+ }
+ 
+-static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
++static int event_recv_msg(struct tgt_event *ev)
+ {
+-	struct tgt_event *ev = NLMSG_DATA(nlh);
+ 	int err = 0;
+ 
+-	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
+-		nlh-&gt;nlmsg_pid, current-&gt;pid);
+-
+-	switch (nlh-&gt;nlmsg_type) {
+-	case TGT_UEVENT_REQ:
+-		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+-		break;
++	switch (ev-&gt;type) {
+ 	case TGT_UEVENT_CMD_RSP:
+-		/* TODO: handle multiple cmds in one event */
+ 		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_rsp.host_no,
+ 					   ev-&gt;u.cmd_rsp.cid,
+ 					   ev-&gt;u.cmd_rsp.result,
+@@ -154,79 +190,126 @@
+ 					       ev-&gt;u.tsk_mgmt_rsp.result);
+ 		break;
+ 	default:
+-		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
++		eprintk(&quot;unknown type %d\n&quot;, ev-&gt;type);
+ 		err = -EINVAL;
+ 	}
+ 
+ 	return err;
+ }
+ 
+-static int event_recv_skb(struct sk_buff *skb)
++static ssize_t tgt_write(struct file *file, const char __user * buffer,
++			 size_t count, loff_t * ppos)
+ {
+-	int err;
+-	uint32_t rlen;
+-	struct nlmsghdr	*nlh;
+-	struct tgt_event ev;
++	struct rbuf_hdr *hdr;
++	struct tgt_event *ev;
++	struct page *sp, *ep;
+ 
+-	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+-		nlh = (struct nlmsghdr *) skb-&gt;data;
+-		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+-			return 0;
+-		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+-		if (rlen &gt; skb-&gt;len)
+-			rlen = skb-&gt;len;
+-		err = event_recv_msg(skb, nlh);
++retry:
++	hdr = head_rbuf_hdr(&amp;rxbuf, rxbuf.idx);
+ 
+-		dprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+-		/*
+-		 * TODO for passthru commands the lower level should
+-		 * probably handle the result or we should modify this
+-		 */
+-		switch (nlh-&gt;nlmsg_type) {
+-		case TGT_UEVENT_CMD_RSP:
+-		case TGT_UEVENT_TSK_MGMT_RSP:
+-			break;
+-		default:
+-			memset(&amp;ev, 0, sizeof(ev));
+-			ev.k.event_rsp.err = err;
+-			send_event_rsp(TGT_KEVENT_RSP, &amp;ev,
+-				       GFP_KERNEL | __GFP_NOFAIL,
+-					nlh-&gt;nlmsg_pid);
+-		}
+-		skb_pull(skb, rlen);
+-	}
+-	return 0;
++	sp = virt_to_page(hdr);
++	ep = virt_to_page((char *) hdr-&gt;data + sizeof(*ev));
++	for (;sp &lt;= ep; sp++)
++		flush_dcache_page(sp);
++
++	if (!hdr-&gt;status)
++		return count;
++
++	rxbuf.idx++;
++	ev = (struct tgt_event *) hdr-&gt;data;
++	event_recv_msg(ev);
++	hdr-&gt;status = 0;
++
++	goto retry;
+ }
+ 
+-static void event_recv(struct sock *sk, int length)
++static unsigned int tgt_poll(struct file * file, struct poll_table_struct *wait)
+ {
+-	struct sk_buff *skb;
++	struct rbuf_hdr *hdr;
++	unsigned long flags;
++	unsigned int mask = 0;
+ 
+-	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
+-		if (NETLINK_CREDS(skb)-&gt;uid) {
+-			skb_pull(skb, skb-&gt;len);
+-			kfree_skb(skb);
+-			continue;
++	poll_wait(file, &amp;tgt_poll_wait, wait);
++
++	spin_lock_irqsave(&amp;txbuf.lock, flags);
++
++	hdr = head_rbuf_hdr(&amp;txbuf, txbuf.idx - 1);
++	if (hdr-&gt;status)
++		mask |= POLLIN | POLLRDNORM;
++
++	spin_unlock_irqrestore(&amp;txbuf.lock, flags);
++
++	return mask;
++}
++
++static int tgt_mmap(struct file *filp, struct vm_area_struct *vma)
++{
++	unsigned long size, addr;
++	struct page *page;
++	int err, i;
++
++	if (vma-&gt;vm_pgoff) {
++		eprintk(&quot;bug\n&quot;);
++		return -EINVAL;
++	}
++
++	size = vma-&gt;vm_end - vma-&gt;vm_start;
++	if (size != TGT_RINGBUF_SIZE * 2) {
++		eprintk(&quot;%lu\n&quot;, size);
++		return -EINVAL;
++	}
++	addr = vma-&gt;vm_start;
++	page = virt_to_page(txbuf.buf);
++	for (i = 0; i &lt; size &gt;&gt; PAGE_SHIFT; i++) {
++		err = vm_insert_page(vma, addr, page);
++		if (err) {
++			eprintk(&quot;%d %d %lu\n&quot;, err, i, addr);
++			return -EINVAL;
+ 		}
++		addr += PAGE_SIZE;
++		page++;
++	}
+ 
+-		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
+-			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
+-		else
+-			kfree_skb(skb);
+-	}
++	return 0;
+ }
+ 
++static struct file_operations tgt_fops = {
++	.owner	= THIS_MODULE,
++	.poll	= tgt_poll,
++	.write	= tgt_write,
++	.mmap	= tgt_mmap,
++};
++
+ void __exit scsi_tgt_if_exit(void)
+ {
+-	sock_release(nl_sk-&gt;sk_socket);
++	int order = long_log2(TGT_RINGBUF_SIZE * 2);
++
++	unregister_chrdev(chrdev, &quot;tgt&quot;);
++	free_pages((unsigned long) txbuf.buf, order);
+ }
+ 
+ int __init scsi_tgt_if_init(void)
+ {
+-	nl_sk = netlink_kernel_create(NETLINK_TGT, 1, event_recv,
+-				    THIS_MODULE);
+-	if (!nl_sk)
+-		return -ENOMEM;
++	u32 bsize = TGT_RINGBUF_SIZE;
++	int order;
++	char *buf;
+ 
++	chrdev = register_chrdev(0, &quot;tgt&quot;, &amp;tgt_fops);
++	if (chrdev &lt; 0)
++		return chrdev;
++
++	order = long_log2((bsize * 2) &gt;&gt; PAGE_SHIFT);
++	buf = (char *) __get_free_pages(GFP_KERNEL | __GFP_COMP | __GFP_ZERO,
++					order);
++	if (!buf)
++		goto free_dev;
++	rbuf_init(&amp;txbuf, buf, bsize, sizeof(struct tgt_event));
++	rbuf_init(&amp;rxbuf, buf + bsize, bsize, sizeof(struct tgt_event));
++
+ 	return 0;
++
++free_dev:
++	unregister_chrdev(chrdev, &quot;tgt&quot;);
++
++	return -ENOMEM;
+ }
+
+Modified: trunk/kernel/scsi_tgt_lib.c
+===================================================================
+--- trunk/kernel/scsi_tgt_lib.c	2006-07-26 05:06:00 UTC (rev 508)
++++ trunk/kernel/scsi_tgt_lib.c	2006-07-26 05:38:50 UTC (rev 509)
+@@ -45,11 +45,9 @@
+ 	/* TODO replace the lists with a large bio */
+ 	struct bio_list xfer_done_list;
+ 	struct bio_list xfer_list;
+-	struct scsi_lun *lun;
+ 
+ 	struct list_head hash_list;
+ 	struct request *rq;
+-	u64 tag;
+ 
+ 	void *buffer;
+ 	unsigned bufflen;
+@@ -62,12 +60,6 @@
+ 	struct Scsi_Host *shost;
+ 	struct list_head cmd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+ 	spinlock_t cmd_hash_lock;
+-
+-	struct work_struct uspace_send_work;
+-
+-	spinlock_t cmd_req_lock;
+-	struct mutex cmd_req_mutex;
+-	struct list_head cmd_req;
+ };
+ 
+ /*
+@@ -117,6 +109,10 @@
+ 	rq-&gt;flags |= REQ_SPECIAL | REQ_BLOCK_PC;
+ 	rq-&gt;end_io_data = tcmd;
+ 
++	bio_list_init(&amp;tcmd-&gt;xfer_list);
++	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
++	tcmd-&gt;rq = rq;
++
+ 	return cmd;
+ 
+ release_rq:
+@@ -175,19 +171,27 @@
+ 	}
+ }
+ 
++static void cmd_hashlist_del(struct scsi_cmnd *cmd)
++{
++	struct request_queue *q = cmd-&gt;request-&gt;q;
++	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
++	unsigned long flags;
++	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
++
++	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
++	list_del(&amp;tcmd-&gt;hash_list);
++	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
++}
++
+ static void scsi_tgt_cmd_destroy(void *data)
+ {
+ 	struct scsi_cmnd *cmd = data;
+ 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-	struct scsi_tgt_queuedata *qdata = cmd-&gt;request-&gt;q-&gt;queuedata;
+-	unsigned long flags;
+ 
+ 	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
+ 		rq_data_dir(cmd-&gt;request));
+ 
+-	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-	list_del(&amp;tcmd-&gt;hash_list);
+-	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
++	cmd_hashlist_del(cmd);
+ 
+ 	/*
+ 	 * We must set rq-&gt;flags here because bio_map_user and
+@@ -216,55 +220,6 @@
+ 	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+ }
+ 
+-static void scsi_tgt_uspace_send_fn(void *data)
+-{
+-	struct request_queue *q = data;
+-	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-	struct request *rq;
+-	struct scsi_cmnd *cmd;
+-	struct scsi_tgt_cmd *tcmd;
+-	unsigned long flags;
+-	int err;
+-
+-retry:
+-	err = 0;
+-	if (list_empty(&amp;qdata-&gt;cmd_req))
+-		return;
+-
+-	mutex_lock(&amp;qdata-&gt;cmd_req_mutex);
+-
+-	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-	if (list_empty(&amp;qdata-&gt;cmd_req)) {
+-		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-		mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-		goto out;
+-	}
+-	rq = list_entry_rq(qdata-&gt;cmd_req.next);
+-	list_del_init(&amp;rq-&gt;queuelist);
+-	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-
+-	tcmd = rq-&gt;end_io_data;
+-	init_scsi_tgt_cmd(rq, tcmd);
+-	cmd = rq-&gt;special;
+-	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, tcmd-&gt;tag, GFP_ATOMIC);
+-	if (err &lt; 0) {
+-		eprintk(&quot;failed to send: %p %d\n&quot;, cmd, err);
+-
+-		spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-		list_add(&amp;rq-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-	}
+-
+-	mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-out:
+-	/* TODO: proper error handling */
+-	if (err &lt; 0)
+-		queue_delayed_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work,
+-				   HZ / 10);
+-	else
+-		goto retry;
+-}
+-
+ /*
+  * scsi_tgt_alloc_queue - setup queue used for message passing
+  * shost: scsi host
+@@ -312,11 +267,6 @@
+ 		INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_hash[i]);
+ 	spin_lock_init(&amp;queuedata-&gt;cmd_hash_lock);
+ 
+-	INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_req);
+-	spin_lock_init(&amp;queuedata-&gt;cmd_req_lock);
+-	INIT_WORK(&amp;queuedata-&gt;uspace_send_work, scsi_tgt_uspace_send_fn, q);
+-	mutex_init(&amp;queuedata-&gt;cmd_req_mutex);
+-
+ 	return 0;
+ 
+ cleanup_queue:
+@@ -336,28 +286,20 @@
+  * scsi_tgt_queue_command - queue command for userspace processing
+  * @cmd:	scsi command
+  * @scsilun:	scsi lun
+- * @noblock:	set to nonzero if the command should be queued
++ * @tag:	unique value to identify this command for tmf
+  */
+ int scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+ 			   u64 tag)
+ {
+-	struct request_queue *q = cmd-&gt;request-&gt;q;
+-	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-	unsigned long flags;
+ 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
++	int err;
+ 
+-	bio_list_init(&amp;tcmd-&gt;xfer_list);
+-	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+-	tcmd-&gt;lun = scsilun;
+-	tcmd-&gt;tag = tag;
+-	tcmd-&gt;rq = cmd-&gt;request;
++	init_scsi_tgt_cmd(cmd-&gt;request, tcmd);
++	err = scsi_tgt_uspace_send_cmd(cmd, scsilun, tag);
++	if (err)
++		cmd_hashlist_del(cmd);
+ 
+-	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-	list_add_tail(&amp;cmd-&gt;request-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-
+-	queue_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work);
+-	return 0;
++	return err;
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+ 
+@@ -371,7 +313,7 @@
+ 
+ 	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+ 
+-	scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
++	scsi_tgt_uspace_send_status(cmd);
+ 	INIT_WORK(&amp;tcmd-&gt;work, scsi_tgt_cmd_destroy, cmd);
+ 	queue_work(scsi_tgtd, &amp;tcmd-&gt;work);
+ }
+@@ -402,7 +344,8 @@
+ 		return;
+ 
+ 	cmd-&gt;result = DID_BUS_BUSY &lt;&lt; 16;
+-	if (scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC) &lt;= 0)
++	err = scsi_tgt_uspace_send_status(cmd);
++	if (err &lt;= 0)
+ 		/* the eh will have to pick this up */
+ 		printk(KERN_ERR &quot;Could not send cmd %p status\n&quot;, cmd);
+ }
+@@ -501,7 +444,8 @@
+ 	/* should we free resources here on error ? */
+ 	if (cmd-&gt;result) {
+ send_uspace_err:
+-		if (scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC) &lt;= 0)
++		err = scsi_tgt_uspace_send_status(cmd);
++		if (err &lt;= 0)
+ 			/* the tgt uspace eh will have to pick this up */
+ 			printk(KERN_ERR &quot;Could not send cmd %p status\n&quot;, cmd);
+ 		return;
+
+Modified: trunk/kernel/scsi_tgt_priv.h
+===================================================================
+--- trunk/kernel/scsi_tgt_priv.h	2006-07-26 05:06:00 UTC (rev 508)
++++ trunk/kernel/scsi_tgt_priv.h	2006-07-26 05:38:50 UTC (rev 509)
+@@ -10,14 +10,13 @@
+ } while (0)
+ 
+ #define dprintk eprintk
+-/* #define dprintk(fmt, args...) */
+ 
+ extern void scsi_tgt_if_exit(void);
+ extern int scsi_tgt_if_init(void);
+ 
+-extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun,
+-				u64 tag, gfp_t flags);
+-extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
++extern int scsi_tgt_uspace_send_cmd(struct scsi_cmnd *cmd, struct scsi_lun *lun,
++				    u64 tag);
++extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd);
+ extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+ 				unsigned long uaddr, u8 rw);
+ extern int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000495.html">[Stgt-svn] r508 - trunk/patchset
+</A></li>
+	<LI>Next message: <A HREF="000497.html">[Stgt-svn] r510 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#496">[ date ]</a>
+              <a href="thread.html#496">[ thread ]</a>
+              <a href="subject.html#496">[ subject ]</a>
+              <a href="author.html#496">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

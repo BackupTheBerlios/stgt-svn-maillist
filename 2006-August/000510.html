@@ -1,0 +1,386 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r523 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r523%20-%20trunk/usr&In-Reply-To=%3C200608121047.k7CAl12j007258%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000509.html">
+   <LINK REL="Next"  HREF="000511.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r523 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r523%20-%20trunk/usr&In-Reply-To=%3C200608121047.k7CAl12j007258%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r523 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 12 12:47:01 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000509.html">[Stgt-svn] r522 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000511.html">[Stgt-svn] r524 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#510">[ date ]</a>
+              <a href="thread.html#510">[ thread ]</a>
+              <a href="subject.html#510">[ subject ]</a>
+              <a href="author.html#510">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-12 12:46:59 +0200 (Sat, 12 Aug 2006)
+New Revision: 523
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Kill poor NR_DEVICE stuff.
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-12 08:49:22 UTC (rev 522)
++++ trunk/usr/scsi.c	2006-08-12 10:46:59 UTC (rev 523)
+@@ -287,7 +287,7 @@
+ 	idx = 1;
+ 	nr_luns = 0;
+ 
+-	list_for_each_entry(dev, dev_list, dlist) {
++	list_for_each_entry(dev, dev_list, d_list) {
+ 		lun = dev-&gt;lun;
+ 
+ 		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-12 08:49:22 UTC (rev 522)
++++ trunk/usr/target.c	2006-08-12 10:46:59 UTC (rev 523)
+@@ -32,8 +32,6 @@
+ #include &lt;sys/stat.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+-#define BITS_PER_LONG (ULONG_MAX == 0xFFFFFFFFUL ? 32 : 64)
+-#include &lt;linux/hash.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ 
+ #include &quot;list.h&quot;
+@@ -43,71 +41,71 @@
+ #include &quot;target.h&quot;
+ 
+ static struct target *hostt[MAX_NR_HOST];
++static struct list_head target_hash_list[1 &lt;&lt; HASH_ORDER];
+ 
+-static struct list_head target_list[1 &lt;&lt; HASH_ORDER];
+-
+ static struct target *target_lookup(int tid)
+ {
+ 	struct target *target;
+ 
+-	list_for_each_entry(target, &amp;target_list[hashfn(tid)], tlist)
++	list_for_each_entry(target, &amp;target_hash_list[hashfn(tid)], t_hlist)
+ 		if (target-&gt;tid == tid)
+ 			return target;
+ 	return NULL;
+ }
+ 
+-static void target_list_insert(struct target *target)
++static void target_hlist_insert(struct target *target)
+ {
+-	struct list_head *list = &amp;target_list[hashfn(target-&gt;tid)];
+-	list_add(&amp;target-&gt;tlist, list);
++	struct list_head *list = &amp;target_hash_list[hashfn(target-&gt;tid)];
++	list_add(&amp;target-&gt;t_hlist, list);
+ }
+ 
+-static void target_list_remove(struct target *target)
++static void target_hlist_remove(struct target *target)
+ {
+-	list_del(&amp;target-&gt;tlist);
++	list_del(&amp;target-&gt;t_hlist);
+ }
+ 
+-static struct tgt_device *device_get(struct target *target, uint64_t dev_id)
++static struct tgt_device *device_lookup(struct target *target, uint64_t dev_id)
+ {
+-	if (dev_id &lt; target-&gt;max_device || dev_id &lt; MAX_NR_DEVICE)
+-		return target-&gt;devt[dev_id];
+-
+-	dprintf(&quot;Invalid device id %&quot; PRIu64 &quot;%d\n&quot;, dev_id, MAX_NR_DEVICE);
++	struct tgt_device *device;
++	struct list_head *list = &amp;target-&gt;device_hash_list[hashfn(dev_id)];
++	list_for_each_entry(device, list, d_hlist)
++		if (device-&gt;lun == dev_id)
++			return device;
+ 	return NULL;
+ }
+ 
+-static struct target *host_to_target(int host_no)
++static void device_hlist_insert(struct target *target, struct tgt_device *device)
+ {
+-	if (host_no &lt; MAX_NR_HOST)
+-		return hostt[host_no];
++	struct list_head *list = &amp;target-&gt;device_hash_list[hashfn(device-&gt;lun)];
++	list_add(&amp;device-&gt;d_hlist, list);
++}
+ 
+-	return NULL;
++static void device_hlist_remove(struct tgt_device *device)
++{
++	list_del(&amp;device-&gt;d_hlist);
+ }
+ 
+-static void resize_device_table(struct target *target, uint64_t did)
++static void device_list_insert(struct target *target, struct tgt_device *device)
+ {
+-	struct tgt_device *device;
+-	void *p, *q;
++	struct tgt_device *pos;
++	list_for_each_entry(pos, &amp;target-&gt;device_list, d_list) {
++		if (device-&gt;lun &lt; pos-&gt;lun)
++			break;
++	}
++	list_add(&amp;device-&gt;d_list, &amp;pos-&gt;d_list);
++}
+ 
+-	p = calloc(did + 1, sizeof(device));
+-	memcpy(p, target-&gt;devt, sizeof(device) * target-&gt;max_device);
+-	q = target-&gt;devt;
+-	target-&gt;devt = p;
+-	target-&gt;max_device = did + 1;
+-	free(q);
++static void device_list_remove(struct tgt_device *device)
++{
++	list_del(&amp;device-&gt;d_list);
+ }
+ 
+-static void tgt_device_link(struct target *target, struct tgt_device *dev)
++static struct target *host_to_target(int host_no)
+ {
+-	struct tgt_device *ent;
+-	struct list_head *pos;
++	if (host_no &lt; MAX_NR_HOST)
++		return hostt[host_no];
+ 
+-	list_for_each(pos, &amp;target-&gt;device_list) {
+-		ent = list_entry(pos, struct tgt_device, dlist);
+-		if (dev-&gt;lun &lt; ent-&gt;lun)
+-			break;
+-	}
+-	list_add(&amp;dev-&gt;dlist, pos);
++	return NULL;
+ }
+ 
+ static void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
+@@ -131,7 +129,7 @@
+ 	if (!target)
+ 		return -ENOENT;
+ 
+-	device = device_get(target, dev_id);
++	device = device_lookup(target, dev_id);
+ 	if (device) {
+ 		eprintf(&quot;device %&quot; PRIu64 &quot; already exists\n&quot;, dev_id);
+ 		return -EINVAL;
+@@ -162,9 +160,6 @@
+ 		goto close_dev_fd;
+ 	}
+ 
+-	if (dev_id &gt;= target-&gt;max_device)
+-		resize_device_table(target, dev_id);
+-
+ 	device = malloc(sizeof(*device));
+ 	if (!device)
+ 		goto close_dev_fd;
+@@ -175,14 +170,10 @@
+ 	device-&gt;lun = dev_id;
+ 	snprintf(device-&gt;scsi_id, sizeof(device-&gt;scsi_id),
+ 		 &quot;deadbeaf%d:%&quot; PRIu64, tid, dev_id);
+-	target-&gt;devt[dev_id] = device;
+ 
+-	if (device-&gt;addr)
+-		eprintf(&quot;Succeed to mmap the device %&quot; PRIx64 &quot;\n&quot;,
+-			device-&gt;addr);
+-
+-	tgt_device_link(target, device);
+ 	tgt_cmd_queue_init(&amp;device-&gt;cmd_queue);
++	device_hlist_insert(target, device);
++	device_list_insert(target, device);
+ 
+ 	eprintf(&quot;Succeed to add a logical unit %&quot; PRIu64 &quot; to the target %d\n&quot;,
+ 		dev_id, tid);
+@@ -204,7 +195,7 @@
+ 	if (!target)
+ 		return -ENOENT;
+ 
+-	device = device_get(target, dev_id);
++	device = device_lookup(target, dev_id);
+ 	if (!device) {
+ 		eprintf(&quot;device %&quot; PRIu64 &quot; not found\n&quot;, dev_id);
+ 		return -EINVAL;
+@@ -213,14 +204,10 @@
+ 	if (!list_empty(&amp;device-&gt;cmd_queue.queue))
+ 		return -EBUSY;
+ 
+-	target-&gt;devt[dev_id] = NULL;
+-	if (device-&gt;addr)
+-		munmap((void *) (unsigned long) device-&gt;addr, device-&gt;size);
+-
+ 	close(device-&gt;fd);
++	device_hlist_remove(device);
++	device_list_remove(device);
+ 
+-	list_del(&amp;device-&gt;dlist);
+-
+ 	free(device);
+ 	return 0;
+ }
+@@ -331,9 +318,9 @@
+ 	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
+ 		dev_id);
+ 
+-	cmd-&gt;dev = device_get(target, dev_id);
++	cmd-&gt;dev = device_lookup(target, dev_id);
+ 	if (cmd-&gt;dev) {
+-		uaddr = target-&gt;devt[dev_id]-&gt;addr;
++		uaddr = cmd-&gt;dev-&gt;addr;
+ 		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
+ 	} else
+ 		q = &amp;target-&gt;cmd_queue;
+@@ -665,7 +652,7 @@
+ 
+ int tgt_target_create(int tid)
+ {
+-	int err, i;
++	int i;
+ 	struct target *target;
+ 
+ 	target = target_lookup(tid);
+@@ -686,25 +673,15 @@
+ 		INIT_LIST_HEAD(&amp;target-&gt;cmd_hash_list[i]);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
++	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;device_hash_list); i++)
++		INIT_LIST_HEAD(&amp;target-&gt;device_hash_list[i]);
+ 
+-	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct tgt_device *));
+-	if (!target-&gt;devt) {
+-		eprintf(&quot;Out of memoryn\n&quot;);
+-		err = 0;
+-		goto free_target;
+-	}
+-	target-&gt;max_device = DEFAULT_NR_DEVICE;
+-
+ 	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
++	target_hlist_insert(target);
+ 
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+-	target_list_insert(target);
+ 
+ 	return 0;
+-
+-free_target:
+-	free(target);
+-	return err;
+ }
+ 
+ int tgt_target_destroy(int tid)
+@@ -723,9 +700,7 @@
+ 	if (!list_empty(&amp;target-&gt;cmd_queue.queue))
+ 		return -EBUSY;
+ 
+-	free(target-&gt;devt);
+-
+-	target_list_remove(target);
++	target_hlist_remove(target);
+ 	free(target);
+ 
+ 	return 0;
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-08-12 08:49:22 UTC (rev 522)
++++ trunk/usr/target.h	2006-08-12 10:46:59 UTC (rev 523)
+@@ -1,14 +1,15 @@
+ #ifndef __TARGET_H__
+ #define __TARGET_H__
+ 
++#define BITS_PER_LONG (ULONG_MAX == 0xFFFFFFFFUL ? 32 : 64)
++#include &lt;linux/hash.h&gt;
++
+ /* better if we can include the followings in kernel header files. */
+ #define	MSG_SIMPLE_TAG	0x20
+ #define	MSG_HEAD_TAG	0x21
+ #define	MSG_ORDERED_TAG	0x22
+ 
+ #define	MAX_NR_HOST		1024
+-#define	DEFAULT_NR_DEVICE	64
+-#define	MAX_NR_DEVICE		(1 &lt;&lt; 20)
+ 
+ #define	HASH_ORDER	4
+ #define	hashfn(cid)	hash_long((cid), HASH_ORDER)
+@@ -44,11 +45,10 @@
+ 	int tid;
+ 	int lid;
+ 
+-	struct list_head tlist;
++	struct list_head t_hlist;
+ 
+-	uint64_t max_device;
+-	struct tgt_device **devt;
+-	struct list_head device_list;
++	struct list_head device_hash_list[1 &lt;&lt; HASH_ORDER];
++	struct list_head device_list; /* for REPORT_LUNS */
+ 
+ 	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
+ 	struct list_head cmd_list;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-12 08:49:22 UTC (rev 522)
++++ trunk/usr/tgtd.h	2006-08-12 10:46:59 UTC (rev 523)
+@@ -18,8 +18,10 @@
+ 	uint64_t size;
+ 	uint64_t lun;
+ 	char scsi_id[SCSI_ID_LEN];
+-	struct list_head dlist;
+ 
++	struct list_head d_hlist;
++	struct list_head d_list;
++
+ 	struct tgt_cmd_queue cmd_queue;
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000509.html">[Stgt-svn] r522 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000511.html">[Stgt-svn] r524 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#510">[ date ]</a>
+              <a href="thread.html#510">[ thread ]</a>
+              <a href="subject.html#510">[ subject ]</a>
+              <a href="author.html#510">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

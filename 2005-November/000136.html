@@ -1,0 +1,168 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r142 - trunk/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r142%20-%20trunk/istgt/usr&In-Reply-To=%3C200511021641.jA2GfbI5013510%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000135.html">
+   <LINK REL="Next"  HREF="000137.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r142 - trunk/istgt/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r142%20-%20trunk/istgt/usr&In-Reply-To=%3C200511021641.jA2GfbI5013510%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r142 - trunk/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Wed Nov  2 17:41:37 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000135.html">[Stgt-svn] r141 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000137.html">[Stgt-svn] r143 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#136">[ date ]</a>
+              <a href="thread.html#136">[ thread ]</a>
+              <a href="subject.html#136">[ subject ]</a>
+              <a href="author.html#136">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-02 17:41:37 +0100 (Wed, 02 Nov 2005)
+New Revision: 142
+
+Modified:
+   trunk/istgt/usr/ctldev.c
+   trunk/istgt/usr/istgt.c
+Log:
+Changes in istgt user-space code for /sys/class/tgt_type again.
+
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2005-11-02 16:40:36 UTC (rev 141)
++++ trunk/istgt/usr/ctldev.c	2005-11-02 16:41:37 UTC (rev 142)
+@@ -585,15 +585,55 @@
+ 	free(namelist);
+ }
+ 
++static int get_typeid(void)
++{
++	int err = -EINVAL, i, nr, fd, typeid = -EINVAL;
++	struct dirent **namelist;
++	char path[PATH_MAX], buf[PATH_MAX], *p;
++
++	nr = scandir(&quot;/sys/class/tgt_type&quot;, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return -ENOENT;
++
++	for (i = 0; i &lt; nr; i++) {
++		memset(path, 0, sizeof(path));
++		strncpy(path, &quot;/sys/class/tgt_type/&quot;, sizeof(path));
++		strncat(&amp;path[strlen(path)], namelist[i]-&gt;d_name, sizeof(path));
++		strncat(&amp;path[strlen(path)], &quot;/name&quot;, sizeof(path));
++		eprintf(&quot;%s\n&quot;, path);
++		fd = open(path, O_RDONLY);
++		if (fd &lt; 0)
++			continue;
++		err = read(fd, buf, sizeof(buf));
++		close(fd);
++		if (err &lt; 0)
++			continue;
++		eprintf(&quot;%s\n&quot;, buf);
++		if (!strncmp(buf, THIS_NAME, strlen(THIS_NAME))) {
++			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++				;
++			typeid = atoi(p);
++		}
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return typeid;
++}
++
+ static int system_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+ {
+-	int err = -EINVAL, i, nr, fd;
++	int err = -EINVAL, i, nr, fd, typeid;
+ 	struct dirent **namelist;
+ 	char path[PATH_MAX], buf[PATH_MAX], *p;
+ 
+ 	if (req-&gt;op != OP_DELETE)
+ 		return err;
+ 
++	typeid = get_typeid();
++
+ 	nr = scandir(&quot;/sys/class/tgt_target&quot;, &amp;namelist, filter, alphasort);
+ 	if (!nr)
+ 		return -ENOENT;
+@@ -602,7 +642,7 @@
+ 		memset(path, 0, sizeof(path));
+ 		strncpy(path, &quot;/sys/class/tgt_target/&quot;, sizeof(path));
+ 		strncat(&amp;path[strlen(path)], namelist[i]-&gt;d_name, sizeof(path));
+-		strncat(&amp;path[strlen(path)], &quot;/name&quot;, sizeof(path));
++		strncat(&amp;path[strlen(path)], &quot;/typeid&quot;, sizeof(path));
+ 		eprintf(&quot;%s\n&quot;, path);
+ 		fd = open(path, O_RDONLY);
+ 		if (fd &lt; 0)
+@@ -612,7 +652,7 @@
+ 		if (err &lt; 0)
+ 			continue;
+ 		eprintf(&quot;%s\n&quot;, buf);
+-		if (!strncmp(buf, THIS_NAME, strlen(THIS_NAME))) {
++		if (typeid == atoi(buf)) {
+ 			int tid;
+ 
+ 			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+
+Modified: trunk/istgt/usr/istgt.c
+===================================================================
+--- trunk/istgt/usr/istgt.c	2005-11-02 16:40:36 UTC (rev 141)
++++ trunk/istgt/usr/istgt.c	2005-11-02 16:41:37 UTC (rev 142)
+@@ -114,9 +114,8 @@
+ 	freeaddrinfo(res0);
+ }
+ 
+-void poll_init(struct pollfd *pfds, int nr)
++void poll_init(struct pollfd *pfds)
+ {
+-	eprintf(&quot;%d\n&quot;, nr);
+ 	listen_socket_create(pfds + POLL_LISTEN);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000135.html">[Stgt-svn] r141 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000137.html">[Stgt-svn] r143 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#136">[ date ]</a>
+              <a href="thread.html#136">[ thread ]</a>
+              <a href="subject.html#136">[ subject ]</a>
+              <a href="author.html#136">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,258 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r754 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r754%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200701050158.l051wb6N008240%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000740.html">
+   <LINK REL="Next"  HREF="000742.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r754 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r754%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200701050158.l051wb6N008240%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r754 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Jan  5 02:58:37 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000740.html">[Stgt-svn] r753 - trunk/usr/ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000742.html">[Stgt-svn] r755 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#741">[ date ]</a>
+              <a href="thread.html#741">[ thread ]</a>
+              <a href="subject.html#741">[ subject ]</a>
+              <a href="author.html#741">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-05 02:58:36 +0100 (Fri, 05 Jan 2007)
+New Revision: 754
+
+Modified:
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Remove device_hash_list to simplify the code (maybe revive it later on).
+
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2007-01-04 11:43:06 UTC (rev 753)
++++ trunk/usr/ibmvio/ibmvio.c	2007-01-05 01:58:36 UTC (rev 754)
+@@ -230,7 +230,7 @@
+ 	idx = 2;
+ 	nr_luns = 1;
+ 
+-	list_for_each_entry(dev, dev_list, d_list) {
++	list_for_each_entry(dev, dev_list, device_siblings) {
+ 		lun = dev-&gt;lun;
+ 		lun = make_lun(0, lun &amp; 0x003f, 0);
+ 		data[idx++] = __cpu_to_be64(lun);
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-01-04 11:43:06 UTC (rev 753)
++++ trunk/usr/scsi.c	2007-01-05 01:58:36 UTC (rev 754)
+@@ -298,7 +298,7 @@
+ 	nr_luns = 0;
+ 
+ 	overflow = 0;
+-	list_for_each_entry(dev, dev_list, d_list) {
++	list_for_each_entry(dev, dev_list, device_siblings) {
+ 		nr_luns++;
+ 
+ 		if (overflow)
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-01-04 11:43:06 UTC (rev 753)
++++ trunk/usr/target.c	2007-01-05 01:58:36 UTC (rev 754)
+@@ -60,42 +60,16 @@
+ 	list_del(&amp;target-&gt;t_hlist);
+ }
+ 
+-static struct tgt_device *device_lookup(struct target *target, uint64_t dev_id)
++static struct tgt_device *device_lookup(struct target *target, uint64_t lun)
+ {
+ 	struct tgt_device *device;
+-	struct list_head *list = &amp;target-&gt;device_hash_list[hashfn(dev_id)];
+-	list_for_each_entry(device, list, d_hlist)
+-		if (device-&gt;lun == dev_id)
++
++	list_for_each_entry(device, &amp;target-&gt;device_list, device_siblings)
++		if (device-&gt;lun == lun)
+ 			return device;
+ 	return NULL;
+ }
+ 
+-static void device_hlist_insert(struct target *target, struct tgt_device *device)
+-{
+-	struct list_head *list = &amp;target-&gt;device_hash_list[hashfn(device-&gt;lun)];
+-	list_add(&amp;device-&gt;d_hlist, list);
+-}
+-
+-static void device_hlist_remove(struct tgt_device *device)
+-{
+-	list_del(&amp;device-&gt;d_hlist);
+-}
+-
+-static void device_list_insert(struct target *target, struct tgt_device *device)
+-{
+-	struct tgt_device *pos;
+-	list_for_each_entry(pos, &amp;target-&gt;device_list, d_list) {
+-		if (device-&gt;lun &lt; pos-&gt;lun)
+-			break;
+-	}
+-	list_add_tail(&amp;device-&gt;d_list, &amp;pos-&gt;d_list);
+-}
+-
+-static void device_list_remove(struct tgt_device *device)
+-{
+-	list_del(&amp;device-&gt;d_list);
+-}
+-
+ static struct cmd *cmd_lookup(struct target *target, uint64_t tag)
+ {
+ 	struct cmd *cmd;
+@@ -177,10 +151,10 @@
+ 
+ int tgt_device_create(int tid, uint64_t lun, char *args)
+ {
+-	struct target *target;
+-	struct tgt_device *device;
+ 	char *p;
+ 	int err;
++	struct target *target;
++	struct tgt_device *device, *pos;
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot;\n&quot;, tid, lun);
+ 
+@@ -218,9 +192,13 @@
+ 		 &quot;deadbeaf%d:%&quot; PRIu64, tid, lun);
+ 
+ 	tgt_cmd_queue_init(&amp;device-&gt;cmd_queue);
+-	device_hlist_insert(target, device);
+-	device_list_insert(target, device);
+ 
++	list_for_each_entry(pos, &amp;target-&gt;device_list, device_siblings) {
++		if (device-&gt;lun &lt; pos-&gt;lun)
++			break;
++	}
++	list_add_tail(&amp;device-&gt;device_siblings, &amp;pos-&gt;device_siblings);
++
+ 	dprintf(&quot;Add a logical unit %&quot; PRIu64 &quot; to the target %d\n&quot;, lun, tid);
+ 	return 0;
+ }
+@@ -242,8 +220,7 @@
+ 		return TGTADM_LUN_ACTIVE;
+ 
+ 	free(device-&gt;path);
+-	device_hlist_remove(device);
+-	device_list_remove(device);
++	list_del(&amp;device-&gt;device_siblings);
+ 
+ 	target-&gt;bdt-&gt;bd_close(device);
+ 	free(device);
+@@ -297,14 +274,6 @@
+ 	return -EBUSY;
+ }
+ 
+-#define buffer_check(buf, total, len, rest)	\
+-({						\
+-	buf += len;				\
+-	total += len;				\
+-	rest -= len;				\
+-	!rest;					\
+-})
+-
+ int tgt_device_update(int tid, uint64_t dev_id, char *name)
+ {
+ 	int err = 0;
+@@ -1171,7 +1140,7 @@
+ 			shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;, acl-&gt;address);
+ 
+ 		shprintf(total, buf, rest, TAB1 &quot;LUN information:\n&quot;);
+-		list_for_each_entry(device, &amp;target-&gt;device_list, d_list)
++		list_for_each_entry(device, &amp;target-&gt;device_list, device_siblings)
+ 			shprintf(total, buf, rest,
+ 				 TAB2 &quot;LUN: %&quot; PRIu64 &quot;\n&quot;
+ 				 TAB3 &quot;SCSI ID: %s\n&quot;
+@@ -1257,8 +1226,6 @@
+ 		INIT_LIST_HEAD(&amp;target-&gt;cmd_hash_list[i]);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+-	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;device_hash_list); i++)
+-          		INIT_LIST_HEAD(&amp;target-&gt;device_hash_list[i]);
+ 
+ 	/* FIXME */
+ 	if (bs_type == LU_BS_RAW) {
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-01-04 11:43:06 UTC (rev 753)
++++ trunk/usr/target.h	2007-01-05 01:58:36 UTC (rev 754)
+@@ -44,8 +44,7 @@
+ 	struct list_head t_list;
+ 	struct list_head t_hlist;
+ 
+-	struct list_head device_hash_list[1 &lt;&lt; HASH_ORDER];
+-	struct list_head device_list; /* for REPORT_LUNS */
++	struct list_head device_list;
+ 
+ 	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-01-04 11:43:06 UTC (rev 753)
++++ trunk/usr/tgtd.h	2007-01-05 01:58:36 UTC (rev 754)
+@@ -31,8 +31,8 @@
+ 	char scsi_sn[SCSI_SN_LEN];
+ 	char *path;
+ 
+-	struct list_head d_hlist;
+-	struct list_head d_list;
++	/* the list of devices belonging to a target */
++	struct list_head device_siblings;
+ 
+ 	struct tgt_cmd_queue cmd_queue;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000740.html">[Stgt-svn] r753 - trunk/usr/ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000742.html">[Stgt-svn] r755 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#741">[ date ]</a>
+              <a href="thread.html#741">[ thread ]</a>
+              <a href="subject.html#741">[ subject ]</a>
+              <a href="author.html#741">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

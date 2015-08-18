@@ -1,0 +1,668 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r447%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605041227.k44CRbd9013443%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000433.html">
+   <LINK REL="Next"  HREF="000435.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r447%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605041227.k44CRbd9013443%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu May  4 14:27:37 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000433.html">[Stgt-svn] r446 - branches/use-scsi-ml/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000435.html">[Stgt-svn] r448 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#434">[ date ]</a>
+              <a href="thread.html#434">[ thread ]</a>
+              <a href="subject.html#434">[ subject ]</a>
+              <a href="author.html#434">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-04 14:27:34 +0200 (Thu, 04 May 2006)
+New Revision: 447
+
+Modified:
+   branches/use-scsi-ml/istgt/usr/Makefile
+   branches/use-scsi-ml/istgt/usr/conn.c
+   branches/use-scsi-ml/istgt/usr/ctldev.c
+   branches/use-scsi-ml/istgt/usr/iscsid.c
+   branches/use-scsi-ml/istgt/usr/iscsid.h
+   branches/use-scsi-ml/istgt/usr/istgt.c
+   branches/use-scsi-ml/istgt/usr/param.c
+   branches/use-scsi-ml/istgt/usr/param.h
+   branches/use-scsi-ml/istgt/usr/session.c
+Log:
+overhaul the user-space code. Compliable, though not finished at all.
+
+
+Modified: branches/use-scsi-ml/istgt/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 12:27:34 UTC (rev 447)
+@@ -1,14 +1,14 @@
+ CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../include -I../../include -I../../usr
+-#LIBS = -lcrypto
+-OBJS = conn.o param.o iscsid.o session.o target.o chap.o ctldev.o
++LIBS = -lcrypto
++OBJS = param.o iscsid.o session.o target.o chap.o ctldev.o
+ SHAREDLIB = istgt.so
+ DAEMON = istgtd
+ 
+-$(DAEMON): istgt.o log.c
+-	$(CC) $^ -o $@
++$(DAEMON): log.o istgt.o conn.o param.o session.o iscsid.o target.o chap.o ctldev.o
++	$(CC) $^ -o $@ $(LIBS)
+ 
+ $(SHAREDLIB): $(OBJS)
+ 	$(CC) -shared -o $@ $(OBJS)
+ 
+ clean:
+-	rm -f *.o $(PROGRAMS) $(SHAREDLIB)
++	rm -f *.o istgtd $(SHAREDLIB)
+
+Modified: branches/use-scsi-ml/istgt/usr/conn.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/conn.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/conn.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -68,17 +68,38 @@
+ {
+ 	int err;
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
++	uint32_t cid = conn-&gt;cid;
+ 
+ 	log_debug(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64,
+ 		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 
+ 	conn-&gt;session-&gt;conn_cnt++;
+ 
+-	err = ki-&gt;conn_create(conn-&gt;tid, sid, conn-&gt;cid,
+-			      conn-&gt;stat_sn, conn-&gt;exp_stat_sn, fd,
+-			      conn-&gt;session_param[key_header_digest].val,
+-			      conn-&gt;session_param[key_data_digest].val);
++	err = ki-&gt;create_conn(thandle, sid, cid, &amp;cid);
++	if (err) {
++		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
++			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
++		goto out;
++	}
++	conn-&gt;cid = cid;
+ 
++	if (ki-&gt;bind_conn(thandle, sid, conn-&gt;cid, fd, 1, &amp;err) || err) {
++		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
++			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
++		goto out;
++	}
++
++/* 	if (ki-&gt;set_param(thandle, sid, conn-&gt;cid, ISCSI_PARAM_EXP_STATSN, */
++/* 			  conn-&gt;exp_stat_sn, &amp;err, || err) { */
++/* 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid); */
++/* 		goto out; */
++/* 	} */
++
++/* 	conn-&gt;stat_sn */
++/* 		conn-&gt;session_param[key_header_digest].val, */
++/* 		conn-&gt;session_param[key_data_digest].val); */
++
++out:
+ 	return;
+ }
+ 
+
+Modified: branches/use-scsi-ml/istgt/usr/ctldev.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/ctldev.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/ctldev.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -22,11 +22,8 @@
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+-#include &quot;tgtd.h&quot;
+-#include &quot;tgt_if.h&quot;
+-#include &quot;tgtadm.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
+ 
++#if 0
+ extern struct qelem targets_list;
+ static int typeid;
+ 
+@@ -485,145 +482,15 @@
+ 	return err;
+ }
+ 
+-/* This is temporary. */
++#endif
+ 
+-#define CONFIG_FILE	&quot;/etc/ietd.conf&quot;
+-#define BUFSIZE	8192
+-
+-/* this is the orignal Ardis code. */
+-static char *target_sep_string(char **pp)
+-{
+-	char *p = *pp;
+-	char *q;
+-
+-	for (p = *pp; isspace(*p); p++)
+-		;
+-	for (q = p; *q &amp;&amp; !isspace(*q); q++)
+-		;
+-	if (*q)
+-		*q++ = 0;
+-	else
+-		p = NULL;
+-	*pp = q;
+-	return p;
+-}
+-
+-static int filter(const struct dirent *dir)
+-{
+-	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
+-}
+-
+-static int driver_to_typeid(char *name)
+-{
+-	int i, nr, err, fd, id = -ENOENT;
+-	char *p, path[PATH_MAX], buf[PATH_MAX];
+-	struct dirent **namelist;
+-
+-	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
+-	for (i = 0; i &lt; nr; i++) {
+-		snprintf(path, sizeof(path), TGT_TYPE_SYSFSDIR &quot;/%s/name&quot;,
+-			 namelist[i]-&gt;d_name);
+-
+-		fd = open(path, O_RDONLY);
+-		if (fd &lt; 0) {
+-			eprintf(&quot;%s %d\n&quot;, path, errno);
+-			continue;
+-		}
+-
+-		err = read(fd, buf, sizeof(buf));
+-		close(fd);
+-		if (err &lt; 0) {
+-			eprintf(&quot;%s %d\n&quot;, path, err);
+-			continue;
+-		}
+-
+-		if (strncmp(name, buf, strlen(name)))
+-			continue;
+-
+-		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-			;
+-		id = atoi(p);
+-		break;
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return id;
+-}
+-
+-void initial_device_create(int tid, int64_t lun, char *params)
+-{
+-	char *path, *devtype;
+-	char d[] = &quot;tgt_vsd&quot;;
+-
+-	path = devtype = NULL;
+-	kdevice_create_parser(params, &amp;path, &amp;devtype);
+-	kdevice_create(tid, lun, path, devtype ? : d);
+-}
+-
+-void initial_config_load(void)
+-{
+-	FILE *config;
+-	char buf[BUFSIZE];
+-	char *p, *q;
+-	int idx, tid;
+-	uint32_t val;
+-
+-	typeid = driver_to_typeid(THIS_NAME);
+-
+-	dprintf(&quot;%d\n&quot;, typeid);
+-
+-	if (!(config = fopen(CONFIG_FILE, &quot;r&quot;)))
+-		return;
+-
+-	tid = -1;
+-	while (fgets(buf, BUFSIZE, config)) {
+-		q = buf;
+-		p = target_sep_string(&amp;q);
+-		if (!p || *p == '#')
+-			continue;
+-		if (!strcasecmp(p, &quot;Target&quot;)) {
+-			tid = 0;
+-			if (!(p = target_sep_string(&amp;q)))
+-				continue;
+-			dprintf(&quot;creaing target %s\n&quot;, p);
+-			tid = istgt_ktarget_create(typeid, p);
+-		} else if (!strcasecmp(p, &quot;Alias&quot;) &amp;&amp; tid &gt;= 0) {
+-			;
+-		} else if (!strcasecmp(p, &quot;MaxSessions&quot;) &amp;&amp; tid &gt;= 0) {
+-			/* target-&gt;max_sessions = strtol(q, &amp;q, 0); */
+-		} else if (!strcasecmp(p, &quot;Lun&quot;) &amp;&amp; tid &gt;= 0) {
+-			uint64_t lun = strtoull(q, &amp;q, 10);
+-			initial_device_create(tid, lun, q);
+-		} else if (!((idx = param_index_by_name(p, target_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+-			val = strtol(q, &amp;q, 0);
+-			if (param_check_val(target_keys, idx, &amp;val) &lt; 0)
+-				log_warning(&quot;%s, %u\n&quot;, target_keys[idx].name, val);
+-			iscsi_param_partial_set(tid, 0, key_target, idx, val);
+-		} else if (!((idx = param_index_by_name(p, session_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+-			char *str = target_sep_string(&amp;q);
+-			if (param_str_to_val(session_keys, idx, str, &amp;val) &lt; 0)
+-				continue;
+-			if (param_check_val(session_keys, idx, &amp;val) &lt; 0)
+-				log_warning(&quot;%s, %u\n&quot;, session_keys[idx].name, val);
+-			iscsi_param_partial_set(tid, 0, key_session, idx, val);
+-		}
+-	}
+-
+-	fclose(config);
+-
+-	return;
+-}
+-
+-struct iscsi_kernel_interface ioctl_ki = {
+-	.param_get = iscsi_param_get,
+-	.param_set = iscsi_param_set,
+-	.session_create = iscsi_session_create,
+-	.session_destroy = iscsi_session_destroy,
+-	.conn_create = iscsi_conn_create,
+-	.conn_destroy = iscsi_conn_destroy,
++struct iscsi_kernel_interface nl_ki = {
++/* 	.param_get = iscsi_param_get, */
++/* 	.param_set = iscsi_param_set, */
++/* 	.session_create = iscsi_session_create, */
++/* 	.session_destroy = iscsi_session_destroy, */
++/* 	.conn_create = iscsi_conn_create, */
++/* 	.conn_destroy = iscsi_conn_destroy, */
+ };
+ 
+-struct iscsi_kernel_interface *ki = &amp;ioctl_ki;
++struct iscsi_kernel_interface *ki = &amp;nl_ki;
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/iscsid.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -228,8 +228,8 @@
+ 			unsigned int val;
+ 			char buf[32];
+ 
+-			if (idx == key_max_recv_data_length)
+-				idx = key_max_xmit_data_length;
++			if (idx == ISCSI_PARAM_MAX_RECV_DLENGTH)
++				idx = ISCSI_PARAM_MAX_XMIT_DLENGTH;
+ 
+ 			if (param_str_to_val(session_keys, idx, value, &amp;val) &lt; 0) {
+ 				if (conn-&gt;session_param[idx].state
+@@ -251,7 +251,7 @@
+ 
+ 			switch (conn-&gt;session_param[idx].state) {
+ 			case KEY_STATE_START:
+-				if (idx == key_max_xmit_data_length)
++				if (idx == ISCSI_PARAM_MAX_XMIT_DLENGTH)
+ 					break;
+ 				memset(buf, 0, sizeof(buf));
+ 				param_val_to_str(session_keys, idx, val, buf);
+@@ -283,14 +283,14 @@
+ 
+ static int text_check_param(struct connection *conn)
+ {
+-	struct iscsi_param *p = conn-&gt;session_param;
++	struct param *p = conn-&gt;session_param;
+ 	char buf[32];
+ 	int i, cnt;
+ 
+ 	for (i = 0, cnt = 0; session_keys[i].name; i++) {
+ 		if (p[i].state == KEY_STATE_START &amp;&amp; p[i].val != session_keys[i].def) {
+ 			if (conn-&gt;state == STATE_LOGIN) {
+-				if (i == key_max_xmit_data_length) {
++				if (i == ISCSI_PARAM_MAX_XMIT_DLENGTH) {
+ 					if (p[i].val &gt; session_keys[i].def)
+ 						p[i].val = session_keys[i].def;
+ 					p[i].state = KEY_STATE_DONE;
+@@ -378,7 +378,7 @@
+ /* 			return; */
+ /* 		} */
+ 
+-		ki-&gt;param_get(conn-&gt;tid, 0, conn-&gt;session_param);
++/* 		ki-&gt;param_get(conn-&gt;tid, 0, conn-&gt;session_param); */
+ 		conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+ 		log_debug(&quot;exp_cmd_sn: %d,%d&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmdsn);
+ 		conn-&gt;max_cmd_sn = conn-&gt;exp_cmd_sn;
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-04 12:27:34 UTC (rev 447)
+@@ -12,14 +12,21 @@
+ #include &lt;linux/types.h&gt;
+ 
+ #include &quot;types.h&quot;
++#include &quot;iscsi_if.h&quot;
++#include &quot;misc.h&quot;
+ #include &quot;param.h&quot;
+-#include &quot;misc.h&quot;
+ #include &quot;log.h&quot;
+ 
+ #include &lt;scsi/iscsi_proto.h&gt;
+ 
+ #define ISCSI_NAME_LEN 255
+ 
++#define DIGEST_ALL	(DIGEST_NONE | DIGEST_CRC32C)
++#define DIGEST_NONE		(1 &lt;&lt; 0)
++#define DIGEST_CRC32C           (1 &lt;&lt; 1)
++
++extern uint64_t thandle;
++
+ #define sid64(isid, tsih)					\
+ ({								\
+ 	(uint64_t) isid[0] &lt;&lt;  0 | (uint64_t) isid[1] &lt;&lt;  8 |	\
+@@ -48,6 +55,10 @@
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+ 
++	/* workaroud */
++	uint32_t ksid;
++	uint32_t hostno;
++
+ 	struct qelem conn_list;
+ 	int conn_cnt;
+ };
+@@ -61,7 +72,7 @@
+ 	struct session *session;
+ 
+ 	int tid;
+-/* 	struct iscsi_param session_param[session_key_last]; */
++	struct param session_param[ISCSI_PARAM_MAX];
+ 
+ 	char *initiator;
+ 	uint8_t isid[6];
+@@ -181,15 +192,23 @@
+ 
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+-	int (*param_get) (int tid, uint64_t sid, struct iscsi_param *);
+-	int (*param_set) (int tid, uint64_t sid, int type, uint32_t flags,
+-			  struct iscsi_param *);
+-	int (*session_create) (int tid, uint64_t sid, uint32_t exp,
+-			       uint32_t max);
+-	int (*session_destroy) (int tid, uint64_t sid);
+-	int (*conn_create) (int tid, uint64_t sid, uint32_t cid, uint32_t sn,
+-			    uint32_t exp_sn, int fd, uint32_t hd, uint32_t dd);
+-	int (*conn_destroy) (int tid, uint64_t sid, uint32_t cid);
++	int (*set_param) (uint64_t transport_handle, uint32_t sid,
++			  uint32_t cid, enum iscsi_param param,
++			  void *value, int len, int *retcode);
++
++	int (*create_session) (uint64_t transport_handle,
++			       uint32_t initial_cmdsn,
++			       uint32_t *out_sid, uint32_t *out_hostno);
++
++	int (*destroy_session) (uint64_t transport_handle, uint32_t sid);
++
++	int (*create_conn) (uint64_t transport_handle,
++			    uint32_t sid, uint32_t cid, uint32_t *out_cid);
++	int (*destroy_conn) (uint64_t transport_handle, uint32_t sid,
++			     uint32_t cid);
++	int (*bind_conn) (uint64_t transport_handle, uint32_t sid,
++			  uint32_t cid, uint64_t transport_eph,
++			  int is_leading, int *retcode);
+ };
+ 
+ extern struct iscsi_kernel_interface *ki;
+
+Modified: branches/use-scsi-ml/istgt/usr/istgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -32,7 +32,6 @@
+ #include &lt;netinet/ip.h&gt;
+ #include &lt;arpa/inet.h&gt;
+ 
+-#include &quot;log.h&quot;
+ #include &quot;iscsid.h&quot;
+ 
+ #define ISCSI_LISTEN_PORT	3260
+@@ -50,6 +49,7 @@
+ static struct pollfd pfd[POLL_MAX];
+ static struct connection *incoming[INCOMING_MAX];
+ static char program_name[] = &quot;istgt&quot;;
++uint64_t thandle;
+ 
+ static void set_non_blocking(int fd)
+ {
+
+Modified: branches/use-scsi-ml/istgt/usr/param.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/param.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/param.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -26,7 +26,7 @@
+ 	return err;
+ }
+ 
+-void param_set_defaults(struct iscsi_param *params, struct iscsi_key *keys)
++void param_set_defaults(struct param *params, struct iscsi_key *keys)
+ {
+ 	int i;
+ 
+@@ -78,7 +78,7 @@
+ 	return err;
+ }
+ 
+-static int or_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int or_set_val(struct param *param, int idx, unsigned int *val)
+ {
+ 	*val |= param[idx].val;
+ 	param[idx].val = *val;
+@@ -86,7 +86,7 @@
+ 	return 0;
+ }
+ 
+-static int and_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int and_set_val(struct param *param, int idx, unsigned int *val)
+ {
+ 	*val &amp;= param[idx].val;
+ 	param[idx].val = *val;
+@@ -118,7 +118,7 @@
+ 	return 0;
+ }
+ 
+-static int minimum_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int minimum_set_val(struct param *param, int idx, unsigned int *val)
+ {
+ 	if (*val &gt; param[idx].val)
+ 		*val = param[idx].val;
+@@ -128,7 +128,7 @@
+ 	return 0;
+ }
+ 
+-static int maximum_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int maximum_set_val(struct param *param, int idx, unsigned int *val)
+ {
+ 	if (param[idx].val &gt; *val)
+ 		*val = param[idx].val;
+@@ -176,7 +176,7 @@
+ 	return err;
+ }
+ 
+-static int digest_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int digest_set_val(struct param *param, int idx, unsigned int *val)
+ {
+ 	if (*val &amp; DIGEST_CRC32C &amp;&amp; param[idx].val &amp; DIGEST_CRC32C)
+ 		*val = DIGEST_CRC32C;
+@@ -198,10 +198,12 @@
+ 	return 0;
+ }
+ 
+-static int marker_set_val(struct iscsi_param *param, int idx, unsigned int *val)
++static int marker_set_val(struct param *param, int idx, unsigned int *val)
+ {
+-	if ((idx == key_ofmarkint &amp;&amp; param[key_ofmarker].state == KEY_STATE_DONE) ||
+-	    (idx == key_ifmarkint &amp;&amp; param[key_ifmarker].state == KEY_STATE_DONE))
++	if ((idx == ISCSI_OFMARKER_EN &amp;&amp;
++	     param[ISCSI_OFMARKER_EN].state == KEY_STATE_DONE) ||
++	    (idx == ISCSI_IFMARKER_EN &amp;&amp;
++	     param[ISCSI_IFMARKER_EN].state == KEY_STATE_DONE))
+ 		*val = 0;
+ 	else
+ 		*val = 1;
+@@ -235,7 +237,7 @@
+ 		return 0;
+ }
+ 
+-int param_set_val(struct iscsi_key *keys, struct iscsi_param *param,
++int param_set_val(struct iscsi_key *keys, struct param *param,
+ 		  int idx, unsigned int *val2)
+ {
+ 	if (keys[idx].ops-&gt;set_val)
+@@ -283,30 +285,25 @@
+ 
+ #define	SET_KEY_VALUES(x)	DEFAULT_NR_##x,MIN_NR_##x, MAX_NR_##x
+ 
+-struct iscsi_key target_keys[] = {
+-	{&quot;QueuedCommands&quot;, SET_KEY_VALUES(QUEUED_CMNDS), &amp;minimum_ops},
+-	{NULL,},
+-};
+-
+ struct iscsi_key session_keys[] = {
+-	{&quot;InitialR2T&quot;, 1, 0, 1, &amp;or_ops},
+-	{&quot;ImmediateData&quot;, 1, 0, 1, &amp;and_ops},
+-	{&quot;MaxConnections&quot;, 1, 1, 65535, &amp;minimum_ops},
+ 	{&quot;MaxRecvDataSegmentLength&quot;, 8192, 512, 16777215, &amp;minimum_ops},
+ 	{&quot;MaxXmitDataSegmentLength&quot;, 8192, 512, 16777215, &amp;minimum_ops},
+-	{&quot;MaxBurstLength&quot;, 262144, 512, 16777215, &amp;minimum_ops},
+-	{&quot;FirstBurstLength&quot;, 65536, 512, 16777215, &amp;minimum_ops},
+-	{&quot;DefaultTime2Wait&quot;, 2, 0, 3600, &amp;maximum_ops},
+-	{&quot;DefaultTime2Retain&quot;, 20, 0, 3600, &amp;minimum_ops},
++	{&quot;HeaderDigest&quot;, DIGEST_NONE, DIGEST_NONE, DIGEST_ALL, &amp;digest_ops},
++	{&quot;DataDigest&quot;, DIGEST_NONE, DIGEST_NONE, DIGEST_ALL, &amp;digest_ops},
++	{&quot;InitialR2T&quot;, 1, 0, 1, &amp;or_ops},
+ 	{&quot;MaxOutstandingR2T&quot;, 1, 1, 65535, &amp;minimum_ops},
++	{&quot;ImmediateData&quot;, 1, 0, 1, &amp;and_ops},
++	{&quot;FirstBurstLength&quot;, 65536, 512, 16777215, &amp;minimum_ops},
++	{&quot;MaxBurstLength&quot;, 262144, 512, 16777215, &amp;minimum_ops},
+ 	{&quot;DataPDUInOrder&quot;, 1, 0, 1, &amp;or_ops},
+ 	{&quot;DataSequenceInOrder&quot;, 1, 0, 1, &amp;or_ops},
+ 	{&quot;ErrorRecoveryLevel&quot;, 0, 0, 2, &amp;minimum_ops},
+-	{&quot;HeaderDigest&quot;, DIGEST_NONE, DIGEST_NONE, DIGEST_ALL, &amp;digest_ops},
+-	{&quot;DataDigest&quot;, DIGEST_NONE, DIGEST_NONE, DIGEST_ALL, &amp;digest_ops},
+-	{&quot;OFMarker&quot;, 0, 0, 1, &amp;and_ops},
+ 	{&quot;IFMarker&quot;, 0, 0, 1, &amp;and_ops},
++	{&quot;OFMarker&quot;, 0, 0, 1, &amp;and_ops},
++	{&quot;DefaultTime2Wait&quot;, 2, 0, 3600, &amp;maximum_ops},
++	{&quot;DefaultTime2Retain&quot;, 20, 0, 3600, &amp;minimum_ops},
+ 	{&quot;OFMarkInt&quot;, 2048, 1, 65535, &amp;marker_ops},
+ 	{&quot;IFMarkInt&quot;, 2048, 1, 65535, &amp;marker_ops},
++	{&quot;MaxConnections&quot;, 1, 1, 65535, &amp;minimum_ops},
+ 	{NULL,},
+ };
+
+Modified: branches/use-scsi-ml/istgt/usr/param.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/param.h	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/param.h	2006-05-04 12:27:34 UTC (rev 447)
+@@ -9,7 +9,7 @@
+ 
+ struct iscsi_key;
+ 
+-struct iscsi_param {
++struct param {
+ 	int state;
+ 	unsigned int val;
+ };
+@@ -18,7 +18,7 @@
+ 	int (*val_to_str)(unsigned int, char *);
+ 	int (*str_to_val)(char *, unsigned int *);
+ 	int (*check_val)(struct iscsi_key *, unsigned int *);
+-	int (*set_val)(struct iscsi_param *, int, unsigned int *);
++	int (*set_val)(struct param *, int, unsigned int *);
+ };
+ 
+ struct iscsi_key {
+@@ -32,11 +32,11 @@
+ extern struct iscsi_key session_keys[];
+ extern struct iscsi_key target_keys[];
+ 
+-extern void param_set_defaults(struct iscsi_param *, struct iscsi_key *);
++extern void param_set_defaults(struct param *, struct iscsi_key *);
+ extern int param_index_by_name(char *, struct iscsi_key *);
+ extern int param_val_to_str(struct iscsi_key *, int, unsigned int, char *);
+ extern int param_str_to_val(struct iscsi_key *, int, char *, unsigned int *);
+ extern int param_check_val(struct iscsi_key *, int, unsigned int *);
+-extern int param_set_val(struct iscsi_key *, struct iscsi_param *, int, unsigned int *);
++extern int param_set_val(struct iscsi_key *, struct param *, int, unsigned int *);
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/istgt/usr/session.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/session.c	2006-05-04 07:13:26 UTC (rev 446)
++++ branches/use-scsi-ml/istgt/usr/session.c	2006-05-04 12:27:34 UTC (rev 447)
+@@ -98,9 +98,10 @@
+ 
+ 	log_debug(&quot;session_create: %#&quot; PRIx64, sid);
+ 
+-	ki-&gt;session_create(conn-&gt;tid, sid, conn-&gt;exp_cmd_sn,
+-			   conn-&gt;max_cmd_sn);
+-	ki-&gt;param_set(conn-&gt;tid, sid, key_session, 0, conn-&gt;session_param);
++	ki-&gt;create_session(thandle, conn-&gt;exp_cmd_sn, &amp;session-&gt;ksid,
++			   &amp;session-&gt;hostno);
++
++	/* FIXME: we need to bind host to target here */
+ }
+ 
+ void session_remove(struct session *session)
+@@ -113,7 +114,7 @@
+ 		eprintf(&quot;%&quot; PRIx64 &quot; conn_list is not null\n&quot;, sid);
+ 
+ 	if (!session-&gt;tsih)
+-		ki-&gt;session_destroy(session-&gt;target-&gt;tid, sid);
++		ki-&gt;destroy_session(thandle, session-&gt;ksid);
+ 
+ 	if (session-&gt;target) {
+ 		remque(&amp;session-&gt;slist);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000433.html">[Stgt-svn] r446 - branches/use-scsi-ml/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000435.html">[Stgt-svn] r448 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#434">[ date ]</a>
+              <a href="thread.html#434">[ thread ]</a>
+              <a href="subject.html#434">[ subject ]</a>
+              <a href="author.html#434">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

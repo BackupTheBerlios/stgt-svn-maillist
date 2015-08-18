@@ -1,0 +1,235 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r718 - in trunk: doc usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r718%20-%20in%20trunk%3A%20doc%20usr&In-Reply-To=%3C200612261240.kBQCeK46032326%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000704.html">
+   <LINK REL="Next"  HREF="000706.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r718 - in trunk: doc usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r718%20-%20in%20trunk%3A%20doc%20usr&In-Reply-To=%3C200612261240.kBQCeK46032326%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r718 - in trunk: doc usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Dec 26 13:40:20 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000704.html">[Stgt-svn] r717 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000706.html">[Stgt-svn] r719 - in trunk: doc patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#705">[ date ]</a>
+              <a href="thread.html#705">[ thread ]</a>
+              <a href="subject.html#705">[ subject ]</a>
+              <a href="author.html#705">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-26 13:40:19 +0100 (Tue, 26 Dec 2006)
+New Revision: 718
+
+Modified:
+   trunk/doc/README.passthrough
+   trunk/usr/Makefile
+   trunk/usr/bd_sg.c
+Log:
+Update bd_sg.c for the current bsg tree.
+
+
+Modified: trunk/doc/README.passthrough
+===================================================================
+--- trunk/doc/README.passthrough	2006-12-26 02:45:18 UTC (rev 717)
++++ trunk/doc/README.passthrough	2006-12-26 12:40:19 UTC (rev 718)
+@@ -18,9 +18,9 @@
+ 
+ The passthrough mode support is not finished yet. tgt can pass SCSI
+ commands but transport-layer commands. So tgt cannot handle TMFs
+-now. This is mainly because Linux kernel does not enable user space to
+-send transport-layer commands to LLDs yet. The sg version 4 will
+-support this. We need to wait for some time.
++now. This is because Linux kernel does not enable user space to send
++transport-layer commands to LLDs yet. The sg version 4 will support
++this. We need to wait for some time.
+ 
+ 
+ Starting
+@@ -32,17 +32,13 @@
+ 
+ <A HREF="http://www.kernel.org/git/?p=linux/kernel/git/axboe/linux-2.6-block.git;a=summary">http://www.kernel.org/git/?p=linux/kernel/git/axboe/linux-2.6-block.git;a=summary</A>
+ 
++Second, apply the IOCB_CMD_EPOLL_WAIT patch in the patch directory,
++rebuild the kernel and reboot with the new kernel.
+ 
+-Secondly, if you want to the passthrough mode with the ibmvio driver,
+-pick up the tgt patches in the tgt tree, and apply them. If you use
+-the iscsi driver, you can skip this.
++Third, modify usr/Makefile to complile bd_sg.c.
+ 
+-Thirdly, apply the IOCB_CMD_EPOLL_WAIT patch in the patch directory.
++The following example is to export /dev/sdb via the iscsi driver.
+ 
+-You are ready. The following example is to export /dev/sda via the
+-iscsi driver. Good luck.
+-
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode target --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode target --tid 1 --name iotype --value rawio
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 0 --params Path=/dev/sda
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode target --tid 1 --backing-store-type raw -T iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --mode logicalunit --tid 1 --lun 0 -b /dev/sdb
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op update --mode target --tid 1 --name state --value running
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-12-26 02:45:18 UTC (rev 717)
++++ trunk/usr/Makefile	2006-12-26 12:40:19 UTC (rev 718)
+@@ -40,7 +40,8 @@
+ CFLAGS += -Wall -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
+ 
+ PROGRAMS += tgtd tgtadm
+-TGTD_OBJS += tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o bd_sg.o
++TGTD_OBJS += tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o
++#TGTD_OBJS += bd_sg.o
+ 
+ all: $(PROGRAMS)
+ 
+
+Modified: trunk/usr/bd_sg.c
+===================================================================
+--- trunk/usr/bd_sg.c	2006-12-26 02:45:18 UTC (rev 717)
++++ trunk/usr/bd_sg.c	2006-12-26 12:40:19 UTC (rev 718)
+@@ -26,26 +26,23 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;scsi/sg.h&gt;
+ #include &lt;sys/epoll.h&gt;
+ #include &lt;limits.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/time.h&gt;
++#include &lt;linux/types.h&gt;
++#include &lt;linux/bsg.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;target.h&quot;
+ 
+-/*
+- * this uses sg4, so you need to Jens' bsg tree now.
+- */
+-
+ static void sg_handler(int fd, int events, void *data)
+ {
+ 	int i, err;
+-	struct sg_io_hdr hdrs[64];
++	struct sg_io_v4 hdrs[64];
+ 	struct tgt_device *dev = data;
+ 
+ 	err = read(dev-&gt;fd, hdrs, sizeof(hdrs));
+@@ -53,13 +50,10 @@
+ 		return;
+ 
+ 	for (i = 0; i &lt; err / sizeof(hdrs[0]); i++) {
+-		struct cmd *cmd = (void *) hdrs[i].usr_ptr;
+-		dprintf(&quot;%d %p %u %u %x\n&quot;, i, hdrs[i].usr_ptr,
+-			hdrs[i].status, hdrs[i].resid,
+-			hdrs[i].info);
+-		if (hdrs[i].resid)
+-			cmd-&gt;len = hdrs[i].resid;
+-		target_cmd_io_done(hdrs[i].usr_ptr, 0);
++		struct cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
++		if (hdrs[i].din_resid)
++			cmd-&gt;len = hdrs[i].din_resid;
++		target_cmd_io_done(cmd, 0);
+ 	}
+ }
+ 
+@@ -70,8 +64,10 @@
+ 	char *sd, buf[256];
+ 	struct stat64 st;
+ 	struct timeval t;
++	struct sg_io_v4 hdr, *h;
+ 
+ 	/* we assume something like /dev/sda */
++	eprintf(&quot;%Zd %Zd %Zd\n&quot;, sizeof(hdr), sizeof(*h), sizeof(struct sg_io_v4));
+ 
+ 	*fd = backed_file_open(path, 0, size);
+ 	if (*fd &lt; 0)
+@@ -172,23 +168,29 @@
+ 			    uint64_t offset, int *async, void *key)
+ {
+ 	int err;
+-	struct sg_io_hdr hdr;
++	struct sg_io_v4 hdr;
+ 
+ 	/* TODO sense */
+ 
+ 	dprintf(&quot;%x %d %u %lx\n&quot;, scb[0], rw, datalen, *uaddr);
+ 	memset(&amp;hdr, 0, sizeof(hdr));
+-	hdr.interface_id = 'S';
+-	hdr.cmd_len = 16;
+-	hdr.cmdp = scb;
+-	hdr.dxfer_direction = rw ? SG_DXFER_TO_DEV : SG_DXFER_FROM_DEV;
+-	hdr.dxfer_len = datalen;
+-	hdr.dxferp = (void *) *uaddr;
+-/* 	hdr.mx_sb_len = sizeof(sense); */
+-/* 	hdr.sbp = sense; */
+-	hdr.timeout = 30000;
+-	hdr.usr_ptr = key;
++	hdr.guard = 'Q';
++	hdr.request_len = 16;
++	hdr.request = (unsigned long) scb;
+ 
++	if (rw) {
++		hdr.dout_xfer_len = datalen;
++		hdr.dout_xferp = *uaddr;
++	} else {
++		hdr.din_xfer_len = datalen;
++		hdr.din_xferp = *uaddr;
++	}
++
++/* 	hdr.max_response_len = sizeof(sense); */
++/* 	hdr.response = (unsigned long) sense; */
++
++	hdr.usr_ptr = (unsigned long) key;
++
+ 	*async = 1;
+ 
+ 	err = write(dev-&gt;fd, &amp;hdr, sizeof(hdr));
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000704.html">[Stgt-svn] r717 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000706.html">[Stgt-svn] r719 - in trunk: doc patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#705">[ date ]</a>
+              <a href="thread.html#705">[ thread ]</a>
+              <a href="subject.html#705">[ subject ]</a>
+              <a href="author.html#705">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

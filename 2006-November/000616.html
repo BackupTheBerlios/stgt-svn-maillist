@@ -1,0 +1,280 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r629 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r629%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611101516.kAAFG67G028899%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000615.html">
+   <LINK REL="Next"  HREF="000617.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r629 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r629%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611101516.kAAFG67G028899%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r629 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 10 16:16:06 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000615.html">[Stgt-svn] r628 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000617.html">[Stgt-svn] r630 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#616">[ date ]</a>
+              <a href="thread.html#616">[ thread ]</a>
+              <a href="subject.html#616">[ subject ]</a>
+              <a href="author.html#616">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-10 16:16:05 +0100 (Fri, 10 Nov 2006)
+New Revision: 629
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/target.c
+   trunk/usr/mgmt.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Now iSCSI param can be configurable. You can do something like this:
+
+lily:/home/fujita# ./tgt/usr/tgtadm --op update --lld iscsi --tid 1 --name MaxRecvDataSegmentLength --value 2048
+
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/driver.h	2006-11-10 15:16:05 UTC (rev 629)
+@@ -8,6 +8,7 @@
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+ 	int (*target_show) (int, char *, int);
++	int (*target_update) (int, char *);
+ 
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+ 	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/iscsi/iscsi.h	2006-11-10 15:16:05 UTC (rev 629)
+@@ -2,6 +2,7 @@
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
+ extern int iscsi_target_show(int, char *, int);
++extern int iscsi_target_update(int, char *);
+ extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
+ extern int iscsi_tm_done(int host_no, uint64_t mid, int result);
+@@ -12,6 +13,7 @@
+ 	.target_create		= iscsi_target_create,
+ 	.target_destroy		= iscsi_target_destroy,
+ 	.target_show		= iscsi_target_show,
++	.target_update		= iscsi_target_update,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+ 	.bdt			= &amp;aio_bdt,
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/iscsi/target.c	2006-11-10 15:16:05 UTC (rev 629)
+@@ -129,6 +129,39 @@
+ 	return 0;
+ }
+ 
++int iscsi_target_update(int tid, char *name)
++{
++	int idx, err;
++	unsigned int val;
++	char *str;
++	struct target* target;
++
++	target = target_find_by_id(tid);
++	if (!target)
++		return -ENOENT;
++
++	str = name + strlen(name) + 1;
++
++	idx = param_index_by_name(name, session_keys);
++	if (idx &lt; 0)
++		return idx;
++
++	err = param_str_to_val(session_keys, idx, str, &amp;val);
++	if (err)
++		return err;
++
++	err = param_check_val(session_keys, idx, &amp;val);
++	if (err &lt; 0)
++		return err;
++
++	target-&gt;session_param[idx].val = val;
++
++	dprintf(&quot;%s %s %u\n&quot;, name, str, val);
++
++	return 0;
++}
++
++
+ int iscsi_target_show(int tid, char *buf, int rest)
+ {
+ 	struct target* target;
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/mgmt.c	2006-11-10 15:16:05 UTC (rev 629)
+@@ -85,6 +85,11 @@
+ 	case OP_BIND:
+ 		err = tgt_target_bind(req-&gt;tid, req-&gt;host_no, lld_no);
+ 		break;
++	case OP_UPDATE:
++		err = -EINVAL;
++		if (tgt_drivers[lld_no]-&gt;target_update)
++			err = tgt_drivers[lld_no]-&gt;target_update(req-&gt;tid, params);
++		break;
+ 	default:
+ 		break;
+ 	}
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/tgtadm.c	2006-11-10 15:16:05 UTC (rev 629)
+@@ -71,6 +71,8 @@
+ 	{&quot;params&quot;, required_argument, NULL, 'p'},
+ 	{&quot;user&quot;, no_argument, NULL, 'u'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
++	{&quot;name&quot;, required_argument, NULL, 'm'},
++	{&quot;value&quot;, required_argument, NULL, 'a'},
+ 	{&quot;debug&quot;, no_argument, NULL, 'd'},
+ 	{&quot;version&quot;, no_argument, NULL, 'v'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+@@ -156,9 +158,9 @@
+ {
+ 	struct tgtadm_res *res;
+ 	char buf[BUFSIZE];
+-	int err, len = (void *) res-&gt;data - (void *) res;
++	int err, len;
+ 
+-	err = read(fd, buf, len);
++	err = read(fd, buf, sizeof(*res));
+ 	if (err &lt; 0) {
+ 		eprintf(&quot;Cannot read from tgtd, %m\n&quot;);
+ 		return -1;
+@@ -172,7 +174,7 @@
+ 
+ 	dprintf(&quot;got the response %d %d\n&quot;, res-&gt;err, res-&gt;len);
+ 
+-	len = res-&gt;len - len;
++	len = res-&gt;len - sizeof(*res);
+ 	if (!len)
+ 		return 0;
+ 
+@@ -245,6 +247,8 @@
+ 		op = OP_BIND;
+ 	else if (!strcmp(&quot;show&quot;, str))
+ 		op = OP_SHOW;
++	else if (!strcmp(&quot;update&quot;, str))
++		op = OP_UPDATE;
+ 	else
+ 		op = -1;
+ 
+@@ -258,10 +262,13 @@
+ 	int tid = -1;
+ 	uint32_t cid = 0, set = 0, hostno = 0;
+ 	uint64_t sid = 0, lun = 0;
+-	char *params = NULL, *lldname = NULL;
++	char *params, *lldname;
+ 	struct tgtadm_req *req;
+ 	char buf[BUFSIZE];
++	char *name, *value;
+ 
++	params = lldname = name = value = NULL;
++
+ 	optind = 1;
+ 	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvdh&quot;,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+@@ -299,6 +306,12 @@
+ 		case 'u':
+ 			set |= (1 &lt;&lt; MODE_USER);
+ 			break;
++		case 'a':
++			value = optarg;
++			break;
++		case 'm':
++			name = optarg;
++			break;
+ 		case 'd':
+ 			debug = 1;
+ 			break;
+@@ -341,8 +354,18 @@
+ 		len = min(strlen(params), sizeof(buf) - len);
+ 		strncpy((char *) req-&gt;data, params, len);
+ 	}
+-	req-&gt;len = ((char *) req-&gt;data - (char *) req) + len;
+ 
++	if (name &amp;&amp; value) {
++		int rest = sizeof(buf) - sizeof(*req);
++		char *p = (char *) req-&gt;data;
++
++		len = snprintf(p, rest, &quot;%s&quot;, name);
++		len += 1;
++		len += snprintf(p + len, rest - len, &quot;%s&quot;, value);
++	}
++
++	req-&gt;len = sizeof(*req) + len;
++
+ 	err = ipc_mgmt_req(req);
+ out:
+ 	return err;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-11-10 14:00:28 UTC (rev 628)
++++ trunk/usr/tgtadm.h	2006-11-10 15:16:05 UTC (rev 629)
+@@ -9,6 +9,7 @@
+ 	OP_DELETE,
+ 	OP_SHOW,
+ 	OP_BIND,
++	OP_UPDATE,
+ };
+ 
+ enum tgtadm_mode {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000615.html">[Stgt-svn] r628 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000617.html">[Stgt-svn] r630 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#616">[ date ]</a>
+              <a href="thread.html#616">[ thread ]</a>
+              <a href="subject.html#616">[ subject ]</a>
+              <a href="author.html#616">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

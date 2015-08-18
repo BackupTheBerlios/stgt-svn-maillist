@@ -1,0 +1,197 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r18 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r18%20-%20trunk/kernel&In-Reply-To=%3C200508231813.j7NIDEwv023418%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000012.html">
+   <LINK REL="Next"  HREF="000014.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r18 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r18%20-%20trunk/kernel&In-Reply-To=%3C200508231813.j7NIDEwv023418%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r18 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Aug 23 20:13:14 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000012.html">[Stgt-svn] r17 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000014.html">[Stgt-svn] r20 - in trunk: include iscsi/kernel kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#13">[ date ]</a>
+              <a href="thread.html#13">[ thread ]</a>
+              <a href="subject.html#13">[ subject ]</a>
+              <a href="author.html#13">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-23 20:13:14 +0200 (Tue, 23 Aug 2005)
+New Revision: 18
+
+Added:
+   trunk/kernel/stgt_vsd.c
+Modified:
+   trunk/kernel/Makefile
+Log:
+Add initial virtual device code.
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2005-08-23 18:03:04 UTC (rev 17)
++++ trunk/kernel/Makefile	2005-08-23 18:13:14 UTC (rev 18)
+@@ -8,7 +8,7 @@
+ obj-m		+= stgt_core.o
+ stgt_core-objs	:= stgt_sysfs.o stgt.o
+ 
+-obj-m		+= stgt_sd.o
++obj-m		+= stgt_sd.o stgt_vsd.o
+ else
+ 
+ ifeq ($(KERNELSRC),)
+
+Added: trunk/kernel/stgt_vsd.c
+===================================================================
+--- trunk/kernel/stgt_vsd.c	2005-08-23 18:03:04 UTC (rev 17)
++++ trunk/kernel/stgt_vsd.c	2005-08-23 18:13:14 UTC (rev 18)
+@@ -0,0 +1,105 @@
++/*
++ * STGT virtual device
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;linux/types.h&gt;
++#include &lt;linux/blkdev.h&gt;
++#include &lt;linux/namei.h&gt;
++
++#include &lt;stgt_device.h&gt;
++
++struct stgt_vsd_dev {
++	struct file *filp;
++};
++
++static void stgt_vsd_destroy(struct stgt_device *device)
++{
++	struct stgt_vsd_dev *vsddev = device-&gt;sdt_data;
++	filp_close(vsddev-&gt;filp, NULL);
++}
++
++static int open_file(struct stgt_vsd_dev *vsddev, const char *path)
++{
++	struct file *filp;
++	mm_segment_t oldfs;
++	int err = 0;
++
++	oldfs = get_fs();
++	set_fs(get_ds());
++	filp = filp_open(path, O_RDWR|O_LARGEFILE, 0);
++	set_fs(oldfs);
++
++	if (IS_ERR(filp)) {
++		err = PTR_ERR(filp);
++		printk(&quot;Can't open %s %d\n&quot;, path, err);
++	} else
++		vsddev-&gt;filp = filp;
++
++	return err;
++}
++
++static int stgt_vsd_create(struct stgt_device *device)
++{
++	struct stgt_vsd_dev *vsddev = device-&gt;sdt_data;
++	struct inode *inode;
++	int err = 0;
++
++	err = open_file(vsddev, device-&gt;path);
++	if (err)
++		return err;
++
++	inode = vsddev-&gt;filp-&gt;f_dentry-&gt;d_inode;
++	if (S_ISREG(inode-&gt;i_mode))
++		;
++	else if (S_ISBLK(inode-&gt;i_mode))
++		inode = inode-&gt;i_bdev-&gt;bd_inode;
++	else {
++		err = -EINVAL;
++		goto out;
++	}
++
++	printk(&quot;%s %llu\n&quot;, device-&gt;path, inode-&gt;i_size &gt;&gt; 9);
++
++	return 0;
++out:
++	filp_close(vsddev-&gt;filp, NULL);
++	return err;
++}
++
++static int stgt_vsd_queue(struct stgt_device *device, struct stgt_cmnd *cmnd)
++{
++	return 0;
++}
++
++static int stgt_vsd_prep(struct stgt_device *device, struct stgt_cmnd *cmnd)
++{
++	return 0;
++}
++
++static struct stgt_device_template stgt_vsd = {
++	.name = &quot;stgt_vsd&quot;,
++	.module = THIS_MODULE,
++	.create = stgt_vsd_create,
++	.destroy = stgt_vsd_destroy,
++	.queuecommand = stgt_vsd_queue,
++	.prepcommand = stgt_vsd_prep,
++};
++
++static int __init stgt_vsd_init(void)
++{
++	stgt_vsd.priv_data_size = sizeof(struct stgt_vsd_dev);
++	return stgt_device_template_register(&amp;stgt_vsd);
++}
++
++static void __exit stgt_vsd_exit(void)
++{
++	stgt_device_template_unregister(&amp;stgt_vsd);
++}
++
++module_init(stgt_vsd_init);
++module_exit(stgt_vsd_exit);
++MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000012.html">[Stgt-svn] r17 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000014.html">[Stgt-svn] r20 - in trunk: include iscsi/kernel kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#13">[ date ]</a>
+              <a href="thread.html#13">[ thread ]</a>
+              <a href="subject.html#13">[ subject ]</a>
+              <a href="author.html#13">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

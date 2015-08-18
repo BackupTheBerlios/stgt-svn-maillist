@@ -1,0 +1,196 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r323 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r323%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602262308.k1QN8lYb017149%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000309.html">
+   <LINK REL="Next"  HREF="000311.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r323 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r323%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602262308.k1QN8lYb017149%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r323 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 27 00:08:47 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000309.html">[Stgt-svn] r322 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000311.html">[Stgt-svn] r324 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#310">[ date ]</a>
+              <a href="thread.html#310">[ thread ]</a>
+              <a href="subject.html#310">[ subject ]</a>
+              <a href="author.html#310">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-27 00:08:46 +0100 (Mon, 27 Feb 2006)
+New Revision: 323
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+   branches/use-scsi-ml/usr/util.h
+Log:
+Move scsi_cmd_done to target.c.
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-26 04:18:10 UTC (rev 322)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-26 23:08:46 UTC (rev 323)
+@@ -27,20 +27,12 @@
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
++#include &lt;sys/user.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
++#include &quot;util.h&quot;
+ 
+-/*
+- * FIXME: in some architectures (e.g., powerpc) don't export PAGE_* to
+- * user space by asm/page.h. How should we handle this?
+- */
+-#ifndef PAGE_SHIFT
+-#define	PAGE_SHIFT	12
+-#define	PAGE_SIZE	(1UL &lt;&lt; PAGE_SHIFT)
+-#define	PAGE_MASK	(~(PAGE_SIZE-1))
+-#endif
+-
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+ #define cpu_to_be64 __cpu_to_be64
+@@ -629,8 +621,6 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-#define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_MASK)) + PAGE_SIZE - 1) &gt;&gt; PAGE_SHIFT)
+-
+ static int mmap_device(int tid, uint64_t lun, uint8_t *scb,
+ 		       int *len, int fd, uint32_t datalen, unsigned long *uaddr,
+ 		       uint64_t *offset)
+@@ -835,21 +825,3 @@
+ 
+ 	return result;
+ }
+-
+-int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	int err = 0;
+-
+-	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
+-
+-	if (do_munmap) {
+-		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
+-		uaddr &amp;= PAGE_MASK;
+-		err = munmap((void *) (unsigned long) uaddr, len);
+-		if (err)
+-			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
+-	} else if (do_free)
+-		free((void *) (unsigned long) uaddr);
+-
+-	return err;
+-}
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-26 04:18:10 UTC (rev 322)
++++ branches/use-scsi-ml/usr/target.c	2006-02-26 23:08:46 UTC (rev 323)
+@@ -33,6 +33,7 @@
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;sys/user.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+ #include &lt;linux/netlink.h&gt;
+@@ -394,6 +395,24 @@
+ 			  NLMSG_SPACE(sizeof(*ev_res)));
+ }
+ 
++static int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	int err = 0;
++
++	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
++
++	if (do_munmap) {
++		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
++		uaddr &amp;= PAGE_MASK;
++		err = munmap((void *) (unsigned long) uaddr, len);
++		if (err)
++			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
++	} else if (do_free)
++		free((void *) (unsigned long) uaddr);
++
++	return err;
++}
++
+ static void cmd_done(struct tgt_event *ev)
+ {
+ 	struct target *target;
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-26 04:18:10 UTC (rev 322)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-26 23:08:46 UTC (rev 323)
+@@ -27,6 +27,5 @@
+ extern int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun);
+-extern int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len);
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/usr/util.h
+===================================================================
+--- branches/use-scsi-ml/usr/util.h	2006-02-26 04:18:10 UTC (rev 322)
++++ branches/use-scsi-ml/usr/util.h	2006-02-26 23:08:46 UTC (rev 323)
+@@ -25,6 +25,8 @@
+ 	     &amp;pos-&gt;member != (head); 	\
+ 	     pos = list_entry(pos-&gt;member.q_forw, typeof(*pos), member))
+ 
++#define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_MASK)) + PAGE_SIZE - 1) &gt;&gt; PAGE_SHIFT)
++
+ struct qelem {
+ 	struct qelem *q_forw;
+ 	struct qelem *q_back;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000309.html">[Stgt-svn] r322 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000311.html">[Stgt-svn] r324 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#310">[ date ]</a>
+              <a href="thread.html#310">[ thread ]</a>
+              <a href="subject.html#310">[ subject ]</a>
+              <a href="author.html#310">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

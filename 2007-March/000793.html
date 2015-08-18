@@ -1,0 +1,717 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r806 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r806%20-%20trunk/usr&In-Reply-To=%3C200703041019.l24AJl9q014761%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000792.html">
+   <LINK REL="Next"  HREF="000794.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r806 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r806%20-%20trunk/usr&In-Reply-To=%3C200703041019.l24AJl9q014761%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r806 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 11:19:47 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000792.html">[Stgt-svn] r805 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000794.html">[Stgt-svn] r807 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#793">[ date ]</a>
+              <a href="thread.html#793">[ thread ]</a>
+              <a href="subject.html#793">[ subject ]</a>
+              <a href="author.html#793">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 11:19:46 +0100 (Sun, 04 Mar 2007)
+New Revision: 806
+
+Modified:
+   trunk/usr/mmc.c
+   trunk/usr/sbc.c
+   trunk/usr/scsi.c
+   trunk/usr/spt.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+print target type via show option.
+
+
+Modified: trunk/usr/mmc.c
+===================================================================
+--- trunk/usr/mmc.c	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/mmc.c	2007-03-04 10:19:46 UTC (rev 806)
+@@ -209,104 +209,107 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-struct device_command_operations mmc_ops[] = {
+-	{spc_test_unit,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_request_sense,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++struct device_type_template mmc_template = {
++	.name	= &quot;cdrom/dvd&quot;,
++	.ops	= {
++		{spc_test_unit,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_request_sense,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	/* 0x10 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{mmc_inquiry,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x10 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{mmc_inquiry,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_start_stop,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_start_stop,}, /* allow medium removal */
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_start_stop,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_start_stop,}, /* allow medium removal */
++		{spc_illegal_op,},
+ 
+-	/* 0x20 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{mmc_read_capacity,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x20 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{mmc_read_capacity,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{mmc_rw},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_test_unit},
++		{mmc_rw},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_test_unit},
+ 
+-	[0x30 ... 0x3f] = {spc_illegal_op,},
++		[0x30 ... 0x3f] = {spc_illegal_op,},
+ 
+-	/* 0x40 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{mmc_read_toc,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x40 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{mmc_read_toc,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	[0x50 ... 0x9f] = {spc_illegal_op,},
++		[0x50 ... 0x9f] = {spc_illegal_op,},
+ 
+-	/* 0xA0 */
+-	{spc_report_luns,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0xA0 */
++		{spc_report_luns,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	[0xb0 ... 0xff] = {spc_illegal_op},
++		[0xb0 ... 0xff] = {spc_illegal_op},
++	}
+ };
+
+Modified: trunk/usr/sbc.c
+===================================================================
+--- trunk/usr/sbc.c	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/sbc.c	2007-03-04 10:19:46 UTC (rev 806)
+@@ -450,140 +450,143 @@
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-struct device_command_operations sbc_ops[] = {
+-	{spc_test_unit,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_request_sense,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++struct device_type_template sbc_template = {
++	.name	= &quot;disk&quot;,
++	.ops	= {
++		{spc_test_unit,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_request_sense,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	/* 0x10 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_inquiry,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_reserve,},
+-	{sbc_release,},
++		/* 0x10 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_inquiry,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_reserve,},
++		{sbc_release,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_mode_sense,},
+-	{spc_start_stop,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_mode_sense,},
++		{spc_start_stop,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	/* 0x20 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_read_capacity,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x20 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_read_capacity,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{sbc_rw},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{spc_test_unit},
++		{sbc_rw},
++		{spc_illegal_op,},
++		{sbc_rw},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_rw},
++		{spc_test_unit},
+ 
+-	/* 0x30 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_sync_cache,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x30 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_sync_cache,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	[0x40 ... 0x7f] = {spc_illegal_op,},
++		[0x40 ... 0x7f] = {spc_illegal_op,},
+ 
+-	/* 0x80 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x80 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{spc_test_unit},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_rw},
++		{spc_test_unit},
+ 
+-	/* 0x90 */
+-	{spc_illegal_op,},
+-	{sbc_sync_cache,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0x90 */
++		{spc_illegal_op,},
++		{sbc_sync_cache,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	/* 0xA0 */
+-	{spc_report_luns,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
++		/* 0xA0 */
++		{spc_report_luns,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
+ 
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_test_unit,},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{sbc_rw,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{sbc_rw,},
++		{spc_test_unit,},
+ 
+-	[0xb0 ... 0xff] = {spc_illegal_op},
++		[0xb0 ... 0xff] = {spc_illegal_op},
++	}
+ };
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/scsi.c	2007-03-04 10:19:46 UTC (rev 806)
+@@ -109,5 +109,5 @@
+ int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	unsigned char op = cmd-&gt;scb[0];
+-	return cmd-&gt;c_target-&gt;dev_cmd_ops[op].cmd_perform(host_no, cmd);
++	return cmd-&gt;c_target-&gt;dev_type_template-&gt;ops[op].cmd_perform(host_no, cmd);
+ }
+
+Modified: trunk/usr/spt.c
+===================================================================
+--- trunk/usr/spt.c	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/spt.c	2007-03-04 10:19:46 UTC (rev 806)
+@@ -61,7 +61,7 @@
+ 	.bd_cmd_done		= spt_sg_cmd_done,
+ };
+ 
+-extern struct device_command_operations sbc_ops[];
++extern struct device_type_template sbc_template;
+ 
+ static int spt_cmd_perform(int host_no, struct scsi_cmd *cmd)
+ {
+@@ -69,7 +69,7 @@
+ 
+ 	/* FIXME */
+ 	if (!cmd-&gt;dev)
+-		return sbc_ops[cmd-&gt;scb[0]].cmd_perform(host_no, cmd);
++		return sbc_template.ops[cmd-&gt;scb[0]].cmd_perform(host_no, cmd);
+ 
+ 	ret = spt_sg_perform(cmd);
+ 	if (ret) {
+@@ -80,27 +80,30 @@
+ 		return SAM_STAT_GOOD;
+ }
+ 
+-struct device_command_operations spt_ops[] = {
+-	[0x00 ... 0x9f] = {spt_cmd_perform,},
++struct device_type_template spt_template = {
++	.name	= &quot;passthrough&quot;,
++	.ops	= {
++		[0x00 ... 0x9f] = {spt_cmd_perform,},
+ 
+-	/* 0xA0 */
+-	{spc_report_luns,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
++		/* 0xA0 */
++		{spc_report_luns,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
+ 
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
+-	{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
++		{spt_cmd_perform,},
+ 
+-	[0xb0 ... 0xff] = {spt_cmd_perform},
++		[0xb0 ... 0xff] = {spt_cmd_perform},
++	}
+ };
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/target.c	2007-03-04 10:19:46 UTC (rev 806)
+@@ -36,7 +36,7 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-extern struct device_command_operations sbc_ops[], mmc_ops[], spt_ops[];
++extern struct device_type_template sbc_template, mmc_template, spt_template;
+ 
+ static LIST_HEAD(target_list);
+ 
+@@ -1097,11 +1097,13 @@
+ 		shprintf(total, buf, rest,
+ 			 &quot;Target %d: %s\n&quot;
+ 			 TAB1 &quot;System information:\n&quot;
+-			 TAB2 &quot;Driver: %s\n&quot;
+-			 TAB2 &quot;Status: %s\n&quot;,
++			 TAB2 &quot;driver : %s\n&quot;
++			 TAB2 &quot;type   : %s\n&quot;
++			 TAB2 &quot;status : %s\n&quot;,
+ 			 target-&gt;tid,
+ 			 target-&gt;name,
+ 			 tgt_drivers[target-&gt;lid]-&gt;name,
++			 target-&gt;dev_type_template-&gt;name,
+ 			 target_state_name(target-&gt;target_state));
+ 
+ 		shprintf(total, buf, rest, TAB1 &quot;I_T nexus information:\n&quot;);
+@@ -1205,13 +1207,13 @@
+ 
+ 	switch (t_type) {
+ 	case TYPE_DISK:
+-		target-&gt;dev_cmd_ops = sbc_ops;
++		target-&gt;dev_type_template = &amp;sbc_template;
+ 		break;
+ 	case TYPE_ROM:
+-		target-&gt;dev_cmd_ops = mmc_ops;
++		target-&gt;dev_type_template = &amp;mmc_template;
+ 		break;
+ 	case TYPE_SPT:
+-		target-&gt;dev_cmd_ops = spt_ops;
++		target-&gt;dev_type_template = &amp;spt_template;
+ 		break;
+ 	default:
+ 		free(target);
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/target.h	2007-03-04 10:19:46 UTC (rev 806)
+@@ -51,7 +51,7 @@
+ 
+ 	struct tgt_account account;
+ 
+-	struct device_command_operations *dev_cmd_ops;
++	struct device_type_template *dev_type_template;
+ };
+ 
+ struct it_nexus {
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-04 09:51:55 UTC (rev 805)
++++ trunk/usr/tgtd.h	2007-03-04 10:19:46 UTC (rev 806)
+@@ -100,10 +100,15 @@
+ }
+ #endif
+ 
+-struct device_command_operations {
++struct device_type_operations {
+ 	int (*cmd_perform)(int host_no, struct scsi_cmd *cmd);
+ };
+ 
++struct device_type_template {
++	char *name;
++	struct device_type_operations ops[256];
++};
++
+ extern int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result);
+ extern int kspace_send_cmd_res(uint64_t nid, int result, struct scsi_cmd *);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000792.html">[Stgt-svn] r805 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000794.html">[Stgt-svn] r807 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#793">[ date ]</a>
+              <a href="thread.html#793">[ thread ]</a>
+              <a href="subject.html#793">[ subject ]</a>
+              <a href="author.html#793">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

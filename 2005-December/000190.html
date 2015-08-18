@@ -1,0 +1,126 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r201 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r201%20-%20trunk/kernel&In-Reply-To=%3C200512071103.jB7B3abY010296%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000189.html">
+   <LINK REL="Next"  HREF="000191.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r201 - trunk/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r201%20-%20trunk/kernel&In-Reply-To=%3C200512071103.jB7B3abY010296%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r201 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Wed Dec  7 12:03:36 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000189.html">[Stgt-svn] r200 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000191.html">[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#190">[ date ]</a>
+              <a href="thread.html#190">[ thread ]</a>
+              <a href="subject.html#190">[ subject ]</a>
+              <a href="author.html#190">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-12-07 12:03:27 +0100 (Wed, 07 Dec 2005)
+New Revision: 201
+
+Modified:
+   trunk/kernel/tgt_priv.h
+   trunk/kernel/tgt_sysfs.c
+   trunk/kernel/tgt_target.h
+Log:
+move internal struct to priv header
+
+Modified: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2005-12-07 10:51:09 UTC (rev 200)
++++ trunk/kernel/tgt_priv.h	2005-12-07 11:03:27 UTC (rev 201)
+@@ -16,6 +16,14 @@
+ extern int tgt_nl_init(void);
+ 
+ /* Sysfs */
++struct target_type_internal {
++	int typeid;
++	struct list_head list;
++	struct tgt_target_template *tt;
++	struct tgt_protocol *proto;
++	struct class_device cdev;
++};
++
+ extern int tgt_sysfs_init(void);
+ extern void tgt_sysfs_exit(void);
+ extern int tgt_sysfs_register_type(struct target_type_internal *ti);
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-12-07 10:51:09 UTC (rev 200)
++++ trunk/kernel/tgt_sysfs.c	2005-12-07 11:03:27 UTC (rev 201)
+@@ -9,6 +9,8 @@
+ #include &lt;tgt_target.h&gt;
+ #include &lt;tgt_device.h&gt;
+ 
++#include &quot;tgt_priv.h&quot;
++
+ static struct class_device_attribute *class_attr_overridden(
+ 				struct class_device_attribute **attrs,
+ 				struct class_device_attribute *attr)
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-12-07 10:51:09 UTC (rev 200)
++++ trunk/kernel/tgt_target.h	2005-12-07 11:03:27 UTC (rev 201)
+@@ -15,14 +15,6 @@
+ struct tgt_target;
+ struct tgt_cmd;
+ 
+-struct target_type_internal {
+-	int typeid;
+-	struct list_head list;
+-	struct tgt_target_template *tt;
+-	struct tgt_protocol *proto;
+-	struct class_device cdev;
+-};
+-
+ enum {
+ 	TGT_CMD_XMIT_OK,
+ 	TGT_CMD_XMIT_FAILED,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000189.html">[Stgt-svn] r200 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000191.html">[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#190">[ date ]</a>
+              <a href="thread.html#190">[ thread ]</a>
+              <a href="subject.html#190">[ subject ]</a>
+              <a href="author.html#190">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

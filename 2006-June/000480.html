@@ -1,0 +1,87 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r492 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r492%20-%20trunk/kernel&In-Reply-To=%3C200606231312.k5NDCIQ4023432%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000478.html">
+   <LINK REL="Next"  HREF="000479.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r492 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r492%20-%20trunk/kernel&In-Reply-To=%3C200606231312.k5NDCIQ4023432%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r492 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Jun 23 15:12:18 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000478.html">[Stgt-svn] r491 - / branches
+</A></li>
+        <LI>Next message: <A HREF="000479.html">[Stgt-svn] r493 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#480">[ date ]</a>
+              <a href="thread.html#480">[ thread ]</a>
+              <a href="subject.html#480">[ subject ]</a>
+              <a href="author.html#480">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-23 15:12:12 +0200 (Fri, 23 Jun 2006)
+New Revision: 492
+
+Modified:
+   trunk/kernel/Makefile
+Log:
+Rename scsi_tgt_core.ko scsi_tgt.ko because of the scsi-target git tree.
+
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2006-06-23 11:36:36 UTC (rev 491)
++++ trunk/kernel/Makefile	2006-06-23 13:12:12 UTC (rev 492)
+@@ -5,8 +5,8 @@
+ EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -DNETLINK_TGT=17
+ 
+ ifneq ($(KERNELRELEASE),)
+-obj-m			+= scsi_tgt_core.o
+-scsi_tgt_core-objs	:= scsi_tgt_lib.o scsi_tgt_if.o
++obj-m			+= scsi_tgt.o
++scsi_tgt-objs		:= scsi_tgt_lib.o scsi_tgt_if.o
+ 
+ else
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000478.html">[Stgt-svn] r491 - / branches
+</A></li>
+	<LI>Next message: <A HREF="000479.html">[Stgt-svn] r493 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#480">[ date ]</a>
+              <a href="thread.html#480">[ thread ]</a>
+              <a href="subject.html#480">[ subject ]</a>
+              <a href="author.html#480">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

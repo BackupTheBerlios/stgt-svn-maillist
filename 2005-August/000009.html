@@ -1,0 +1,1575 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r14 - in trunk/iscsi: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r14%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508230929.j7N9TOAc006380%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000008.html">
+   <LINK REL="Next"  HREF="000010.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r14 - in trunk/iscsi: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r14%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508230929.j7N9TOAc006380%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r14 - in trunk/iscsi: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Aug 23 11:29:24 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000008.html">[Stgt-svn] r13 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000010.html">[Stgt-svn] r15 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#9">[ date ]</a>
+              <a href="thread.html#9">[ thread ]</a>
+              <a href="subject.html#9">[ subject ]</a>
+              <a href="author.html#9">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-23 11:29:23 +0200 (Tue, 23 Aug 2005)
+New Revision: 14
+
+Added:
+   trunk/iscsi/include/iscsi_proto.h
+Removed:
+   trunk/iscsi/kernel/iscsi_proto.h
+   trunk/iscsi/usr/iscsi_hdr.h
+Modified:
+   trunk/iscsi/usr/conn.c
+   trunk/iscsi/usr/ietd.c
+   trunk/iscsi/usr/iscsid.c
+   trunk/iscsi/usr/iscsid.h
+   trunk/iscsi/usr/session.c
+   trunk/iscsi/usr/types.h
+Log:
+Use open-iscsi iscsi_proto.h instead of Ardis iscsi_hdr.h in user space.
+
+Copied: trunk/iscsi/include/iscsi_proto.h (from rev 13, trunk/iscsi/kernel/iscsi_proto.h)
+
+Deleted: trunk/iscsi/kernel/iscsi_proto.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi_proto.h	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/kernel/iscsi_proto.h	2005-08-23 09:29:23 UTC (rev 14)
+@@ -1,587 +0,0 @@
+-/*
+- * RFC 3720 (iSCSI) protocol data types
+- *
+- * Copyright (C) 2005 Dmitry Yusupov
+- * Copyright (C) 2005 Alex Aizman
+- * maintained by <A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">open-iscsi at googlegroups.com</A>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published
+- * by the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- *
+- * See the file COPYING included with this distribution for more details.
+- */
+-
+-#ifndef ISCSI_PROTO_H
+-#define ISCSI_PROTO_H
+-
+-#define ISCSI_VERSION_STR	&quot;0.3&quot;
+-#define ISCSI_DATE_STR		&quot;22-Apr-2005&quot;
+-#define ISCSI_DRAFT20_VERSION	0x00
+-
+-/* default iSCSI listen port for incoming connections */
+-#define ISCSI_LISTEN_PORT	3260
+-
+-/* Padding word length */
+-#define PAD_WORD_LEN		4
+-
+-/*
+- * useful common(control and data pathes) macro
+- */
+-#define ntoh24(p) (((p)[0] &lt;&lt; 16) | ((p)[1] &lt;&lt; 8) | ((p)[2]))
+-#define hton24(p, v) { \
+-        p[0] = (((v) &gt;&gt; 16) &amp; 0xFF); \
+-        p[1] = (((v) &gt;&gt; 8) &amp; 0xFF); \
+-        p[2] = ((v) &amp; 0xFF); \
+-}
+-#define zero_data(p) {p[0]=0;p[1]=0;p[2]=0;}
+-
+-/*
+- * iSCSI Template Message Header
+- */
+-struct iscsi_hdr {
+-	uint8_t		opcode;
+-	uint8_t		flags;		/* Final bit */
+-	uint8_t		rsvd2[2];
+-	uint8_t		hlength;	/* AHSs total length */
+-	uint8_t		dlength[3];	/* Data length */
+-	uint8_t		lun[8];
+-	__be32		itt;		/* Initiator Task Tag */
+-	__be32		ttt;		/* Target Task Tag */
+-	__be32		statsn;
+-	__be32		exp_statsn;
+-	__be32		max_statsn;
+-	uint8_t		other[12];
+-};
+-
+-/************************* RFC 3720 Begin *****************************/
+-
+-#define ISCSI_RESERVED_TAG		0xffffffff
+-
+-/* Opcode encoding bits */
+-#define ISCSI_OP_RETRY			0x80
+-#define ISCSI_OP_IMMEDIATE		0x40
+-#define ISCSI_OPCODE_MASK		0x3F
+-
+-/* Initiator Opcode values */
+-#define ISCSI_OP_NOOP_OUT		0x00
+-#define ISCSI_OP_SCSI_CMD		0x01
+-#define ISCSI_OP_SCSI_TMFUNC		0x02
+-#define ISCSI_OP_LOGIN			0x03
+-#define ISCSI_OP_TEXT			0x04
+-#define ISCSI_OP_SCSI_DATA_OUT		0x05
+-#define ISCSI_OP_LOGOUT			0x06
+-#define ISCSI_OP_SNACK			0x10
+-
+-#define ISCSI_OP_VENDOR1_CMD		0x1c
+-#define ISCSI_OP_VENDOR2_CMD		0x1d
+-#define ISCSI_OP_VENDOR3_CMD		0x1e
+-#define ISCSI_OP_VENDOR4_CMD		0x1f
+-
+-/* Target Opcode values */
+-#define ISCSI_OP_NOOP_IN		0x20
+-#define ISCSI_OP_SCSI_CMD_RSP		0x21
+-#define ISCSI_OP_SCSI_TMFUNC_RSP	0x22
+-#define ISCSI_OP_LOGIN_RSP		0x23
+-#define ISCSI_OP_TEXT_RSP		0x24
+-#define ISCSI_OP_SCSI_DATA_IN		0x25
+-#define ISCSI_OP_LOGOUT_RSP		0x26
+-#define ISCSI_OP_R2T			0x31
+-#define ISCSI_OP_ASYNC_EVENT		0x32
+-#define ISCSI_OP_REJECT			0x3f
+-
+-struct iscsi_ahs_hdr {
+-	__be16 ahslength;
+-	uint8_t ahstype;
+-	uint8_t ahspec[5];
+-};
+-
+-#define ISCSI_AHSTYPE_CDB		1
+-#define ISCSI_AHSTYPE_RLENGTH		2
+-
+-/* iSCSI PDU Header */
+-struct iscsi_cmd {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	__be16 rsvd2;
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32 itt;	/* Initiator Task Tag */
+-	__be32 data_length;
+-	__be32 cmdsn;
+-	__be32 exp_statsn;
+-	uint8_t cdb[16];	/* SCSI Command Block */
+-	/* Additional Data (Command Dependent) */
+-};
+-
+-/* Command PDU flags */
+-#define ISCSI_FLAG_CMD_FINAL		0x80
+-#define ISCSI_FLAG_CMD_READ		0x40
+-#define ISCSI_FLAG_CMD_WRITE		0x20
+-#define ISCSI_FLAG_CMD_ATTR_MASK	0x07	/* 3 bits */
+-
+-/* SCSI Command Attribute values */
+-#define ISCSI_ATTR_UNTAGGED		0
+-#define ISCSI_ATTR_SIMPLE		1
+-#define ISCSI_ATTR_ORDERED		2
+-#define ISCSI_ATTR_HEAD_OF_QUEUE	3
+-#define ISCSI_ATTR_ACA			4
+-
+-struct iscsi_rlength_ahdr {
+-	__be16 ahslength;
+-	uint8_t ahstype;
+-	uint8_t reserved;
+-	__be32 read_length;
+-};
+-
+-/* SCSI Response Header */
+-struct iscsi_cmd_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t response;
+-	uint8_t cmd_status;
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	rsvd1;
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	__be32	exp_datasn;
+-	__be32	bi_residual_count;
+-	__be32	residual_count;
+-	/* Response or Sense Data (optional) */
+-};
+-
+-/* Command Response PDU flags */
+-#define ISCSI_FLAG_CMD_BIDI_OVERFLOW	0x10
+-#define ISCSI_FLAG_CMD_BIDI_UNDERFLOW	0x08
+-#define ISCSI_FLAG_CMD_OVERFLOW		0x04
+-#define ISCSI_FLAG_CMD_UNDERFLOW	0x02
+-
+-/* iSCSI Status values. Valid if Rsp Selector bit is not set */
+-#define ISCSI_STATUS_CMD_COMPLETED	0
+-#define ISCSI_STATUS_TARGET_FAILURE	1
+-#define ISCSI_STATUS_SUBSYS_FAILURE	2
+-
+-/* Asynchronous Event Header */
+-struct iscsi_async {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[2];
+-	uint8_t rsvd3;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	uint8_t rsvd4[8];
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	uint8_t async_event;
+-	uint8_t async_vcode;
+-	__be16	param1;
+-	__be16	param2;
+-	__be16	param3;
+-	uint8_t rsvd5[4];
+-};
+-
+-/* iSCSI Event Codes */
+-#define ISCSI_ASYNC_MSG_SCSI_EVENT			0
+-#define ISCSI_ASYNC_MSG_REQUEST_LOGOUT			1
+-#define ISCSI_ASYNC_MSG_DROPPING_CONNECTION		2
+-#define ISCSI_ASYNC_MSG_DROPPING_ALL_CONNECTIONS	3
+-#define ISCSI_ASYNC_MSG_PARAM_NEGOTIATION		4
+-#define ISCSI_ASYNC_MSG_VENDOR_SPECIFIC			255
+-
+-/* NOP-Out Message */
+-struct iscsi_nopout {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	__be16	rsvd2;
+-	uint8_t rsvd3;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	ttt;	/* Target Transfer Tag */
+-	__be32	cmdsn;
+-	__be32	exp_statsn;
+-	uint8_t rsvd4[16];
+-};
+-
+-/* NOP-In Message */
+-struct iscsi_nopin {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	__be16	rsvd2;
+-	uint8_t rsvd3;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	ttt;	/* Target Transfer Tag */
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	uint8_t rsvd4[12];
+-};
+-
+-/* SCSI Task Management Message Header */
+-struct iscsi_tm {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd1[2];
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	rtt;	/* Reference Task Tag */
+-	__be32	cmdsn;
+-	__be32	exp_statsn;
+-	__be32	refcmdsn;
+-	__be32	exp_datasn;
+-	uint8_t rsvd2[8];
+-};
+-
+-#define ISCSI_FLAG_TM_FUNC_MASK			0x7F
+-
+-/* Function values */
+-#define ISCSI_TM_FUNC_ABORT_TASK		1
+-#define ISCSI_TM_FUNC_ABORT_TASK_SET		2
+-#define ISCSI_TM_FUNC_CLEAR_ACA			3
+-#define ISCSI_TM_FUNC_CLEAR_TASK_SET		4
+-#define ISCSI_TM_FUNC_LOGICAL_UNIT_RESET	5
+-#define ISCSI_TM_FUNC_TARGET_WARM_RESET		6
+-#define ISCSI_TM_FUNC_TARGET_COLD_RESET		7
+-#define ISCSI_TM_FUNC_TASK_REASSIGN		8
+-
+-/* SCSI Task Management Response Header */
+-struct iscsi_tm_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t response;	/* see Response values below */
+-	uint8_t qualifier;
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd2[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	rtt;	/* Reference Task Tag */
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	uint8_t rsvd3[12];
+-};
+-
+-/* Response values */
+-#define ISCSI_TMF_RSP_COMPLETE		0x00
+-#define ISCSI_TMF_RSP_NO_TASK		0x01
+-#define ISCSI_TMF_RSP_NO_LUN		0x02
+-#define ISCSI_TMF_RSP_TASK_ALLEGIANT	0x03
+-#define ISCSI_TMF_RSP_NO_FAILOVER	0x04
+-#define ISCSI_TMF_RSP_NOT_SUPPORTED	0x05
+-#define ISCSI_TMF_RSP_AUTH_FAILED	0x06
+-#define ISCSI_TMF_RSP_REJECTED		0xff
+-
+-/* Ready To Transfer Header */
+-struct iscsi_r2t_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[2];
+-	uint8_t	hlength;
+-	uint8_t	dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	ttt;	/* Target Transfer Tag */
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	__be32	r2tsn;
+-	__be32	data_offset;
+-	__be32	data_length;
+-};
+-
+-/* SCSI Data Hdr */
+-struct iscsi_data {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[2];
+-	uint8_t rsvd3;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;
+-	__be32	ttt;
+-	__be32	rsvd4;
+-	__be32	exp_statsn;
+-	__be32	rsvd5;
+-	__be32	datasn;
+-	__be32	offset;
+-	__be32	rsvd6;
+-	/* Payload */
+-};
+-
+-/* SCSI Data Response Hdr */
+-struct iscsi_data_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2;
+-	uint8_t cmd_status;
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t lun[8];
+-	__be32	itt;
+-	__be32	ttt;
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	__be32	datasn;
+-	__be32	offset;
+-	__be32	residual_count;
+-};
+-
+-/* Data Response PDU flags */
+-#define ISCSI_FLAG_DATA_ACK		0x40
+-#define ISCSI_FLAG_DATA_OVERFLOW	0x04
+-#define ISCSI_FLAG_DATA_UNDERFLOW	0x02
+-#define ISCSI_FLAG_DATA_STATUS		0x01
+-
+-/* Text Header */
+-struct iscsi_text {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[2];
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd4[8];
+-	__be32	itt;
+-	__be32	ttt;
+-	__be32	cmdsn;
+-	__be32	exp_statsn;
+-	uint8_t rsvd5[16];
+-	/* Text - key=value pairs */
+-};
+-
+-#define ISCSI_FLAG_TEXT_CONTINUE	0x40
+-
+-/* Text Response Header */
+-struct iscsi_text_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[2];
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd4[8];
+-	__be32	itt;
+-	__be32	ttt;
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	uint8_t rsvd5[12];
+-	/* Text Response - key:value pairs */
+-};
+-
+-/* Login Header */
+-struct iscsi_login {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t max_version;	/* Max. version supported */
+-	uint8_t min_version;	/* Min. version supported */
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t isid[6];	/* Initiator Session ID */
+-	__be16	tsih;	/* Target Session Handle */
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be16	cid;
+-	__be16	rsvd3;
+-	__be32	cmdsn;
+-	__be32	exp_statsn;
+-	uint8_t rsvd5[16];
+-};
+-
+-/* Login PDU flags */
+-#define ISCSI_FLAG_LOGIN_TRANSIT		0x80
+-#define ISCSI_FLAG_LOGIN_CONTINUE		0x40
+-#define ISCSI_FLAG_LOGIN_CURRENT_STAGE_MASK	0x0C	/* 2 bits */
+-#define ISCSI_FLAG_LOGIN_NEXT_STAGE_MASK	0x03	/* 2 bits */
+-
+-#define ISCSI_LOGIN_CURRENT_STAGE(flags) \
+-	((flags &amp; ISCSI_FLAG_LOGIN_CURRENT_STAGE_MASK) &gt;&gt; 2)
+-#define ISCSI_LOGIN_NEXT_STAGE(flags) \
+-	(flags &amp; ISCSI_FLAG_LOGIN_NEXT_STAGE_MASK)
+-
+-/* Login Response Header */
+-struct iscsi_login_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t max_version;	/* Max. version supported */
+-	uint8_t active_version;	/* Active version */
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t isid[6];	/* Initiator Session ID */
+-	__be16	tsih;	/* Target Session Handle */
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	rsvd3;
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	uint8_t status_class;	/* see Login RSP ststus classes below */
+-	uint8_t status_detail;	/* see Login RSP Status details below */
+-	uint8_t rsvd4[10];
+-};
+-
+-/* Login stage (phase) codes for CSG, NSG */
+-#define ISCSI_INITIAL_LOGIN_STAGE		-1
+-#define ISCSI_SECURITY_NEGOTIATION_STAGE	0
+-#define ISCSI_OP_PARMS_NEGOTIATION_STAGE	1
+-#define ISCSI_FULL_FEATURE_PHASE		3
+-
+-/* Login Status response classes */
+-#define ISCSI_STATUS_CLS_SUCCESS		0x00
+-#define ISCSI_STATUS_CLS_REDIRECT		0x01
+-#define ISCSI_STATUS_CLS_INITIATOR_ERR		0x02
+-#define ISCSI_STATUS_CLS_TARGET_ERR		0x03
+-
+-/* Login Status response detail codes */
+-/* Class-0 (Success) */
+-#define ISCSI_LOGIN_STATUS_ACCEPT		0x00
+-
+-/* Class-1 (Redirection) */
+-#define ISCSI_LOGIN_STATUS_TGT_MOVED_TEMP	0x01
+-#define ISCSI_LOGIN_STATUS_TGT_MOVED_PERM	0x02
+-
+-/* Class-2 (Initiator Error) */
+-#define ISCSI_LOGIN_STATUS_INIT_ERR		0x00
+-#define ISCSI_LOGIN_STATUS_AUTH_FAILED		0x01
+-#define ISCSI_LOGIN_STATUS_TGT_FORBIDDEN	0x02
+-#define ISCSI_LOGIN_STATUS_TGT_NOT_FOUND	0x03
+-#define ISCSI_LOGIN_STATUS_TGT_REMOVED		0x04
+-#define ISCSI_LOGIN_STATUS_NO_VERSION		0x05
+-#define ISCSI_LOGIN_STATUS_ISID_ERROR		0x06
+-#define ISCSI_LOGIN_STATUS_MISSING_FIELDS	0x07
+-#define ISCSI_LOGIN_STATUS_CONN_ADD_FAILED	0x08
+-#define ISCSI_LOGIN_STATUS_NO_SESSION_TYPE	0x09
+-#define ISCSI_LOGIN_STATUS_NO_SESSION		0x0a
+-#define ISCSI_LOGIN_STATUS_INVALID_REQUEST	0x0b
+-
+-/* Class-3 (Target Error) */
+-#define ISCSI_LOGIN_STATUS_TARGET_ERROR		0x00
+-#define ISCSI_LOGIN_STATUS_SVC_UNAVAILABLE	0x01
+-#define ISCSI_LOGIN_STATUS_NO_RESOURCES		0x02
+-
+-/* Logout Header */
+-struct iscsi_logout {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd1[2];
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd2[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be16	cid;
+-	uint8_t rsvd3[2];
+-	__be32	cmdsn;
+-	__be32	exp_statsn;
+-	uint8_t rsvd4[16];
+-};
+-
+-/* Logout PDU flags */
+-#define ISCSI_FLAG_LOGOUT_REASON_MASK	0x7F
+-
+-/* logout reason_code values */
+-
+-#define ISCSI_LOGOUT_REASON_CLOSE_SESSION	0
+-#define ISCSI_LOGOUT_REASON_CLOSE_CONNECTION	1
+-#define ISCSI_LOGOUT_REASON_RECOVERY		2
+-#define ISCSI_LOGOUT_REASON_AEN_REQUEST		3
+-
+-/* Logout Response Header */
+-struct iscsi_logout_rsp {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t response;	/* see Logout response values below */
+-	uint8_t rsvd2;
+-	uint8_t hlength;
+-	uint8_t dlength[3];
+-	uint8_t rsvd3[8];
+-	__be32	itt;	/* Initiator Task Tag */
+-	__be32	rsvd4;
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	__be32	rsvd5;
+-	__be16	t2wait;
+-	__be16	t2retain;
+-	__be32	rsvd6;
+-};
+-
+-/* logout response status values */
+-
+-#define ISCSI_LOGOUT_SUCCESS			0
+-#define ISCSI_LOGOUT_CID_NOT_FOUND		1
+-#define ISCSI_LOGOUT_RECOVERY_UNSUPPORTED	2
+-#define ISCSI_LOGOUT_CLEANUP_FAILED		3
+-
+-/* SNACK Header */
+-struct iscsi_snack {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t rsvd2[14];
+-	__be32	itt;
+-	__be32	begrun;
+-	__be32	runlength;
+-	__be32	exp_statsn;
+-	__be32	rsvd3;
+-	__be32	exp_datasn;
+-	uint8_t rsvd6[8];
+-};
+-
+-/* SNACK PDU flags */
+-#define ISCSI_FLAG_SNACK_TYPE_MASK	0x0F	/* 4 bits */
+-
+-/* Reject Message Header */
+-struct iscsi_reject {
+-	uint8_t opcode;
+-	uint8_t flags;
+-	uint8_t reason;
+-	uint8_t rsvd2;
+-	uint8_t rsvd3;
+-	uint8_t dlength[3];
+-	uint8_t rsvd4[16];
+-	__be32	statsn;
+-	__be32	exp_cmdsn;
+-	__be32	max_cmdsn;
+-	__be32	datasn;
+-	uint8_t rsvd5[8];
+-	/* Text - Rejected hdr */
+-};
+-
+-/* Reason for Reject */
+-#define CMD_BEFORE_LOGIN	1
+-#define DATA_DIGEST_ERROR	2
+-#define DATA_SNACK_REJECT	3
+-#define ISCSI_PROTOCOL_ERROR	4
+-#define CMD_NOT_SUPPORTED	5
+-#define IMM_CMD_REJECT		6
+-#define TASK_IN_PROGRESS	7
+-#define INVALID_SNACK		8
+-#define BOOKMARK_REJECTED	9
+-#define BOOKMARK_NO_RESOURCES	10
+-#define NEGOTIATION_RESET	11
+-
+-/* Max. number of Key=Value pairs in a text message */
+-#define MAX_KEY_VALUE_PAIRS	8192
+-
+-/* maximum length for text keys/values */
+-#define KEY_MAXLEN		64
+-#define VALUE_MAXLEN		255
+-#define TARGET_NAME_MAXLEN	VALUE_MAXLEN
+-
+-#define DEFAULT_MAX_RECV_DATA_SEGMENT_LENGTH	8192
+-
+-/************************* RFC 3720 End *****************************/
+-
+-#endif /* ISCSI_PROTO_H */
+
+Modified: trunk/iscsi/usr/conn.c
+===================================================================
+--- trunk/iscsi/usr/conn.c	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/conn.c	2005-08-23 09:29:23 UTC (rev 14)
+@@ -46,7 +46,7 @@
+ 	int err = -ENOENT, find = 0;
+ 
+ 	t_tid = conn-&gt;tid;
+-	t_sid = conn-&gt;session-&gt;sid.id64;
++	t_sid = sid64(conn-&gt;session-&gt;isid, conn-&gt;session-&gt;tsih);
+ 	t_cid = conn-&gt;cid;
+ 
+ 	if ((f = fopen(PROC_SESSION, &quot;r&quot;)) == NULL) {
+@@ -104,12 +104,14 @@
+ void conn_take_fd(struct connection *conn, int fd)
+ {
+ 	int err;
++	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
++
+ 	log_debug(1, &quot;conn_take_fd: %d %u %u %u %&quot; PRIx64,
+-		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, conn-&gt;sid.id64);
++		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 
+ 	conn-&gt;session-&gt;conn_cnt++;
+ 
+-	err = ki-&gt;conn_create(conn-&gt;tid, conn-&gt;session-&gt;sid.id64, conn-&gt;cid,
++	err = ki-&gt;conn_create(conn-&gt;tid, sid, conn-&gt;cid,
+ 			      conn-&gt;stat_sn, conn-&gt;exp_stat_sn, fd,
+ 			      conn-&gt;session_param[key_header_digest].val,
+ 			      conn-&gt;session_param[key_data_digest].val);
+
+Modified: trunk/iscsi/usr/ietd.c
+===================================================================
+--- trunk/iscsi/usr/ietd.c	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/ietd.c	2005-08-23 09:29:23 UTC (rev 14)
+@@ -103,7 +103,7 @@
+ 	int i, sock, opt;
+ 
+ 	memset(servname, 0, sizeof(servname));
+-	snprintf(servname, sizeof(servname), &quot;%d&quot;, ISCSI_TARGET_DEFAULT_PORT);
++	snprintf(servname, sizeof(servname), &quot;%d&quot;, ISCSI_LISTEN_PORT);
+ 
+ 	memset(&amp;hints, 0, sizeof(hints));
+ 	hints.ai_socktype = SOCK_STREAM;
+@@ -265,10 +265,10 @@
+ 				switch (conn-&gt;iostate) {
+ 				case IOSTATE_READ_BHS:
+ 					conn-&gt;iostate = IOSTATE_READ_AHS_DATA;
+-					conn-&gt;req.ahssize = conn-&gt;req.bhs.ahslength * 4;
+-					conn-&gt;req.datasize = ((conn-&gt;req.bhs.datalength[0] &lt;&lt; 16) +
+-							      (conn-&gt;req.bhs.datalength[1] &lt;&lt; 8) +
+-							      conn-&gt;req.bhs.datalength[2]);
++					conn-&gt;req.ahssize =
++						conn-&gt;req.bhs.hlength * 4;
++					conn-&gt;req.datasize =
++						ntoh24(conn-&gt;req.bhs.dlength);
+ 					conn-&gt;rwsize = (conn-&gt;req.ahssize + conn-&gt;req.datasize + 3) &amp; -4;
+ 					if (conn-&gt;rwsize) {
+ 						if (!conn-&gt;req_buffer)
+@@ -466,7 +466,7 @@
+ 
+ 	if (use_isns) {
+ 		if (initialize_iet_isns(isns_ip,
+-					ISCSI_TARGET_DEFAULT_PORT) &lt; 0)
++					ISCSI_LISTEN_PORT) &lt; 0)
+ 			use_isns = 0;
+ 	}
+ 
+
+Deleted: trunk/iscsi/usr/iscsi_hdr.h
+===================================================================
+--- trunk/iscsi/usr/iscsi_hdr.h	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/iscsi_hdr.h	2005-08-23 09:29:23 UTC (rev 14)
+@@ -1,213 +0,0 @@
+-/*
+- * Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;
+- *
+- * Released under the terms of the GNU GPL v2.0.
+- */
+-
+-#ifndef ISCSI_HDR_H
+-#define ISCSI_HDR_H
+-
+-#define ISCSI_VERSION			0
+-
+-#define __packed __attribute__ ((packed))
+-
+-struct iscsi_hdr {
+-	u8  opcode;			/* 0 */
+-	u8  flags;
+-	u8  spec1[2];
+-	u8  ahslength;			/* 4 */
+-	u8  datalength[3];
+-	u16 lun[4];			/* 8 */
+-	u32 itt;			/* 16 */
+-	u32 ttt;			/* 20 */
+-	u32 sn;				/* 24 */
+-	u32 exp_sn;			/* 28 */
+-	u32 max_sn;			/* 32 */
+-	u32 spec3[3];			/* 36 */
+-} __packed;				/* 48 */
+-
+-/* Opcode encoding bits */
+-#define ISCSI_OP_RETRY			0x80
+-#define ISCSI_OP_IMMEDIATE		0x40
+-#define ISCSI_OPCODE_MASK		0x3F
+-
+-/* Client to Server Message Opcode values */
+-#define ISCSI_OP_NOOP_OUT		0x00
+-#define ISCSI_OP_SCSI_CMD		0x01
+-#define ISCSI_OP_SCSI_TASK_MGT_MSG	0x02
+-#define ISCSI_OP_LOGIN_CMD		0x03
+-#define ISCSI_OP_TEXT_CMD		0x04
+-#define ISCSI_OP_SCSI_DATA		0x05
+-#define ISCSI_OP_LOGOUT_CMD		0x06
+-#define ISCSI_OP_SNACK_CMD		0x10
+-
+-/* Server to Client Message Opcode values */
+-#define ISCSI_OP_NOOP_IN		0x20
+-#define ISCSI_OP_SCSI_RSP		0x21
+-#define ISCSI_OP_SCSI_TASK_MGT_RSP	0x22
+-#define ISCSI_OP_LOGIN_RSP		0x23
+-#define ISCSI_OP_TEXT_RSP		0x24
+-#define ISCSI_OP_SCSI_DATA_RSP		0x25
+-#define ISCSI_OP_LOGOUT_RSP		0x26
+-#define ISCSI_OP_R2T_RSP		0x31
+-#define ISCSI_OP_ASYNC_EVENT		0x32
+-#define ISCSI_OP_REJECT_MSG		0x3f
+-
+-struct iscsi_ahs_hdr {
+-	u16 ahslength;
+-	u8 ahstype;
+-} __packed;
+-
+-#define ISCSI_AHSTYPE_CDB		1
+-#define ISCSI_AHSTYPE_RLENGTH		2
+-
+-union iscsi_sid {
+-	struct {
+-		u8 isid[6];		/* Initiator Session ID */
+-		u16 tsih;		/* Target Session ID */
+-	} id;
+-	u64 id64;
+-} __packed;
+-
+-struct iscsi_text_req_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u16 rsvd1;
+-	u8  ahslength;
+-	u8  datalength[3];
+-	u32 rsvd2[2];
+-	u32 itt;
+-	u32 ttt;
+-	u32 cmd_sn;
+-	u32 exp_stat_sn;
+-	u32 rsvd3[4];
+-} __packed;
+-
+-struct iscsi_text_rsp_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u16 rsvd1;
+-	u8  ahslength;
+-	u8  datalength[3];
+-	u32 rsvd2[2];
+-	u32 itt;
+-	u32 ttt;
+-	u32 stat_sn;
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
+-	u32 rsvd3[3];
+-} __packed;
+-
+-struct iscsi_login_req_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u8  max_version;		/* Max. version supported */
+-	u8  min_version;		/* Min. version supported */
+-	u8  ahslength;
+-	u8  datalength[3];
+-	union iscsi_sid sid;
+-	u32 itt;			/* Initiator Task Tag */
+-	u16 cid;			/* Connection ID */
+-	u16 rsvd1;
+-	u32 cmd_sn;
+-	u32 exp_stat_sn;
+-	u32 rsvd2[4];
+-} __packed;
+-
+-struct iscsi_login_rsp_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u8  max_version;		/* Max. version supported */
+-	u8  active_version;		/* Active version */
+-	u8  ahslength;
+-	u8  datalength[3];
+-	union iscsi_sid sid;
+-	u32 itt;			/* Initiator Task Tag */
+-	u32 rsvd1;
+-	u32 stat_sn;
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
+-	u8  status_class;		/* see Login RSP ststus classes below */
+-	u8  status_detail;		/* see Login RSP Status details below */
+-	u8  rsvd2[10];
+-} __packed;
+-
+-#define ISCSI_FLG_FINAL			0x80
+-#define ISCSI_FLG_TRANSIT		0x80
+-#define ISCSI_FLG_CSG_SECURITY		0x00
+-#define ISCSI_FLG_CSG_LOGIN		0x04
+-#define ISCSI_FLG_CSG_FULL_FEATURE	0x0c
+-#define ISCSI_FLG_CSG_MASK		0x0c
+-#define ISCSI_FLG_NSG_SECURITY		0x00
+-#define ISCSI_FLG_NSG_LOGIN		0x01
+-#define ISCSI_FLG_NSG_FULL_FEATURE	0x03
+-#define ISCSI_FLG_NSG_MASK		0x03
+-
+-/* Login Status response classes */
+-#define ISCSI_STATUS_SUCCESS		0x00
+-#define ISCSI_STATUS_REDIRECT		0x01
+-#define ISCSI_STATUS_INITIATOR_ERR	0x02
+-#define ISCSI_STATUS_TARGET_ERR		0x03
+-
+-/* Login Status response detail codes */
+-/* Class-0 (Success) */
+-#define ISCSI_STATUS_ACCEPT		0x00
+-
+-/* Class-1 (Redirection) */
+-#define ISCSI_STATUS_TGT_MOVED_TEMP	0x01
+-#define ISCSI_STATUS_TGT_MOVED_PERM	0x02
+-
+-/* Class-2 (Initiator Error) */
+-#define ISCSI_STATUS_INIT_ERR		0x00
+-#define ISCSI_STATUS_AUTH_FAILED	0x01
+-#define ISCSI_STATUS_TGT_FORBIDDEN	0x02
+-#define ISCSI_STATUS_TGT_NOT_FOUND	0x03
+-#define ISCSI_STATUS_TGT_REMOVED	0x04
+-#define ISCSI_STATUS_NO_VERSION		0x05
+-#define ISCSI_STATUS_TOO_MANY_CONN	0x06
+-#define ISCSI_STATUS_MISSING_FIELDS	0x07
+-#define ISCSI_STATUS_CONN_ADD_FAILED	0x08
+-#define ISCSI_STATUS_INV_SESSION_TYPE	0x09
+-#define ISCSI_STATUS_SESSION_NOT_FOUND	0x0a
+-#define ISCSI_STATUS_INV_REQ_TYPE	0x0b
+-
+-/* Class-3 (Target Error) */
+-#define ISCSI_STATUS_TARGET_ERROR	0x00
+-#define ISCSI_STATUS_SVC_UNAVAILABLE	0x01
+-#define ISCSI_STATUS_NO_RESOURCES	0x02
+-
+-struct iscsi_logout_req_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u16 rsvd1;
+-	u8  ahslength;
+-	u8  datalength[3];
+-	u32 rsvd2[2];
+-	u32 itt;
+-	u16 cid;
+-	u16 rsvd3;
+-	u32 cmd_sn;
+-	u32 exp_stat_sn;
+-	u32 rsvd4[4];
+-} __packed;
+-
+-struct iscsi_logout_rsp_hdr {
+-	u8  opcode;
+-	u8  flags;
+-	u8  response;
+-	u8  rsvd1;
+-	u8  ahslength;
+-	u8  datalength[3];
+-	u32 rsvd2[2];
+-	u32 itt;
+-	u32 rsvd3;
+-	u32 stat_sn;
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
+-	u32 rsvd4;
+-	u16 time2wait;
+-	u16 time2retain;
+-	u32 rsvd5;
+-} __packed;
+-
+-#endif	/* ISCSI_HDR_H */
+
+Modified: trunk/iscsi/usr/iscsid.c
+===================================================================
+--- trunk/iscsi/usr/iscsid.c	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/iscsid.c	2005-08-23 09:29:23 UTC (rev 14)
+@@ -123,7 +123,7 @@
+ 
+ static void text_scan_security(struct connection *conn)
+ {
+-	struct iscsi_login_rsp_hdr *rsp = (struct iscsi_login_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	char *key, *value, *data, *nextValue;
+ 	int datasize;
+ 
+@@ -160,8 +160,8 @@
+ 			text_key_add(conn, key, &quot;NotUnderstood&quot;);
+ 	}
+ 	if (conn-&gt;auth_method == AUTH_UNKNOWN) {
+-		rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-		rsp-&gt;status_detail = ISCSI_STATUS_AUTH_FAILED;
++		rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++		rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_AUTH_FAILED;
+ 		conn-&gt;state = STATE_EXIT;
+ 	}
+ }
+@@ -169,22 +169,23 @@
+ static void login_security_done(struct connection *conn)
+ {
+ 	int err;
+-	struct iscsi_login_req_hdr *req = (struct iscsi_login_req_hdr *)&amp;conn-&gt;req.bhs;
+-	struct iscsi_login_rsp_hdr *rsp = (struct iscsi_login_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
++	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct session *session;
+ 
+ 	if (!conn-&gt;tid)
+ 		return;
+ 
+-	if ((session = session_find_name(conn-&gt;tid, conn-&gt;initiator, req-&gt;sid))) {
+-		if (!req-&gt;sid.id.tsih) {
++	if ((session = session_find_name(conn-&gt;tid, conn-&gt;initiator, req-&gt;isid))) {
++		if (!req-&gt;tsih) {
++			uint64_t sid = sid64(session-&gt;isid, session-&gt;tsih);
+ 			/* do session reinstatement */
+-			session_conns_close(conn-&gt;tid, session-&gt;sid.id64);
++			session_conns_close(conn-&gt;tid, sid);
+ 			session = NULL;
+-		} else if (req-&gt;sid.id.tsih != session-&gt;sid.id.tsih) {
++		} else if (req-&gt;tsih != session-&gt;tsih) {
+ 			/* fail the login */
+-			rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-			rsp-&gt;status_detail = ISCSI_STATUS_SESSION_NOT_FOUND;
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		} else if ((err = conn_test(conn)) == -ENOENT) {
+@@ -193,10 +194,10 @@
+ 		/* add a new connection to the session */
+ 		conn-&gt;session = session;
+ 	} else {
+-		if (req-&gt;sid.id.tsih) {
++		if (req-&gt;tsih) {
+ 			/* fail the login */
+-			rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-			rsp-&gt;status_detail = ISCSI_STATUS_SESSION_NOT_FOUND;
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_NO_SESSION;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
+@@ -208,7 +209,7 @@
+ {
+ 	char *key, *value, *data;
+ 	int datasize, idx;
+-	struct iscsi_login_rsp_hdr *rsp = (struct iscsi_login_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 
+ 	data = conn-&gt;req.data;
+ 	datasize = conn-&gt;req.datasize;
+@@ -232,8 +233,10 @@
+ 					text_key_add_reject(conn, key);
+ 					continue;
+ 				} else {
+-					rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-					rsp-&gt;status_detail = ISCSI_STATUS_INIT_ERR;
++					rsp-&gt;status_class =
++						ISCSI_STATUS_CLS_INITIATOR_ERR;
++					rsp-&gt;status_detail =
++						ISCSI_LOGIN_STATUS_INIT_ERR;
+ 					conn-&gt;state = STATE_EXIT;
+ 					goto out;
+ 				}
+@@ -252,8 +255,10 @@
+ 				break;
+ 			case KEY_STATE_REQUEST:
+ 				if (val != conn-&gt;session_param[idx].val) {
+-					rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-					rsp-&gt;status_detail = ISCSI_STATUS_INIT_ERR;
++					rsp-&gt;status_class =
++						ISCSI_STATUS_CLS_INITIATOR_ERR;
++					rsp-&gt;status_detail =
++						ISCSI_LOGIN_STATUS_INIT_ERR;
+ 					conn-&gt;state = STATE_EXIT;
+ 					log_warning(&quot;%s %u %u\n&quot;, key,
+ 					val, conn-&gt;session_param[idx].val);
+@@ -302,23 +307,25 @@
+ 
+ static void login_start(struct connection *conn)
+ {
+-	struct iscsi_login_req_hdr *req = (struct iscsi_login_req_hdr *)&amp;conn-&gt;req.bhs;
+-	struct iscsi_login_rsp_hdr *rsp = (struct iscsi_login_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
++	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	char *name, *alias, *session_type, *target_name;
+ 
+ 	conn-&gt;cid = be16_to_cpu(req-&gt;cid);
+-	conn-&gt;sid.id64 = req-&gt;sid.id64;
+-	if (!conn-&gt;sid.id64) {
+-		rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-		rsp-&gt;status_detail = ISCSI_STATUS_MISSING_FIELDS;
++	memcpy(conn-&gt;isid, req-&gt;isid, sizeof(req-&gt;isid));
++	conn-&gt;tsih = req-&gt;tsih;
++
++	if (!sid64(conn-&gt;isid, conn-&gt;tsih)) {
++		rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++		rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_MISSING_FIELDS;
+ 		conn-&gt;state = STATE_EXIT;
+ 		return;
+ 	}
+ 
+ 	name = text_key_find(conn, &quot;InitiatorName&quot;);
+ 	if (!name) {
+-		rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-		rsp-&gt;status_detail = ISCSI_STATUS_MISSING_FIELDS;
++		rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++		rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_MISSING_FIELDS;
+ 		conn-&gt;state = STATE_EXIT;
+ 		return;
+ 	}
+@@ -334,8 +341,8 @@
+ 		if (!strcmp(session_type, &quot;Discovery&quot;))
+ 			conn-&gt;session_type = SESSION_DISCOVERY;
+ 		else if (strcmp(session_type, &quot;Normal&quot;)) {
+-			rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-			rsp-&gt;status_detail = ISCSI_STATUS_INV_SESSION_TYPE;
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_NO_SESSION_TYPE;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
+@@ -343,16 +350,16 @@
+ 
+ 	if (conn-&gt;session_type == SESSION_NORMAL) {
+ 		if (!target_name) {
+-			rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-			rsp-&gt;status_detail = ISCSI_STATUS_MISSING_FIELDS;
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_MISSING_FIELDS;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
+ 
+ 		if (!(conn-&gt;tid = target_find_by_name(target_name)) ||
+ 		    cops-&gt;initiator_access(conn-&gt;tid, conn-&gt;fd) &lt; 0) {
+-			rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-			rsp-&gt;status_detail = ISCSI_STATUS_TGT_NOT_FOUND;
++			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
+@@ -367,8 +374,8 @@
+ /* 		} */
+ 
+ 		ki-&gt;param_get(conn-&gt;tid, 0, conn-&gt;session_param);
+-		conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmd_sn);
+-		log_debug(1, &quot;exp_cmd_sn: %d,%d&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmd_sn);
++		conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
++		log_debug(1, &quot;exp_cmd_sn: %d,%d&quot;, conn-&gt;exp_cmd_sn, req-&gt;cmdsn);
+ 		conn-&gt;max_cmd_sn = conn-&gt;exp_cmd_sn;
+ 	}
+ 	text_key_add(conn, &quot;TargetPortalGroupTag&quot;, &quot;1&quot;);
+@@ -380,11 +387,12 @@
+ 	case SESSION_NORMAL:
+ 		if (!conn-&gt;session)
+ 			session_create(conn);
+-		conn-&gt;sid = conn-&gt;session-&gt;sid;
++		memcpy(conn-&gt;isid, conn-&gt;session-&gt;isid, sizeof(conn-&gt;isid));
++		conn-&gt;tsih = conn-&gt;session-&gt;tsih;
+ 		break;
+ 	case SESSION_DISCOVERY:
+ 		/* set a dummy tsih value */
+-		conn-&gt;sid.id.tsih = 1;
++		conn-&gt;tsih = 1;
+ 		break;
+ 	}
+ }
+@@ -410,33 +418,33 @@
+ 
+ static void cmnd_exec_login(struct connection *conn)
+ {
+-	struct iscsi_login_req_hdr *req = (struct iscsi_login_req_hdr *)&amp;conn-&gt;req.bhs;
+-	struct iscsi_login_rsp_hdr *rsp = (struct iscsi_login_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
++	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *)&amp;conn-&gt;rsp.bhs;
+ 	int stay = 0, nsg_disagree = 0;
+ 
+ 	memset(rsp, 0, BHS_SIZE);
+-	if ((req-&gt;opcode &amp; ISCSI_OPCODE_MASK) != ISCSI_OP_LOGIN_CMD ||
++	if ((req-&gt;opcode &amp; ISCSI_OPCODE_MASK) != ISCSI_OP_LOGIN ||
+ 	    !(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE)) {
+ 		//reject
+ 	}
+ 
+ 	rsp-&gt;opcode = ISCSI_OP_LOGIN_RSP;
+-	rsp-&gt;max_version = ISCSI_VERSION;
+-	rsp-&gt;active_version = ISCSI_VERSION;
++	rsp-&gt;max_version = ISCSI_DRAFT20_VERSION;
++	rsp-&gt;active_version = ISCSI_DRAFT20_VERSION;
+ 	rsp-&gt;itt = req-&gt;itt;
+ 
+ 	if (/*req-&gt;max_version &lt; ISCSI_VERSION ||*/
+-	    req-&gt;min_version &gt; ISCSI_VERSION) {
+-		rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-		rsp-&gt;status_detail = ISCSI_STATUS_NO_VERSION;
++	    req-&gt;min_version &gt; ISCSI_DRAFT20_VERSION) {
++		rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++		rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_NO_VERSION;
+ 		conn-&gt;state = STATE_EXIT;
+ 		return;
+ 	}
+ 
+-	switch (req-&gt;flags &amp; ISCSI_FLG_CSG_MASK) {
+-	case ISCSI_FLG_CSG_SECURITY:
++	switch (ISCSI_LOGIN_CURRENT_STAGE(req-&gt;flags)) {
++	case ISCSI_SECURITY_NEGOTIATION_STAGE:
+ 		log_debug(1, &quot;Login request (security negotiation): %d&quot;, conn-&gt;state);
+-		rsp-&gt;flags = ISCSI_FLG_CSG_SECURITY;
++		rsp-&gt;flags = ISCSI_SECURITY_NEGOTIATION_STAGE &lt;&lt; 2;
+ 
+ 		switch (conn-&gt;state) {
+ 		case STATE_FREE:
+@@ -470,9 +478,9 @@
+ 		}
+ 
+ 		break;
+-	case ISCSI_FLG_CSG_LOGIN:
++	case ISCSI_OP_PARMS_NEGOTIATION_STAGE:
+ 		log_debug(1, &quot;Login request (operational negotiation): %d&quot;, conn-&gt;state);
+-		rsp-&gt;flags = ISCSI_FLG_CSG_LOGIN;
++		rsp-&gt;flags = ISCSI_OP_PARMS_NEGOTIATION_STAGE &lt;&lt; 2;
+ 
+ 		switch (conn-&gt;state) {
+ 		case STATE_FREE:
+@@ -504,11 +512,12 @@
+ 
+ 	if (rsp-&gt;status_class)
+ 		return;
+-	if (conn-&gt;state != STATE_SECURITY_AUTH &amp;&amp; req-&gt;flags &amp; ISCSI_FLG_TRANSIT) {
+-		int nsg = req-&gt;flags &amp; ISCSI_FLG_NSG_MASK;
++	if (conn-&gt;state != STATE_SECURITY_AUTH &amp;&amp;
++	    req-&gt;flags &amp; ISCSI_FLAG_LOGIN_TRANSIT) {
++		int nsg = ISCSI_LOGIN_NEXT_STAGE(req-&gt;flags);
+ 
+ 		switch (nsg) {
+-		case ISCSI_FLG_NSG_LOGIN:
++		case ISCSI_OP_PARMS_NEGOTIATION_STAGE:
+ 			switch (conn-&gt;state) {
+ 			case STATE_SECURITY:
+ 			case STATE_SECURITY_DONE:
+@@ -519,13 +528,13 @@
+ 				goto init_err;
+ 			}
+ 			break;
+-		case ISCSI_FLG_NSG_FULL_FEATURE:
++		case ISCSI_FULL_FEATURE_PHASE:
+ 			switch (conn-&gt;state) {
+ 			case STATE_SECURITY:
+ 			case STATE_SECURITY_DONE:
+ 				if ((nsg_disagree = text_check_param(conn))) {
+ 					conn-&gt;state = STATE_LOGIN;
+-					nsg = ISCSI_FLG_NSG_LOGIN;
++					nsg = ISCSI_OP_PARMS_NEGOTIATION_STAGE;
+ 					break;
+ 				}
+ 				conn-&gt;state = STATE_SECURITY_FULL;
+@@ -533,7 +542,7 @@
+ 				break;
+ 			case STATE_LOGIN:
+ 				if (stay)
+-					nsg = ISCSI_FLG_NSG_LOGIN;
++					nsg = ISCSI_OP_PARMS_NEGOTIATION_STAGE;
+ 				else
+ 					conn-&gt;state = STATE_LOGIN_FULL;
+ 				break;
+@@ -546,24 +555,25 @@
+ 		default:
+ 			goto init_err;
+ 		}
+-		rsp-&gt;flags |= nsg | (stay ? 0 : ISCSI_FLG_TRANSIT);
++		rsp-&gt;flags |= nsg | (stay ? 0 : ISCSI_FLAG_LOGIN_TRANSIT);
+ 	}
+ 
+-	rsp-&gt;sid = conn-&gt;sid;
+-	rsp-&gt;stat_sn = cpu_to_be32(conn-&gt;stat_sn++);
+-	rsp-&gt;exp_cmd_sn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+-	rsp-&gt;max_cmd_sn = cpu_to_be32(conn-&gt;max_cmd_sn);
++	memcpy(rsp-&gt;isid, conn-&gt;isid, sizeof(rsp-&gt;isid));
++	rsp-&gt;tsih = conn-&gt;tsih;
++	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ 	return;
+ init_err:
+ 	rsp-&gt;flags = 0;
+-	rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-	rsp-&gt;status_detail = ISCSI_STATUS_INIT_ERR;
++	rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++	rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_INIT_ERR;
+ 	conn-&gt;state = STATE_EXIT;
+ 	return;
+ auth_err:
+ 	rsp-&gt;flags = 0;
+-	rsp-&gt;status_class = ISCSI_STATUS_INITIATOR_ERR;
+-	rsp-&gt;status_detail = ISCSI_STATUS_AUTH_FAILED;
++	rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
++	rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_AUTH_FAILED;
+ 	conn-&gt;state = STATE_EXIT;
+ 	return;
+ }
+@@ -604,7 +614,7 @@
+ 			if (ss.ss_family == AF_INET6)
+ 				 *p++ = ']';
+ 
+-			sprintf(p, &quot;:%d,1&quot;, ISCSI_TARGET_DEFAULT_PORT);
++			sprintf(p, &quot;:%d,1&quot;, ISCSI_LISTEN_PORT);
+ 			target_list_build(conn, buf,
+ 					  strcmp(value, &quot;All&quot;) ? value : NULL);
+ 		} else
+@@ -614,8 +624,8 @@
+ 
+ static void cmnd_exec_text(struct connection *conn)
+ {
+-	struct iscsi_text_req_hdr *req = (struct iscsi_text_req_hdr *)&amp;conn-&gt;req.bhs;
+-	struct iscsi_text_rsp_hdr *rsp = (struct iscsi_text_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_text *req = (struct iscsi_text *)&amp;conn-&gt;req.bhs;
++	struct iscsi_text_rsp *rsp = (struct iscsi_text_rsp *)&amp;conn-&gt;rsp.bhs;
+ 
+ 	memset(rsp, 0, BHS_SIZE);
+ 
+@@ -626,37 +636,37 @@
+ 	rsp-&gt;itt = req-&gt;itt;
+ 	//rsp-&gt;ttt = rsp-&gt;ttt;
+ 	rsp-&gt;ttt = 0xffffffff;
+-	conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmd_sn);
++	conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+ 	if (!(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE))
+ 		conn-&gt;exp_cmd_sn++;
+ 
+ 	log_debug(1, &quot;Text request: %d&quot;, conn-&gt;state);
+ 	text_scan_text(conn);
+ 
+-	if (req-&gt;flags &amp; ISCSI_FLG_FINAL)
+-		rsp-&gt;flags = ISCSI_FLG_FINAL;
++	if (req-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
++		rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 
+-	rsp-&gt;stat_sn = cpu_to_be32(conn-&gt;stat_sn++);
+-	rsp-&gt;exp_cmd_sn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+-	rsp-&gt;max_cmd_sn = cpu_to_be32(conn-&gt;max_cmd_sn);
++	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ }
+ 
+ static void cmnd_exec_logout(struct connection *conn)
+ {
+-	struct iscsi_logout_req_hdr *req = (struct iscsi_logout_req_hdr *)&amp;conn-&gt;req.bhs;
+-	struct iscsi_logout_rsp_hdr *rsp = (struct iscsi_logout_rsp_hdr *)&amp;conn-&gt;rsp.bhs;
++	struct iscsi_logout *req = (struct iscsi_logout *)&amp;conn-&gt;req.bhs;
++	struct iscsi_logout_rsp *rsp = (struct iscsi_logout_rsp *)&amp;conn-&gt;rsp.bhs;
+ 
+ 	memset(rsp, 0, BHS_SIZE);
+ 	rsp-&gt;opcode = ISCSI_OP_LOGOUT_RSP;
+-	rsp-&gt;flags = ISCSI_FLG_FINAL;
++	rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 	rsp-&gt;itt = req-&gt;itt;
+-	conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmd_sn);
++	conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+ 	if (!(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE))
+ 		conn-&gt;exp_cmd_sn++;
+ 
+-	rsp-&gt;stat_sn = cpu_to_be32(conn-&gt;stat_sn++);
+-	rsp-&gt;exp_cmd_sn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+-	rsp-&gt;max_cmd_sn = cpu_to_be32(conn-&gt;max_cmd_sn);
++	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;max_cmd_sn);
+ }
+ 
+ int cmnd_execute(struct connection *conn)
+@@ -664,31 +674,27 @@
+ 	int res = 1;
+ 
+ 	switch (conn-&gt;req.bhs.opcode &amp; ISCSI_OPCODE_MASK) {
+-	case ISCSI_OP_LOGIN_CMD:
++	case ISCSI_OP_LOGIN:
+ 		//if conn-&gt;state == STATE_FULL -&gt; reject
+ 		cmnd_exec_login(conn);
+-		conn-&gt;rsp.bhs.ahslength = conn-&gt;rsp.ahssize / 4;
+-		conn-&gt;rsp.bhs.datalength[0] = conn-&gt;rsp.datasize &gt;&gt; 16;
+-		conn-&gt;rsp.bhs.datalength[1] = conn-&gt;rsp.datasize &gt;&gt; 8;
+-		conn-&gt;rsp.bhs.datalength[2] = conn-&gt;rsp.datasize;
++		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
++		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+-	case ISCSI_OP_TEXT_CMD:
++	case ISCSI_OP_TEXT:
+ 		//if conn-&gt;state != STATE_FULL -&gt; reject
++		printf(&quot;%s %d %u\n&quot;, __FUNCTION__, __LINE__, conn-&gt;req.datasize);
+ 		cmnd_exec_text(conn);
+-		conn-&gt;rsp.bhs.ahslength = conn-&gt;rsp.ahssize / 4;
+-		conn-&gt;rsp.bhs.datalength[0] = conn-&gt;rsp.datasize &gt;&gt; 16;
+-		conn-&gt;rsp.bhs.datalength[1] = conn-&gt;rsp.datasize &gt;&gt; 8;
+-		conn-&gt;rsp.bhs.datalength[2] = conn-&gt;rsp.datasize;
++		printf(&quot;%s %d %u\n&quot;, __FUNCTION__, __LINE__, conn-&gt;rsp.datasize);
++		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
++		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+-	case ISCSI_OP_LOGOUT_CMD:
++	case ISCSI_OP_LOGOUT:
+ 		//if conn-&gt;state != STATE_FULL -&gt; reject
+ 		cmnd_exec_logout(conn);
+-		conn-&gt;rsp.bhs.ahslength = conn-&gt;rsp.ahssize / 4;
+-		conn-&gt;rsp.bhs.datalength[0] = conn-&gt;rsp.datasize &gt;&gt; 16;
+-		conn-&gt;rsp.bhs.datalength[1] = conn-&gt;rsp.datasize &gt;&gt; 8;
+-		conn-&gt;rsp.bhs.datalength[2] = conn-&gt;rsp.datasize;
++		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
++		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	default:
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/iscsid.h	2005-08-23 09:29:23 UTC (rev 14)
+@@ -11,16 +11,22 @@
+ #include &lt;sys/types.h&gt;
+ 
+ #include &quot;types.h&quot;
+-#include &quot;iscsi_hdr.h&quot;
+ #include &quot;iet_u.h&quot;
+ #include &quot;param.h&quot;
+ #include &quot;config.h&quot;
+ #include &quot;misc.h&quot;
++#include &lt;iscsi_proto.h&gt;
+ 
+-#define ISCSI_TARGET_DEFAULT_PORT	3260
+-
+ #define PROC_SESSION	&quot;/proc/net/iet/session&quot;
+ 
++#define sid64(isid, tsih)					\
++({								\
++	(uint64_t) isid[0] &lt;&lt;  0 | (uint64_t) isid[1] &lt;&lt;  8 |	\
++	(uint64_t) isid[2] &lt;&lt; 16 | (uint64_t) isid[3] &lt;&lt; 24 |	\
++	(uint64_t) isid[4] &lt;&lt; 32 | (uint64_t) isid[5] &lt;&lt; 40 |	\
++	(uint64_t) tsih &lt;&lt; 48;					\
++})
++
+ struct PDU {
+ 	struct iscsi_hdr bhs;
+ 	void *ahs;
+@@ -38,7 +44,8 @@
+ 
+ 	char *initiator;
+ 	struct target *target;
+-	union iscsi_sid sid;
++	uint8_t isid[6];
++	uint16_t tsih;
+ 
+ 	int conn_cnt;
+ };
+@@ -54,7 +61,8 @@
+ 	struct iscsi_param session_param[session_key_last];
+ 
+ 	char *initiator;
+-	union iscsi_sid sid;
++	uint8_t isid[6];
++	uint16_t tsih;
+ 	u16 cid;
+ 	u16 pad;
+ 	int session_type;
+@@ -175,7 +183,7 @@
+ extern void log_pdu(int level, struct PDU *pdu);
+ 
+ /* session.c */
+-extern struct session *session_find_name(u32 tid, const char *iname, union iscsi_sid sid);
++extern struct session *session_find_name(u32 tid, const char *iname, uint8_t *isid);
+ extern struct session *session_find_id(u32 tid, u64 sid);
+ extern void session_create(struct connection *conn);
+ extern void session_remove(struct session *session);
+
+Modified: trunk/iscsi/usr/session.c
+===================================================================
+--- trunk/iscsi/usr/session.c	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/session.c	2005-08-23 09:29:23 UTC (rev 14)
+@@ -34,7 +34,7 @@
+ 	return session;
+ }
+ 
+-struct session *session_find_name(u32 tid, const char *iname, union iscsi_sid sid)
++struct session *session_find_name(u32 tid, const char *iname, uint8_t *isid)
+ {
+ 	struct session *session;
+ 	struct target *target;
+@@ -42,9 +42,10 @@
+ 	if (!(target = target_find_by_id(tid)))
+ 		return NULL;
+ 
+-	log_debug(1, &quot;session_find_name: %s %#&quot; PRIx64, iname, sid.id64);
++	log_debug(1, &quot;session_find_name: %s %x %x %x %x %x %x&quot;, iname,
++		  isid[0], isid[1], isid[2], isid[3], isid[4], isid[5]);
+ 	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
+-		if (!memcmp(sid.id.isid, session-&gt;sid.id.isid, 6) &amp;&amp;
++		if (!memcmp(isid, session-&gt;isid, sizeof(session-&gt;isid)) &amp;&amp;
+ 		    !strcmp(iname, session-&gt;initiator))
+ 			return session;
+ 	}
+@@ -62,7 +63,7 @@
+ 
+ 	log_debug(1, &quot;session_find_id: %#&quot; PRIx64, sid);
+ 	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
+-		if (session-&gt;sid.id64 == sid)
++		if (sid64(session-&gt;isid, session-&gt;tsih) == sid)
+ 			return session;
+ 	}
+ 
+@@ -120,42 +121,46 @@
+ void session_create(struct connection *conn)
+ {
+ 	struct session *session;
++	uint64_t sid;
+ 	static u16 tsih = 1;
+ 
+ 	if (!(session = session_alloc(conn-&gt;tid)))
+ 		return;
+ 
+-	session-&gt;sid = conn-&gt;sid;
+-	session-&gt;sid.id.tsih = tsih;
++	memcpy(session-&gt;isid, conn-&gt;isid, sizeof(session-&gt;isid));
++	session-&gt;tsih = tsih;
+ 
+ 	while (1) {
+-		int err = session_test(conn-&gt;tid, session-&gt;sid.id64);
++		sid = sid64(session-&gt;isid, session-&gt;tsih);
++		int err = session_test(conn-&gt;tid, sid);
+ 
+ 		if (err == -ENOENT)
+ 			break;
+ 		else if (err &lt; 0)
+ 			return;
+-		session-&gt;sid.id.tsih++;
++		session-&gt;tsih++;
+ 	}
+-	tsih = session-&gt;sid.id.tsih + 1;
++	tsih = session-&gt;tsih + 1;
+ 
+ 	conn-&gt;session = session;
+ 	conn-&gt;session-&gt;initiator = strdup(conn-&gt;initiator);
+ 
+-	log_debug(1, &quot;session_create: %#&quot; PRIx64, session-&gt;sid.id64);
++	log_debug(1, &quot;session_create: %#&quot; PRIx64, sid);
+ 
+-	ki-&gt;session_create(conn-&gt;tid, session-&gt;sid.id64, conn-&gt;exp_cmd_sn,
++	ki-&gt;session_create(conn-&gt;tid, sid, conn-&gt;exp_cmd_sn,
+ 			   conn-&gt;max_cmd_sn, session-&gt;initiator);
+-	ki-&gt;param_set(conn-&gt;tid, session-&gt;sid.id64, key_session, 0, conn-&gt;session_param);
++	ki-&gt;param_set(conn-&gt;tid, sid, key_session, 0, conn-&gt;session_param);
+ }
+ 
+ void session_remove(struct session *session)
+ {
+-	log_debug(1, &quot;session_remove: %#&quot;  PRIx64, session-&gt;sid.id64);
++	uint64_t sid = sid64(session-&gt;isid, session-&gt;tsih);
+ 
+-	if (!session-&gt;sid.id.tsih)
+-		ki-&gt;session_destroy(session-&gt;target-&gt;tid, session-&gt;sid.id64);
++	log_debug(1, &quot;session_remove: %#&quot;  PRIx64, sid);
+ 
++	if (!session-&gt;tsih)
++		ki-&gt;session_destroy(session-&gt;target-&gt;tid, sid);
++
+ 	if (session-&gt;target) {
+ 		remque(&amp;session-&gt;slist);
+ /* 		session-&gt;target-&gt;nr_sessions--; */
+
+Modified: trunk/iscsi/usr/types.h
+===================================================================
+--- trunk/iscsi/usr/types.h	2005-08-19 04:54:53 UTC (rev 13)
++++ trunk/iscsi/usr/types.h	2005-08-23 09:29:23 UTC (rev 14)
+@@ -32,4 +32,7 @@
+ typedef u_int32_t u32;
+ typedef u_int64_t u64;
+ 
++typedef uint16_t __be16;
++typedef uint32_t __be32;
++
+ #endif	/* TYPES_H */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000008.html">[Stgt-svn] r13 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000010.html">[Stgt-svn] r15 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#9">[ date ]</a>
+              <a href="thread.html#9">[ thread ]</a>
+              <a href="subject.html#9">[ subject ]</a>
+              <a href="author.html#9">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,122 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r48 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r48%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509071202.j87C2vor023140%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000040.html">
+   <LINK REL="Next"  HREF="000042.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r48 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r48%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509071202.j87C2vor023140%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r48 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Sep  7 14:02:57 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000040.html">[Stgt-svn] r47 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000042.html">[Stgt-svn] r49 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#41">[ date ]</a>
+              <a href="thread.html#41">[ thread ]</a>
+              <a href="subject.html#41">[ subject ]</a>
+              <a href="author.html#41">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-07 14:02:57 +0200 (Wed, 07 Sep 2005)
+New Revision: 48
+
+Modified:
+   trunk/iscsi/kernel/target.c
+Log:
+Fix failure handling in iscsi_target_create().
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-09-07 11:38:03 UTC (rev 47)
++++ trunk/iscsi/kernel/target.c	2005-09-07 12:02:57 UTC (rev 48)
+@@ -106,12 +106,11 @@
+ 	int err = -EINVAL;
+ 	struct iscsi_target *target;
+ 
+-	if (!(target = kmalloc(sizeof(*target), GFP_KERNEL))) {
+-		err = -ENOMEM;
+-		goto out;
+-	}
++	target = kmalloc(sizeof(*target), GFP_KERNEL);
++	if (!target)
++		return -ENOMEM;
++
+ 	memset(target, 0, sizeof(*target));
+-
+ 	memcpy(&amp;target-&gt;sess_param, &amp;default_session_param, sizeof(default_session_param));
+ 	memcpy(&amp;target-&gt;trgt_param, &amp;default_target_param, sizeof(default_target_param));
+ 
+@@ -122,19 +121,21 @@
+ 
+ 	nthread_init(target);
+ 
+-	if ((err = target_thread_start(target)) &lt; 0) {
+-		target_thread_stop(target);
+-		goto out;
+-	}
+-
+ 	target-&gt;stt = stgt_target_create(&quot;iet&quot;, DEFAULT_NR_QUEUED_CMNDS);
++	if (!target-&gt;stt)
++		goto free_target;
+ 
++	err = target_thread_start(target);
++	if (err &lt; 0)
++		goto destory_tgt;
++
+ 	target-&gt;tid = info-&gt;tid = target-&gt;stt-&gt;tid;
++	return 0;
+ 
+-	return 0;
+-out:
++destory_tgt:
++	stgt_target_destroy(target-&gt;stt);
++free_target:
+ 	kfree(target);
+-
+ 	return err;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000040.html">[Stgt-svn] r47 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000042.html">[Stgt-svn] r49 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#41">[ date ]</a>
+              <a href="thread.html#41">[ thread ]</a>
+              <a href="subject.html#41">[ subject ]</a>
+              <a href="author.html#41">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

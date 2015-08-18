@@ -1,0 +1,448 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r564 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r564%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608311111.k7VBBepC015358%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000550.html">
+   <LINK REL="Next"  HREF="000552.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r564 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r564%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608311111.k7VBBepC015358%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r564 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 13:11:40 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000550.html">[Stgt-svn] r563 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000552.html">[Stgt-svn] r565 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#551">[ date ]</a>
+              <a href="thread.html#551">[ thread ]</a>
+              <a href="subject.html#551">[ subject ]</a>
+              <a href="author.html#551">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 13:11:39 +0200 (Thu, 31 Aug 2006)
+New Revision: 564
+
+Removed:
+   trunk/usr/iscsi/netlink.c
+Log:
+remove netlink.c
+
+Deleted: trunk/usr/iscsi/netlink.c
+===================================================================
+--- trunk/usr/iscsi/netlink.c	2006-08-31 08:10:12 UTC (rev 563)
++++ trunk/usr/iscsi/netlink.c	2006-08-31 11:11:39 UTC (rev 564)
+@@ -1,372 +0,0 @@
+-/*
+- * iSCSI Netlink/Linux Interface
+- *
+- * Copyright (C) 2004 Dmitry Yusupov, Alex Aizman
+- * maintained by <A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">open-iscsi at googlegroups.com</A>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published
+- * by the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- *
+- * See the file COPYING included with this distribution for more details.
+- */
+-
+-#include &lt;ctype.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;dirent.h&gt;
+-
+-#include &lt;sys/ioctl.h&gt;
+-#include &lt;sys/types.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;sys/socket.h&gt;
+-#include &lt;sys/un.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/netlink.h&gt;
+-
+-#include &quot;iscsid.h&quot;
+-#include &quot;tgtadm.h&quot;
+-
+-#define NL_BUFSIZE 4096
+-
+-static struct sockaddr_nl saddr, daddr;
+-
+-static int __nl_read(int fd, void *data, int size, int flags)
+-{
+-	struct sockaddr_nl saddr;
+-	socklen_t slen = sizeof(saddr);
+-
+-	memset(&amp;saddr, 0, sizeof(saddr));
+-	saddr.nl_family = AF_NETLINK;
+-	saddr.nl_pid = getpid();
+-	saddr.nl_groups = 0; /* not in mcast groups */
+-
+-	return recvfrom(fd, data, size, flags, (struct sockaddr *) &amp;saddr, &amp;slen);
+-}
+-
+-static int nl_read(char *buf)
+-{
+-	struct nlmsghdr *nlh;
+-	int err;
+-
+-peek_again:
+-	err = __nl_read(nl_fd, buf, NLMSG_LENGTH(0), MSG_PEEK);
+-	if (err &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, err);
+-		if (errno == EAGAIN || errno == EINTR)
+-			goto peek_again;
+-		return err;
+-	}
+-
+-	nlh = (struct nlmsghdr *) buf;
+-
+-/* 	dprintf(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type, nlh-&gt;nlmsg_len, getpid()); */
+-read_again:
+-	err = __nl_read(nl_fd, buf, nlh-&gt;nlmsg_len, 0);
+-	if (err &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, err);
+-		if (errno == EAGAIN || errno == EINTR)
+-			goto read_again;
+-		return err;
+-	}
+-
+-	return err;
+-}
+-
+-static int __kipc_call(struct iscsi_uevent *ev, int len)
+-{
+-	struct nlmsghdr *nlh;
+-	char sbuf[NL_BUFSIZE];
+-	int err;
+-
+-	nlh = (struct nlmsghdr *) sbuf;
+-	memset(sbuf, 0, NL_BUFSIZE);
+-	memcpy(NLMSG_DATA(nlh), ev, len);
+-
+-	len = NLMSG_SPACE(len);
+-	nlh-&gt;nlmsg_pid = getpid();
+-	nlh-&gt;nlmsg_len = len;
+-	nlh-&gt;nlmsg_type = ev-&gt;type;
+-
+-	err = sendto(nl_fd, nlh, len, 0, (struct sockaddr *) &amp;daddr, sizeof(daddr));
+-	if (err &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, err);
+-		return err;
+-	}
+-
+-	memset(sbuf, 0, NL_BUFSIZE);
+-	err = nl_read(sbuf);
+-	if (err &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, err);
+-		return err;
+-	}
+-
+-	memcpy(ev, NLMSG_DATA(sbuf), sizeof(*ev));
+-
+-	return err;
+-}
+-
+-static int kcreate_session(uint64_t transport_handle, uint32_t initial_cmdsn,
+-		uint32_t *out_sid, uint32_t *out_hostno)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	dprintf(&quot;%&quot;PRIx64 &quot; %u %u %u\n&quot;,
+-		transport_handle, initial_cmdsn, *out_sid, *out_hostno);
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_CREATE_SESSION;
+-	ev.transport_handle = transport_handle;
+-	ev.u.c_session.initial_cmdsn = initial_cmdsn;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		return rc;
+-	}
+-
+-	*out_hostno = ev.r.c_session_ret.host_no;
+-	*out_sid = ev.r.c_session_ret.sid;
+-
+-	return 0;
+-}
+-
+-static int kdestroy_session(uint64_t transport_handle, uint32_t sid)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_DESTROY_SESSION;
+-	ev.transport_handle = transport_handle;
+-	ev.u.d_session.sid = sid;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		return rc;
+-	}
+-
+-	return 0;
+-}
+-
+-static int kcreate_conn(uint64_t transport_handle, uint32_t sid,
+-		       uint32_t cid, uint32_t *out_cid)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	dprintf(&quot;%&quot;PRIx64 &quot; %u %u\n&quot;, transport_handle, sid, cid);
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_CREATE_CONN;
+-	ev.transport_handle = transport_handle;
+-	ev.u.c_conn.cid = cid;
+-	ev.u.c_conn.sid = sid;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, rc);
+-		return rc;
+-	}
+-
+-	if ((int)ev.r.c_conn_ret.cid == -1)
+-		return -EIO;
+-
+-	*out_cid = ev.r.c_conn_ret.cid;
+-	return 0;
+-}
+-
+-static int kdestroy_conn(uint64_t transport_handle, uint32_t sid, uint32_t cid)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_DESTROY_CONN;
+-	ev.transport_handle = transport_handle;
+-	ev.u.d_conn.sid = sid;
+-	ev.u.d_conn.cid = cid;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, rc);
+-	}
+-
+-	return 0;
+-}
+-
+-static int
+-kbind_conn(uint64_t transport_handle, uint32_t sid, uint32_t cid,
+-	   uint64_t transport_eph, int is_leading, int *retcode)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	ev.type = ISCSI_UEVENT_BIND_CONN;
+-	ev.transport_handle = transport_handle;
+-	ev.u.b_conn.sid = sid;
+-	ev.u.b_conn.cid = cid;
+-	ev.u.b_conn.transport_eph = transport_eph;
+-	ev.u.b_conn.is_leading = is_leading;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		return rc;
+-	}
+-
+-	*retcode = ev.r.retcode;
+-
+-	return 0;
+-}
+-
+-static int
+-kstop_conn(uint64_t transport_handle, uint32_t sid, uint32_t cid, int flag)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_STOP_CONN;
+-	ev.transport_handle = transport_handle;
+-	ev.u.stop_conn.sid = sid;
+-	ev.u.stop_conn.cid = cid;
+-	ev.u.stop_conn.flag = flag;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		return rc;
+-	}
+-
+-	return 0;
+-}
+-
+-static int
+-kstart_conn(uint64_t transport_handle, uint32_t sid, uint32_t cid,
+-	    int *retcode)
+-{
+-	int rc;
+-	struct iscsi_uevent ev;
+-
+-	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+-
+-	ev.type = ISCSI_UEVENT_START_CONN;
+-	ev.transport_handle = transport_handle;
+-	ev.u.start_conn.sid = sid;
+-	ev.u.start_conn.cid = cid;
+-
+-	if ((rc = __kipc_call(&amp;ev, sizeof(ev))) &lt; 0) {
+-		return rc;
+-	}
+-
+-	*retcode = ev.r.retcode;
+-	return 0;
+-}
+-
+-static int
+-kset_param(uint64_t transport_handle, uint32_t sid, uint32_t cid,
+-	   enum iscsi_param param, void *value, int len, int *retcode)
+-{
+-	struct iscsi_uevent *ev;
+-	char setparam_buf[NL_BUFSIZE];
+-	int rc;
+-
+-	memset(setparam_buf, 0, sizeof(setparam_buf));
+-	ev = (struct iscsi_uevent *) setparam_buf;
+-	ev-&gt;type = ISCSI_UEVENT_SET_PARAM;
+-	ev-&gt;transport_handle = transport_handle;
+-	ev-&gt;u.set_param.sid = sid;
+-	ev-&gt;u.set_param.cid = cid;
+-	ev-&gt;u.set_param.param = param;
+-	ev-&gt;u.set_param.len = len;
+-	memcpy(setparam_buf + sizeof(*ev), value, len);
+-
+-	if ((rc = __kipc_call(ev, sizeof(*ev) + len)) &lt; 0) {
+-		return rc;
+-	}
+-
+-	*retcode = ev-&gt;r.retcode;
+-
+-	return 0;
+-}
+-
+-static int transport_handle_init(void)
+-{
+-	int fd, err;
+-	char buf[64];
+-
+-	fd = open(&quot;/sys/class/iscsi_transport/iscsi_tcp_tgt/handle&quot;, O_RDONLY);
+-	if (fd &lt; 0)
+-		return fd;
+-	err = read(fd, buf, sizeof(buf));
+-	if (err &lt; 0)
+-		goto out;
+-	thandle = strtoull(buf, NULL, 10);
+-	dprintf(&quot;%&quot; PRIx64 &quot;\n&quot;, thandle);
+-	err = 0;
+-out:
+-	close(fd);
+-	return err;
+-}
+-
+-int iscsi_nl_init(void)
+-{
+-	int err, rsize = 256 * 1024;
+-
+-	err = transport_handle_init();
+-	if (err)
+-		return err;
+-
+-	nl_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_ISCSI);
+-	if (nl_fd &lt; 0) {
+-		eprintf(&quot;Fail to create the netlink socket %d\n&quot;, errno);
+-		return err;
+-	}
+-	eprintf(&quot;create the netlink socket %d\n&quot;, nl_fd);
+-
+-	err = setsockopt(nl_fd, SOL_SOCKET, SO_RCVBUF, &amp;rsize, sizeof(rsize));
+-	if (err) {
+-		eprintf(&quot;fail to setsockopt %d\n&quot;, errno);
+-		return err;
+-	}
+-
+-	memset(&amp;saddr, 0, sizeof(saddr));
+-	saddr.nl_family = AF_NETLINK;
+-	saddr.nl_pid = getpid();
+-	saddr.nl_groups = 0; /* not in mcast groups */
+-/* 	err = bind(nl_fd, (struct sockaddr *) &amp;saddr, sizeof(saddr)); */
+-/* 	if (err) { */
+-/* 		eprintf(&quot;can not bind NETLINK_ISCSI socket %d\n&quot;, errno); */
+-/* 		close(nl_fd); */
+-/* 		return err; */
+-/* 	} */
+-
+-	memset(&amp;daddr, 0, sizeof(daddr));
+-	daddr.nl_family = AF_NETLINK;
+-	daddr.nl_pid = 0; /* kernel */
+-	daddr.nl_groups = 0; /* unicast */
+-	eprintf(&quot;create the netlink socket %d %d\n&quot;, nl_fd, err);
+-
+-	return err;
+-}
+-
+-struct iscsi_kernel_interface nl_ki = {
+-	.create_session		= kcreate_session,
+-	.destroy_session	= kdestroy_session,
+-	.create_conn		= kcreate_conn,
+-	.destroy_conn		= kdestroy_conn,
+-	.bind_conn		= kbind_conn,
+-	.set_param              = kset_param,
+-	.start_conn             = kstart_conn,
+-	.stop_conn              = kstop_conn,
+-};
+-
+-struct iscsi_kernel_interface *ki = &amp;nl_ki;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000550.html">[Stgt-svn] r563 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000552.html">[Stgt-svn] r565 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#551">[ date ]</a>
+              <a href="thread.html#551">[ thread ]</a>
+              <a href="subject.html#551">[ subject ]</a>
+              <a href="author.html#551">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

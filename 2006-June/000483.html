@@ -1,0 +1,677 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r496 - trunk/patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r496%20-%20trunk/patchset&In-Reply-To=%3C200606270549.k5R5nrRl008298%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000482.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r496 - trunk/patchset</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r496%20-%20trunk/patchset&In-Reply-To=%3C200606270549.k5R5nrRl008298%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r496 - trunk/patchset">tomo at berlios.de
+       </A><BR>
+    <I>Tue Jun 27 07:49:53 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000482.html">[Stgt-svn] r495 - trunk/kernel
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#483">[ date ]</a>
+              <a href="thread.html#483">[ thread ]</a>
+              <a href="subject.html#483">[ subject ]</a>
+              <a href="author.html#483">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-27 07:49:03 +0200 (Tue, 27 Jun 2006)
+New Revision: 496
+
+Added:
+   trunk/patchset/tgt-2.6.17.patch
+Log:
+tgt headers and mainline changes for 2.6.17. This patch enables you to compile the tgt code in the svn repository for 2.6.17.
+
+
+Added: trunk/patchset/tgt-2.6.17.patch
+===================================================================
+--- trunk/patchset/tgt-2.6.17.patch	2006-06-27 04:27:41 UTC (rev 495)
++++ trunk/patchset/tgt-2.6.17.patch	2006-06-27 05:49:03 UTC (rev 496)
+@@ -0,0 +1,602 @@
++Subject: [PATCH] scsi tgt: tgt headers and mainline changes.
++
++---
++
++ block/ll_rw_blk.c          |   40 ++++++++++----------
++ block/scsi_ioctl.c         |    3 +
++ drivers/scsi/hosts.c       |    5 ++
++ drivers/scsi/scsi.c        |   43 +++++++++++++--------
++ drivers/scsi/scsi_lib.c    |   33 ++++++++++++----
++ fs/bio.c                   |   19 +--------
++ include/linux/blkdev.h     |    3 +
++ include/linux/netlink.h    |    1 
++ include/scsi/scsi_cmnd.h   |    8 ++++
++ include/scsi/scsi_host.h   |   43 +++++++++++++++++++++
++ include/scsi/scsi_tgt.h    |   17 ++++++++
++ include/scsi/scsi_tgt_if.h |   89 ++++++++++++++++++++++++++++++++++++++++++++
++ 12 files changed, 240 insertions(+), 64 deletions(-)
++ create mode 100644 include/scsi/scsi_tgt.h
++ create mode 100644 include/scsi/scsi_tgt_if.h
++
++92f10cdafc264d0c336ea82f3ddb38dd8d9ab622
++diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
++index 7eb36c5..4fe85d7 100644
++--- a/block/ll_rw_blk.c
+++++ b/block/ll_rw_blk.c
++@@ -2351,19 +2351,20 @@ int blk_rq_map_user(request_queue_t *q, 
++ 	else
++ 		bio = bio_copy_user(q, uaddr, len, reading);
++ 
++-	if (!IS_ERR(bio)) {
++-		rq-&gt;bio = rq-&gt;biotail = bio;
++-		blk_rq_bio_prep(q, rq, bio);
+++	if (IS_ERR(bio))
+++		return PTR_ERR(bio);
++ 
++-		rq-&gt;buffer = rq-&gt;data = NULL;
++-		rq-&gt;data_len = len;
++-		return 0;
+++	if (bio-&gt;bi_size != len) {
+++		bio_endio(bio, bio-&gt;bi_size, 0);
+++		bio_unmap_user(bio);
+++		return -EINVAL;
++ 	}
++ 
++-	/*
++-	 * bio is the err-ptr
++-	 */
++-	return PTR_ERR(bio);
+++	rq-&gt;bio = rq-&gt;biotail = bio;
+++	blk_rq_bio_prep(q, rq, bio);
+++	rq-&gt;buffer = rq-&gt;data = NULL;
+++	rq-&gt;data_len = len;
+++	return 0;
++ }
++ 
++ EXPORT_SYMBOL(blk_rq_map_user);
++@@ -2389,7 +2390,7 @@ EXPORT_SYMBOL(blk_rq_map_user);
++  *    unmapping.
++  */
++ int blk_rq_map_user_iov(request_queue_t *q, struct request *rq,
++-			struct sg_iovec *iov, int iov_count)
+++			struct sg_iovec *iov, int iov_count, unsigned int len)
++ {
++ 	struct bio *bio;
++ 
++@@ -2403,6 +2404,12 @@ int blk_rq_map_user_iov(request_queue_t 
++ 	if (IS_ERR(bio))
++ 		return PTR_ERR(bio);
++ 
+++	if (bio-&gt;bi_size != len) {
+++		bio_endio(bio, bio-&gt;bi_size, 0);
+++		bio_unmap_user(bio);
+++		return -EINVAL;
+++	}
+++
++ 	rq-&gt;bio = rq-&gt;biotail = bio;
++ 	blk_rq_bio_prep(q, rq, bio);
++ 	rq-&gt;buffer = rq-&gt;data = NULL;
++@@ -2826,16 +2833,12 @@ static void init_request_from_bio(struct
++ 
++ 	req-&gt;errors = 0;
++ 	req-&gt;hard_sector = req-&gt;sector = bio-&gt;bi_sector;
++-	req-&gt;hard_nr_sectors = req-&gt;nr_sectors = bio_sectors(bio);
++-	req-&gt;current_nr_sectors = req-&gt;hard_cur_sectors = bio_cur_sectors(bio);
++-	req-&gt;nr_phys_segments = bio_phys_segments(req-&gt;q, bio);
++-	req-&gt;nr_hw_segments = bio_hw_segments(req-&gt;q, bio);
++-	req-&gt;buffer = bio_data(bio);	/* see -&gt;buffer comment above */
++ 	req-&gt;waiting = NULL;
++-	req-&gt;bio = req-&gt;biotail = bio;
++ 	req-&gt;ioprio = bio_prio(bio);
++ 	req-&gt;rq_disk = bio-&gt;bi_bdev-&gt;bd_disk;
++ 	req-&gt;start_time = jiffies;
+++
+++	blk_rq_bio_prep(req-&gt;q, req, bio);
++ }
++ 
++ static int __make_request(request_queue_t *q, struct bio *bio)
++@@ -3487,9 +3490,6 @@ EXPORT_SYMBOL(end_request);
++ 
++ void blk_rq_bio_prep(request_queue_t *q, struct request *rq, struct bio *bio)
++ {
++-	/* first three bits are identical in rq-&gt;flags and bio-&gt;bi_rw */
++-	rq-&gt;flags |= (bio-&gt;bi_rw &amp; 7);
++-
++ 	rq-&gt;nr_phys_segments = bio_phys_segments(q, bio);
++ 	rq-&gt;nr_hw_segments = bio_hw_segments(q, bio);
++ 	rq-&gt;current_nr_sectors = bio_cur_sectors(bio);
++diff --git a/block/scsi_ioctl.c b/block/scsi_ioctl.c
++index b33eda2..b77e185 100644
++--- a/block/scsi_ioctl.c
+++++ b/block/scsi_ioctl.c
++@@ -274,7 +274,8 @@ static int sg_io(struct file *file, requ
++ 			goto out;
++ 		}
++ 
++-		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count);
+++		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count,
+++					  hdr-&gt;dxfer_len);
++ 		kfree(iov);
++ 	} else if (hdr-&gt;dxfer_len)
++ 		ret = blk_rq_map_user(q, rq, hdr-&gt;dxferp, hdr-&gt;dxfer_len);
++diff --git a/drivers/scsi/hosts.c b/drivers/scsi/hosts.c
++index dfcb96f..f8cce09 100644
++--- a/drivers/scsi/hosts.c
+++++ b/drivers/scsi/hosts.c
++@@ -264,6 +264,11 @@ static void scsi_host_dev_release(struct
++ 	if (shost-&gt;work_q)
++ 		destroy_workqueue(shost-&gt;work_q);
++ 
+++	if (shost-&gt;uspace_req_q) {
+++		kfree(shost-&gt;uspace_req_q-&gt;queuedata);
+++		scsi_free_queue(shost-&gt;uspace_req_q);
+++	}
+++
++ 	scsi_destroy_command_freelist(shost);
++ 	kfree(shost-&gt;shost_data);
++ 
++diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
++index 73994e2..0591b93 100644
++--- a/drivers/scsi/scsi.c
+++++ b/drivers/scsi/scsi.c
++@@ -210,8 +210,7 @@ static struct scsi_host_cmd_pool scsi_cm
++ 
++ static DEFINE_MUTEX(host_cmd_pool_mutex);
++ 
++-static struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *shost,
++-					    gfp_t gfp_mask)
+++struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *shost, gfp_t gfp_mask)
++ {
++ 	struct scsi_cmnd *cmd;
++ 
++@@ -232,6 +231,7 @@ static struct scsi_cmnd *__scsi_get_comm
++ 
++ 	return cmd;
++ }
+++EXPORT_SYMBOL_GPL(__scsi_get_command);
++ 
++ /*
++  * Function:	scsi_get_command()
++@@ -268,9 +268,29 @@ struct scsi_cmnd *scsi_get_command(struc
++ 		put_device(&amp;dev-&gt;sdev_gendev);
++ 
++ 	return cmd;
++-}				
+++}
++ EXPORT_SYMBOL(scsi_get_command);
++ 
+++void __scsi_put_command(struct Scsi_Host *shost, struct scsi_cmnd *cmd,
+++			struct device *dev)
+++{
+++	unsigned long flags;
+++
+++	/* changing locks here, don't need to restore the irq state */
+++	spin_lock_irqsave(&amp;shost-&gt;free_list_lock, flags);
+++	if (unlikely(list_empty(&amp;shost-&gt;free_list))) {
+++		list_add(&amp;cmd-&gt;list, &amp;shost-&gt;free_list);
+++		cmd = NULL;
+++	}
+++	spin_unlock_irqrestore(&amp;shost-&gt;free_list_lock, flags);
+++
+++	if (likely(cmd != NULL))
+++		kmem_cache_free(shost-&gt;cmd_pool-&gt;slab, cmd);
+++
+++	put_device(dev);
+++}
+++EXPORT_SYMBOL(__scsi_put_command);
+++
++ /*
++  * Function:	scsi_put_command()
++  *
++@@ -285,26 +305,15 @@ EXPORT_SYMBOL(scsi_get_command);
++ void scsi_put_command(struct scsi_cmnd *cmd)
++ {
++ 	struct scsi_device *sdev = cmd-&gt;device;
++-	struct Scsi_Host *shost = sdev-&gt;host;
++ 	unsigned long flags;
++-	
+++
++ 	/* serious error if the command hasn't come from a device list */
++ 	spin_lock_irqsave(&amp;cmd-&gt;device-&gt;list_lock, flags);
++ 	BUG_ON(list_empty(&amp;cmd-&gt;list));
++ 	list_del_init(&amp;cmd-&gt;list);
++-	spin_unlock(&amp;cmd-&gt;device-&gt;list_lock);
++-	/* changing locks here, don't need to restore the irq state */
++-	spin_lock(&amp;shost-&gt;free_list_lock);
++-	if (unlikely(list_empty(&amp;shost-&gt;free_list))) {
++-		list_add(&amp;cmd-&gt;list, &amp;shost-&gt;free_list);
++-		cmd = NULL;
++-	}
++-	spin_unlock_irqrestore(&amp;shost-&gt;free_list_lock, flags);
+++	spin_unlock_irqrestore(&amp;cmd-&gt;device-&gt;list_lock, flags);
++ 
++-	if (likely(cmd != NULL))
++-		kmem_cache_free(shost-&gt;cmd_pool-&gt;slab, cmd);
++-
++-	put_device(&amp;sdev-&gt;sdev_gendev);
+++	__scsi_put_command(cmd-&gt;device-&gt;host, cmd, &amp;sdev-&gt;sdev_gendev);
++ }
++ EXPORT_SYMBOL(scsi_put_command);
++ 
++diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
++index faee475..f8ac3d5 100644
++--- a/drivers/scsi/scsi_lib.c
+++++ b/drivers/scsi/scsi_lib.c
++@@ -803,7 +803,7 @@ static struct scsi_cmnd *scsi_end_reques
++ 	return NULL;
++ }
++ 
++-static struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+++struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
++ {
++ 	struct scsi_host_sg_pool *sgp;
++ 	struct scatterlist *sgl;
++@@ -844,7 +844,9 @@ static struct scatterlist *scsi_alloc_sg
++ 	return sgl;
++ }
++ 
++-static void scsi_free_sgtable(struct scatterlist *sgl, int index)
+++EXPORT_SYMBOL(scsi_alloc_sgtable);
+++
+++void scsi_free_sgtable(struct scatterlist *sgl, int index)
++ {
++ 	struct scsi_host_sg_pool *sgp;
++ 
++@@ -854,6 +856,8 @@ static void scsi_free_sgtable(struct sca
++ 	mempool_free(sgl, sgp-&gt;pool);
++ }
++ 
+++EXPORT_SYMBOL(scsi_free_sgtable);
+++
++ /*
++  * Function:    scsi_release_buffers()
++  *
++@@ -1714,29 +1718,40 @@ u64 scsi_calculate_bounce_limit(struct S
++ }
++ EXPORT_SYMBOL(scsi_calculate_bounce_limit);
++ 
++-struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+++struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+++					 request_fn_proc *request_fn)
++ {
++-	struct Scsi_Host *shost = sdev-&gt;host;
++ 	struct request_queue *q;
++ 
++-	q = blk_init_queue(scsi_request_fn, NULL);
+++	q = blk_init_queue(request_fn, NULL);
++ 	if (!q)
++ 		return NULL;
++ 
++-	blk_queue_prep_rq(q, scsi_prep_fn);
++-
++ 	blk_queue_max_hw_segments(q, shost-&gt;sg_tablesize);
++ 	blk_queue_max_phys_segments(q, SCSI_MAX_PHYS_SEGMENTS);
++ 	blk_queue_max_sectors(q, shost-&gt;max_sectors);
++ 	blk_queue_bounce_limit(q, scsi_calculate_bounce_limit(shost));
++ 	blk_queue_segment_boundary(q, shost-&gt;dma_boundary);
++-	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
++-	blk_queue_softirq_done(q, scsi_softirq_done);
++ 
++ 	if (!shost-&gt;use_clustering)
++ 		clear_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags);
++ 	return q;
++ }
+++EXPORT_SYMBOL(__scsi_alloc_queue);
+++
+++struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+++{
+++	struct request_queue *q;
+++
+++	q = __scsi_alloc_queue(sdev-&gt;host, scsi_request_fn);
+++	if (!q)
+++		return NULL;
+++
+++	blk_queue_prep_rq(q, scsi_prep_fn);
+++	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+++	blk_queue_softirq_done(q, scsi_softirq_done);
+++	return q;
+++}
++ 
++ void scsi_free_queue(struct request_queue *q)
++ {
++diff --git a/fs/bio.c b/fs/bio.c
++index 6a0b9ad..ade77bf 100644
++--- a/fs/bio.c
+++++ b/fs/bio.c
++@@ -621,10 +621,9 @@ static struct bio *__bio_map_user_iov(re
++ 
++ 		nr_pages += end - start;
++ 		/*
++-		 * transfer and buffer must be aligned to at least hardsector
++-		 * size for now, in the future we can relax this restriction
+++		 * buffer must be aligned to at least hardsector size for now
++ 		 */
++-		if ((uaddr &amp; queue_dma_alignment(q)) || (len &amp; queue_dma_alignment(q)))
+++		if (uaddr &amp; queue_dma_alignment(q))
++ 			return ERR_PTR(-EINVAL);
++ 	}
++ 
++@@ -750,7 +749,6 @@ struct bio *bio_map_user_iov(request_que
++ 			     int write_to_vm)
++ {
++ 	struct bio *bio;
++-	int len = 0, i;
++ 
++ 	bio = __bio_map_user_iov(q, bdev, iov, iov_count, write_to_vm);
++ 
++@@ -765,18 +763,7 @@ struct bio *bio_map_user_iov(request_que
++ 	 */
++ 	bio_get(bio);
++ 
++-	for (i = 0; i &lt; iov_count; i++)
++-		len += iov[i].iov_len;
++-
++-	if (bio-&gt;bi_size == len)
++-		return bio;
++-
++-	/*
++-	 * don't support partial mappings
++-	 */
++-	bio_endio(bio, bio-&gt;bi_size, 0);
++-	bio_unmap_user(bio);
++-	return ERR_PTR(-EINVAL);
+++	return bio;
++ }
++ 
++ static void __bio_unmap_user(struct bio *bio)
++diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
++index 59e1259..cec7ccf 100644
++--- a/include/linux/blkdev.h
+++++ b/include/linux/blkdev.h
++@@ -624,7 +624,8 @@ extern void blk_queue_activity_fn(reques
++ extern int blk_rq_map_user(request_queue_t *, struct request *, void __user *, unsigned int);
++ extern int blk_rq_unmap_user(struct bio *, unsigned int);
++ extern int blk_rq_map_kern(request_queue_t *, struct request *, void *, unsigned int, gfp_t);
++-extern int blk_rq_map_user_iov(request_queue_t *, struct request *, struct sg_iovec *, int);
+++extern int blk_rq_map_user_iov(request_queue_t *, struct request *,
+++			       struct sg_iovec *, int, unsigned int);
++ extern int blk_execute_rq(request_queue_t *, struct gendisk *,
++ 			  struct request *, int);
++ extern void blk_execute_rq_nowait(request_queue_t *, struct gendisk *,
++diff --git a/include/linux/netlink.h b/include/linux/netlink.h
++index 87b8a57..cfac287 100644
++--- a/include/linux/netlink.h
+++++ b/include/linux/netlink.h
++@@ -21,6 +21,7 @@
++ #define NETLINK_DNRTMSG		14	/* DECnet routing messages */
++ #define NETLINK_KOBJECT_UEVENT	15	/* Kernel messages to userspace */
++ #define NETLINK_GENERIC		16
+++#define NETLINK_TGT		17	/* SCSI target */
++ 
++ #define MAX_LINKS 32		
++ 
++diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
++index 1ace1b9..d69dbf5 100644
++--- a/include/scsi/scsi_cmnd.h
+++++ b/include/scsi/scsi_cmnd.h
++@@ -8,6 +8,7 @@
++ 
++ struct request;
++ struct scatterlist;
+++struct Scsi_Host;
++ struct scsi_device;
++ struct scsi_request;
++ 
++@@ -84,6 +85,8 @@ struct scsi_cmnd {
++ 	unsigned short sglist_len;	/* size of malloc'd scatter-gather list */
++ 	unsigned bufflen;	/* Size of data buffer */
++ 	void *buffer;		/* Data buffer */
+++	/* offset in cmd we are at (for multi-transfer tgt cmds) */
+++	unsigned offset;
++ 
++ 	unsigned underflow;	/* Return error if less than
++ 				   this amount is transferred */
++@@ -148,8 +151,13 @@ struct scsi_cmnd {
++ 
++ 
++ extern struct scsi_cmnd *scsi_get_command(struct scsi_device *, gfp_t);
+++extern struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *, gfp_t);
++ extern void scsi_put_command(struct scsi_cmnd *);
+++extern void __scsi_put_command(struct Scsi_Host *, struct scsi_cmnd *,
+++			       struct device *);
++ extern void scsi_io_completion(struct scsi_cmnd *, unsigned int, unsigned int);
++ extern void scsi_finish_command(struct scsi_cmnd *cmd);
+++extern struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *, gfp_t);
+++extern void scsi_free_sgtable(struct scatterlist *, int);
++ 
++ #endif /* _SCSI_SCSI_CMND_H */
++diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
++index de6ce54..353abe5 100644
++--- a/include/scsi/scsi_host.h
+++++ b/include/scsi/scsi_host.h
++@@ -7,6 +7,7 @@
++ #include &lt;linux/workqueue.h&gt;
++ #include &lt;linux/mutex.h&gt;
++ 
+++struct request_queue;
++ struct block_device;
++ struct completion;
++ struct module;
++@@ -123,6 +124,39 @@ struct scsi_host_template {
++ 			     void (*done)(struct scsi_cmnd *));
++ 
++ 	/*
+++	 * The transfer functions are used to queue a scsi command to
+++	 * the LLD. When the driver is finished processing the command
+++	 * the done callback is invoked.
+++	 *
+++	 * return values: see queuecommand
+++	 *
+++	 * If the LLD accepts the cmd, it should set the result to an
+++	 * appropriate value when completed before calling the done function.
+++	 *
+++	 * STATUS: REQUIRED FOR TARGET DRIVERS
+++	 */
+++	/* TODO: rename */
+++	int (* transfer_response)(struct scsi_cmnd *,
+++				  void (*done)(struct scsi_cmnd *));
+++	/*
+++	 * This is called to inform the LLD to transfer cmd-&gt;request_bufflen
+++	 * bytes of the cmd at cmd-&gt;offset in the cmd. The cmd-&gt;use_sg
+++	 * speciefies the number of scatterlist entried in the command
+++	 * and cmd-&gt;request_buffer contains the scatterlist.
+++	 *
+++	 * If the command cannot be processed in one transfer_data call
+++	 * becuase a scatterlist within the LLD's limits cannot be
+++	 * created then transfer_data will be called multiple times.
+++	 * It is initially called from process context, and later
+++	 * calls are from the interrup context.
+++	 */
+++	int (* transfer_data)(struct scsi_cmnd *,
+++			      void (*done)(struct scsi_cmnd *));
+++
+++	/* Used as callback for the completion of task management request. */
+++	int (* tsk_mgmt_response)(u64 mid, int result);
+++
+++	/*
++ 	 * This is an error handling strategy routine.  You don't need to
++ 	 * define one of these if you don't want to - there is a default
++ 	 * routine that is present that should work in most cases.  For those
++@@ -557,6 +591,12 @@ struct Scsi_Host {
++ 	 */
++ 	unsigned int max_host_blocked;
++ 
+++	/*
+++	 * q used for scsi_tgt msgs, async events or any other requests that
+++	 * need to be processed in userspace
+++ 	 */
+++	struct request_queue *uspace_req_q;
+++
++ 	/* legacy crap */
++ 	unsigned long base;
++ 	unsigned long io_port;
++@@ -659,6 +699,9 @@ extern void scsi_unblock_requests(struct
++ extern void scsi_block_requests(struct Scsi_Host *);
++ 
++ struct class_container;
+++
+++extern struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+++					     void (*) (struct request_queue *));
++ /*
++  * These two functions are used to allocate and free a pseudo device
++  * which will connect to the host adapter itself rather than any
++diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
++new file mode 100644
++index 0000000..61e8ee9
++--- /dev/null
+++++ b/include/scsi/scsi_tgt.h
++@@ -0,0 +1,17 @@
+++/*
+++ * SCSI target definitions
+++ */
+++
+++#include &lt;linux/dma-mapping.h&gt;
+++
+++struct Scsi_Host;
+++struct scsi_cmnd;
+++struct scsi_lun;
+++
+++extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *);
+++extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+++extern int scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, u64);
+++extern int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *, int, u64, struct scsi_lun *,
+++				     void *);
+++extern struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *,
+++					       enum dma_data_direction,	gfp_t);
++diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
++new file mode 100644
++index 0000000..63b2e3a
++--- /dev/null
+++++ b/include/scsi/scsi_tgt_if.h
++@@ -0,0 +1,89 @@
+++/*
+++ * SCSI target kernel/user interface
+++ *
+++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+++ *
+++ * This program is free software; you can redistribute it and/or
+++ * modify it under the terms of the GNU General Public License as
+++ * published by the Free Software Foundation; either version 2 of the
+++ * License, or (at your option) any later version.
+++ *
+++ * This program is distributed in the hope that it will be useful, but
+++ * WITHOUT ANY WARRANTY; without even the implied warranty of
+++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+++ * General Public License for more details.
+++ *
+++ * You should have received a copy of the GNU General Public License
+++ * along with this program; if not, write to the Free Software
+++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+++ * 02110-1301 USA
+++ */
+++#ifndef __SCSI_TARGET_IF_H
+++#define __SCSI_TARGET_IF_H
+++
+++enum tgt_event_type {
+++	/* user -&gt; kernel */
+++	TGT_UEVENT_REQ,
+++	TGT_UEVENT_CMD_RSP,
+++	TGT_UEVENT_TSK_MGMT_RSP,
+++
+++	/* kernel -&gt; user */
+++	TGT_KEVENT_RSP,
+++	TGT_KEVENT_CMD_REQ,
+++	TGT_KEVENT_CMD_DONE,
+++	TGT_KEVENT_TSK_MGMT_REQ,
+++};
+++
+++struct tgt_event {
+++	/* user-&gt; kernel */
+++	union {
+++		struct {
+++			int type;
+++			int host_no;
+++		} event_req;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t len;
+++			int result;
+++			uint64_t uaddr;
+++			uint8_t rw;
+++		} cmd_rsp;
+++		struct {
+++			int host_no;
+++			uint64_t mid;
+++			int result;
+++		} tsk_mgmt_rsp;
+++	} u;
+++
+++	/* kernel -&gt; user */
+++	union {
+++		struct {
+++			int err;
+++		} event_rsp;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t data_len;
+++			uint8_t scb[16];
+++			uint8_t lun[8];
+++			int attribute;
+++			uint64_t tag;
+++		} cmd_req;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			int result;
+++		} cmd_done;
+++		struct {
+++			int host_no;
+++			int function;
+++			uint64_t tag;
+++			uint8_t lun[8];
+++			uint64_t mid;
+++		} tsk_mgmt_req;
+++	} k;
+++
+++} __attribute__ ((aligned (sizeof(uint64_t))));
+++#endif
++-- 
++1.1.3
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000482.html">[Stgt-svn] r495 - trunk/kernel
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#483">[ date ]</a>
+              <a href="thread.html#483">[ thread ]</a>
+              <a href="subject.html#483">[ subject ]</a>
+              <a href="author.html#483">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

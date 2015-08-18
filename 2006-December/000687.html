@@ -1,0 +1,83 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r700 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r700%20-%20trunk/usr&In-Reply-To=%3C200612201248.kBKCmoSL011580%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000686.html">
+   <LINK REL="Next"  HREF="000688.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r700 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r700%20-%20trunk/usr&In-Reply-To=%3C200612201248.kBKCmoSL011580%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r700 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Dec 20 13:48:50 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000686.html">[Stgt-svn] r699 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000688.html">[Stgt-svn] r701 - trunk/patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#687">[ date ]</a>
+              <a href="thread.html#687">[ thread ]</a>
+              <a href="subject.html#687">[ subject ]</a>
+              <a href="author.html#687">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-20 13:48:49 +0100 (Wed, 20 Dec 2006)
+New Revision: 700
+
+Modified:
+   trunk/usr/bd_aio.c
+Log:
+Fix bd_aio_close bug.
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-12-19 23:49:25 UTC (rev 699)
++++ trunk/usr/bd_aio.c	2006-12-20 12:48:49 UTC (rev 700)
+@@ -65,7 +65,6 @@
+ 
+ static void bd_aio_close(struct tgt_device *dev)
+ {
+-	tgt_event_del(dev-&gt;fd);
+ 	close(dev-&gt;fd);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000686.html">[Stgt-svn] r699 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000688.html">[Stgt-svn] r701 - trunk/patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#687">[ date ]</a>
+              <a href="thread.html#687">[ thread ]</a>
+              <a href="subject.html#687">[ subject ]</a>
+              <a href="author.html#687">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

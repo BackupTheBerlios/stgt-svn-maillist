@@ -1,0 +1,233 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r181 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r181%20-%20trunk/kernel&In-Reply-To=%3C200511181212.jAICCE5R001563%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000169.html">
+   <LINK REL="Next"  HREF="000171.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r181 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r181%20-%20trunk/kernel&In-Reply-To=%3C200511181212.jAICCE5R001563%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r181 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Nov 18 13:12:14 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000169.html">[Stgt-svn] r179 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000171.html">[Stgt-svn] r182 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#170">[ date ]</a>
+              <a href="thread.html#170">[ thread ]</a>
+              <a href="subject.html#170">[ subject ]</a>
+              <a href="author.html#170">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-18 13:11:42 +0100 (Fri, 18 Nov 2005)
+New Revision: 181
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+Log:
+Create tgt_queuedata (and remove protocol-specific queuedata) for device lifetime management.
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-11-18 11:32:05 UTC (rev 180)
++++ trunk/kernel/tgt.c	2005-11-18 12:11:42 UTC (rev 181)
+@@ -212,11 +212,9 @@
+ 	if (!q)
+ 		return -ENOMEM;
+ 
+-	if (proto-&gt;priv_queuedata_size) {
+-		q-&gt;queuedata = kzalloc(proto-&gt;priv_queuedata_size, GFP_KERNEL);
+-		if (!q-&gt;queuedata)
+-			goto out;
+-	}
++	q-&gt;queuedata = kzalloc(sizeof(struct tgt_queuedata), GFP_KERNEL);
++	if (!q-&gt;queuedata)
++		goto out;
+ 
+ 	/*
+ 	 * this is a tmp hack: we do not register this queue
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-11-18 11:32:05 UTC (rev 180)
++++ trunk/kernel/tgt.h	2005-11-18 12:11:42 UTC (rev 181)
+@@ -66,6 +66,16 @@
+ 	unsigned long proto_priv[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
++enum {
++	TGT_QUEUE_DEL,
++	TGT_QUEUE_PRIVATE_START,
++};
++
++struct tgt_queuedata {
++	int active_cmd; /* should we use q-&gt;in_flight? */
++	unsigned long qflags;
++};
++
+ extern struct tgt_session *
+ tgt_session_create(struct tgt_target *target,
+ 		   int max_cmds,
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-11-18 11:32:05 UTC (rev 180)
++++ trunk/kernel/tgt_protocol.h	2005-11-18 12:11:42 UTC (rev 181)
+@@ -26,7 +26,6 @@
+ 
+ 	kmem_cache_t *cmd_cache;
+ 	unsigned uspace_pdu_size;
+-	unsigned priv_queuedata_size;
+ 
+ 	char *elevator;
+ 	/*
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-11-18 11:32:05 UTC (rev 180)
++++ trunk/kernel/tgt_scsi.c	2005-11-18 12:11:42 UTC (rev 181)
+@@ -19,17 +19,16 @@
+ 
+ static kmem_cache_t *scsi_tgt_cmd_cache;
+ 
+-struct tgt_scsi_queuedata {
+-	int nr_active; /* Can we use q-&gt;in_flight? */
+-	int blocked;
++enum {
++	TGT_SCSI_QUEUE_BLOCKED = TGT_QUEUE_PRIVATE_START,
+ };
+ 
+ static struct request *elevator_tgt_scsi_next_request(request_queue_t *q)
+ {
+ 	struct request *rq;
+-	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
+ 	struct scsi_tgt_cmd *scmd;
+ 	int enabled = 0;
++	struct tgt_queuedata *tqd = q-&gt;queuedata;
+ 
+ 	if (list_empty(&amp;q-&gt;queue_head))
+ 		return NULL;
+@@ -37,14 +36,15 @@
+ 	rq = list_entry_rq(q-&gt;queue_head.next);
+ 
+ 	scmd = tgt_cmd_to_scsi(rq-&gt;special);
+-	dprintk(&quot;%p %x %x %d %d\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
+-		sqdata-&gt;blocked, sqdata-&gt;nr_active);
++	dprintk(&quot;%p %x %x %llx %d\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
++		(unsigned long long) tqd-&gt;qflags, tqd-&gt;active_cmd);
+ 	switch (scmd-&gt;tags) {
+ 	case MSG_SIMPLE_TAG:
+-		if (!sqdata-&gt;blocked)
++		if (!test_bit(TGT_SCSI_QUEUE_BLOCKED, &amp;tqd-&gt;qflags))
+ 			enabled = 1;
+ 	case MSG_ORDERED_TAG:
+-		if (!sqdata-&gt;blocked &amp;&amp; !sqdata-&gt;nr_active)
++		if (!test_bit(TGT_SCSI_QUEUE_BLOCKED, &amp;tqd-&gt;qflags) &amp;&amp;
++		    !tqd-&gt;active_cmd)
+ 			enabled = 1;
+ 		break;
+ 	case MSG_HEAD_TAG:
+@@ -82,18 +82,18 @@
+ static void elevator_tgt_scsi_remove_request(request_queue_t *q,
+ 					     struct request *rq)
+ {
+-	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
++	struct tgt_queuedata *tqd = q-&gt;queuedata;
+ 	struct tgt_cmd *cmd = rq-&gt;special;
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 
+-	sqdata-&gt;nr_active++;
++	tqd-&gt;active_cmd++;
+ 
+-	dprintk(&quot;%p %x %x %d %d %llu\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
+-		sqdata-&gt;blocked, sqdata-&gt;nr_active,
++	dprintk(&quot;%p %x %x %llx %d %llu\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
++		(unsigned long long) tqd-&gt;qflags, tqd-&gt;active_cmd,
+ 		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
+ 
+ 	if (scmd-&gt;tags == MSG_ORDERED_TAG || scmd-&gt;tags == MSG_HEAD_TAG)
+-		sqdata-&gt;blocked = 1;
++		set_bit(TGT_SCSI_QUEUE_BLOCKED, &amp;tqd-&gt;qflags);
+ }
+ 
+ static struct elevator_type elevator_tgt_scsi = {
+@@ -109,20 +109,20 @@
+ static void scsi_tgt_complete_cmd(struct tgt_cmd *cmd)
+ {
+ 	struct request_queue *q = cmd-&gt;rq-&gt;q;
+-	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
++	struct tgt_queuedata *tqd = q-&gt;queuedata;
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 	unsigned long flags;
+ 
+-	dprintk(&quot;%p %x %x %d %d %llu\n&quot;, cmd, scmd-&gt;tags, scmd-&gt;scb[0],
+-		sqdata-&gt;blocked, sqdata-&gt;nr_active,
++	dprintk(&quot;%p %x %x %llx %d %llu\n&quot;, cmd, scmd-&gt;tags, scmd-&gt;scb[0],
++		(unsigned long long) tqd-&gt;qflags, tqd-&gt;active_cmd,
+ 		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
+ 
+ 	spin_lock_irqsave(q-&gt;queue_lock, flags);
+ 
+-	sqdata-&gt;nr_active--;
++	tqd-&gt;active_cmd--;
+ 
+ 	if (scmd-&gt;tags == MSG_ORDERED_TAG || scmd-&gt;tags == MSG_HEAD_TAG)
+-		sqdata-&gt;blocked = 0;
++		clear_bit(TGT_SCSI_QUEUE_BLOCKED, &amp;tqd-&gt;qflags);
+ 
+ 	blk_plug_device(q);
+ 
+@@ -281,7 +281,6 @@
+ 	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
+ 	.execute_cmd = scsi_tgt_execute_cmd,
+ 	.complete_cmd = scsi_tgt_complete_cmd,
+-	.priv_queuedata_size = sizeof(struct tgt_scsi_queuedata),
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000169.html">[Stgt-svn] r179 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000171.html">[Stgt-svn] r182 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#170">[ date ]</a>
+              <a href="thread.html#170">[ thread ]</a>
+              <a href="subject.html#170">[ subject ]</a>
+              <a href="author.html#170">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,425 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r348 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r348%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603012341.k21NfVav020315%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000336.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r348 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r348%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603012341.k21NfVav020315%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r348 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Mar  2 00:41:31 CET 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000336.html">[Stgt-svn] r349 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#335">[ date ]</a>
+              <a href="thread.html#335">[ thread ]</a>
+              <a href="subject.html#335">[ subject ]</a>
+              <a href="author.html#335">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-02 00:41:28 +0100 (Thu, 02 Mar 2006)
+New Revision: 348
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+   branches/use-scsi-ml/usr/util.h
+Log:
+Remove all the ancient code in scsi.c for target and device structures
+in kernel space (that is, sysfs). We still use directories and files
+to share information between tgtd and tgtadm. Should we replace it
+with other mechanisms too?
+
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-28 12:28:01 UTC (rev 347)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-01 23:41:28 UTC (rev 348)
+@@ -29,7 +29,6 @@
+ #include &lt;sys/types.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
+-#include &quot;tgt_sysfs.h&quot;
+ 
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+@@ -59,26 +58,6 @@
+ #define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+ #define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
+ 
+-static int device_info(int tid, uint64_t lun, uint64_t *size)
+-{
+-	int fd, err;
+-	char path[PATH_MAX], buf[128];
+-
+-	sprintf(path, TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;,
+-		tid, lun);
+-
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0)
+-		return fd;
+-	err = read(fd, buf, sizeof(buf));
+-	if (err &lt; 0)
+-		return err;
+-	*size = strtoull(buf, NULL, 10);
+-
+-	close(fd);
+-	return 0;
+-}
+-
+ static int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 		      uint8_t ascode, uint8_t ascodeq)
+ {
+@@ -295,21 +274,19 @@
+ 	return sizeof(*id);
+ }
+ 
+-static int inquiry(int host_no, int tid, uint8_t *lun_buf,
++static int inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+ 		   uint8_t *scb, uint8_t *data, int *len)
+ {
+-	uint64_t size, lun;
+-	int err, result = SAM_STAT_CHECK_CONDITION;
++	uint64_t lun;
++	int result = SAM_STAT_CHECK_CONDITION;
+ 
+ 	lun = scsi_get_devid(lun_buf);
+ 
+ 	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+ 		goto err;
+ 
+-	err = device_info(tid, lun, &amp;size);
++	dprintf(&quot;%&quot; PRIx64 &quot; %x %x\n&quot;, lun, scb[1], scb[2]);
+ 
+-	dprintf(&quot;%&quot; PRIx64 &quot; %d %x %x\n&quot;, lun, err, scb[1], scb[2]);
+-
+ 	if (!(scb[1] &amp; 0x3)) {
+ 		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
+ #if 0
+@@ -357,7 +334,6 @@
+ 			*len = 8;
+ 			result = SAM_STAT_GOOD;
+ 		} else if (scb[2] == 0x83) {
+-#define SCSI_ID_LEN	24
+ 			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
+ 
+ 			data[1] = 0x83;
+@@ -365,8 +341,8 @@
+ 			data[4] = 0x1;
+ 			data[5] = 0x1;
+ 			data[7] = tmp;
+-			if (err &lt; 0)
+-				sprintf(data + 8, &quot;deadbeaf%d:%&quot; PRIu64, tid, lun);
++			if (dev)
++				strncpy(data + 8, dev-&gt;scsi_id, SCSI_ID_LEN);
+ 			*len = tmp + 8;
+ 			result = SAM_STAT_GOOD;
+ 		}
+@@ -377,7 +353,7 @@
+ 
+ 	*len = min_t(int, *len, scb[4]);
+ 
+-	if (err &lt; 0) {
++	if (!dev) {
+ 		dprintf(&quot;%&quot; PRIu64 &quot;\n&quot;, lun);
+ 		data[0] = TYPE_NO_LUN;
+ 	}
+@@ -390,37 +366,28 @@
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int report_luns(int tid, uint8_t *lun_buf, uint8_t *scb, uint8_t *p,
+-		       int *len)
++static int report_luns(struct qelem *dev_list, uint8_t *lun_buf, uint8_t *scb,
++		       uint8_t *p, int *len)
+ {
++	struct tgt_device *dev;
+ 	uint64_t lun, *data = (uint64_t *) p;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096;
+-	DIR *dir;
+-	struct dirent *ent;
+-	char buf[128];
+ 	int result = SAM_STAT_GOOD;
+ 
+ 	memset(data, 0, rbuflen);
+ 
+-	dir = opendir(TGT_DEVICE_SYSFSDIR);
+-	if (!dir) {
+-		eprintf(&quot;can't open %s %d\n&quot;, TGT_DEVICE_SYSFSDIR, errno);
+-		exit(0);
+-	}
+-
+ 	alen = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+ 	if (alen &lt; 16) {
+ 		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+-		result = SAM_STAT_CHECK_CONDITION;
+-		goto out;
++		return SAM_STAT_CHECK_CONDITION;
+ 	}
+ 
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+ 
+ 	if ((*((uint64_t *) lun_buf))) {
+-		eprintf(&quot;Another sick hack for ibmvstgt\n&quot;);
++		dprintf(&quot;Another sick hack for ibmvstgt\n&quot;);
+ 		nr_luns = 1;
+ 		goto done;
+ 	}
+@@ -434,30 +401,26 @@
+ 	idx = 2;
+ 	nr_luns = 1;
+ 
+-	sprintf(buf, &quot;device%d:&quot;, tid);
+-	while ((ent = readdir(dir))) {
+-		if (!strncmp(ent-&gt;d_name, buf, strlen(buf))) {
+-			sscanf(ent-&gt;d_name, &quot;device%d:%&quot; SCNu64, &amp;tid, &amp;lun);
++	list_for_each_entry(dev, dev_list, dlist) {
++		lun = dev-&gt;lun;
+ 
+-			lun = (0x8000 | (lun &amp; 0x001f)) &lt;&lt; 48;
+-			dprintf(&quot;%d %&quot; PRIx64 &quot;\n&quot;, tid, lun);
+-
+-			data[idx++] = cpu_to_be64(lun);
+-			if (!(alen -= 8))
+-				break;
+-			if (!(rbuflen -= 8)) {
+-				fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
+-				exit(-1);
+-			}
+-			nr_luns++;
++		/* ibmvstgt hack */
++		lun = (0x8000 | (lun &amp; 0x001f)) &lt;&lt; 48;
++		dprintf(&quot;%&quot; PRIx64 &quot;\n&quot;, lun);
++		data[idx++] = cpu_to_be64(lun);
++		if (!(alen -= 8))
++			break;
++		if (!(rbuflen -= 8)) {
++			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
++			exit(-1);
+ 		}
++		nr_luns++;
+ 	}
+ 
+ done:
+ 	*((uint32_t *) data) = cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+-out:
+-	closedir(dir);
++
+ 	return result;
+ }
+ 
+@@ -639,10 +602,10 @@
+ 	return lun;
+ }
+ 
+-int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
++int scsi_cmd_process(int host_no, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+-		     struct tgt_device *dev)
++		     struct tgt_device *dev, struct qelem *dev_list)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t *data = NULL, *scb = pdu;
+@@ -650,7 +613,7 @@
+ 
+ 	lun = scsi_get_devid(lun_buf);
+ 
+-	dprintf(&quot;%d %&quot; PRIu64 &quot; %x %u\n&quot;, tid, lun, scb[0], datalen);
++	dprintf(&quot;%&quot; PRIu64 &quot; %x %u\n&quot;, lun, scb[0], datalen);
+ 
+ 	*offset = 0;
+ 	if (!mmap_cmd_init(scb, rw))
+@@ -674,10 +637,10 @@
+ 
+ 	switch (scb[0]) {
+ 	case INQUIRY:
+-		result = inquiry(host_no, tid, lun_buf, scb, data, len);
++		result = inquiry(dev, host_no, lun_buf, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
+-		result = report_luns(tid, lun_buf, scb, data, len);
++		result = report_luns(dev_list, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+ 		result = read_capacity(dev, scb, data, len);
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-28 12:28:01 UTC (rev 347)
++++ branches/use-scsi-ml/usr/target.c	2006-03-01 23:41:28 UTC (rev 348)
+@@ -58,8 +58,10 @@
+ 
+ struct target {
+ 	int tid;
++
++	uint64_t max_device;
+ 	struct tgt_device **devt;
+-	uint64_t max_device;
++	struct qelem device_list;
+ 
+ 	/* TODO: move to device */
+ 	struct qelem cqueue;
+@@ -171,6 +173,19 @@
+ 	return 0;
+ }
+ 
++static void tgt_device_link(struct target *target, struct tgt_device *dev)
++{
++	struct tgt_device *ent;
++	struct qelem *pos;
++
++	list_for_each(pos, &amp;target-&gt;device_list) {
++		ent = list_entry(pos, struct tgt_device, dlist);
++		if (dev-&gt;lun &lt; ent-&gt;lun)
++			break;
++	}
++	insque(&amp;dev-&gt;dlist, pos);
++}
++
+ int tgt_device_create(int tid, uint64_t dev_id, char *path)
+ {
+ 	struct target *target;
+@@ -217,6 +232,7 @@
+ 	device-&gt;state = 0;
+ 	device-&gt;addr = try_mmap_device(dev_fd, size);
+ 	device-&gt;size = size;
++	device-&gt;lun = dev_id;
+ 	snprintf(device-&gt;scsi_id, sizeof(device-&gt;scsi_id),
+ 		 &quot;deadbeaf%d:%&quot; PRIu64, tid, dev_id);
+ 	target-&gt;devt[dev_id] = device;
+@@ -225,6 +241,8 @@
+ 		eprintf(&quot;Succeed to mmap the device %&quot; PRIx64 &quot;\n&quot;,
+ 			device-&gt;addr);
+ 
++	tgt_device_link(target, device);
++
+ 	eprintf(&quot;Succeed to add a logical unit %&quot; PRIu64 &quot; to the target %d\n&quot;,
+ 		dev_id, tid);
+ 
+@@ -299,6 +317,8 @@
+ 
+ 	device_dir_remove(tid, dev_id);
+ 
++	remque(&amp;device-&gt;dlist);
++
+ 	free(device);
+ 	return err;
+ }
+@@ -361,10 +381,11 @@
+ 	if (device)
+ 		uaddr = target-&gt;devt[dev_id]-&gt;addr;
+ 
+-	result = scsi_cmd_process(host_no, target-&gt;tid, ev_req-&gt;k.cmd_req.scb,
++	result = scsi_cmd_process(host_no, ev_req-&gt;k.cmd_req.scb,
+ 				  &amp;len, ev_req-&gt;k.cmd_req.data_len,
+ 				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset,
+-				  ev_req-&gt;k.cmd_req.lun, device);
++				  ev_req-&gt;k.cmd_req.lun, device,
++				  &amp;target-&gt;device_list);
+ 
+ 	dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+ 		cid, ev_req-&gt;k.cmd_req.scb[0], uaddr, offset, result);
+@@ -560,6 +581,8 @@
+ 	if (err &lt; 0)
+ 		goto free_device_table;
+ 
++	INIT_LIST_HEAD(&amp;target-&gt;device_list);
++
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+ 	tgtt[tid] = target;
+ 	return 0;
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-28 12:28:01 UTC (rev 347)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-01 23:41:28 UTC (rev 348)
+@@ -11,12 +11,12 @@
+ 	int fd;
+ 	uint64_t addr; /* persistent mapped address */
+ 	uint64_t size;
++	uint64_t lun;
+ 	unsigned long state;
+ 	char scsi_id[SCSI_ID_LEN];
++	struct qelem dlist;
+ 
+-	struct qelem cmd_list;
+-
+-	struct tgt_device *next_device;
++	struct qelem cmd_queue;
+ };
+ 
+ /* makeshift */
+@@ -38,9 +38,9 @@
+ extern int tgt_target_bind(int tid, int host_no);
+ 
+ extern uint64_t scsi_get_devid(uint8_t *pdu);
+-extern int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
++extern int scsi_cmd_process(int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+-			    struct tgt_device *dev);
++			    struct tgt_device *dev, struct qelem *dev_list);
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/usr/util.h
+===================================================================
+--- branches/use-scsi-ml/usr/util.h	2006-02-28 12:28:01 UTC (rev 347)
++++ branches/use-scsi-ml/usr/util.h	2006-03-01 23:41:28 UTC (rev 348)
+@@ -22,6 +22,9 @@
+ #define list_entry(ptr, type, member) \
+ 	container_of(ptr, type, member)
+ 
++#define list_for_each(pos, head) \
++	for (pos = (head)-&gt;q_forw; pos != (head); pos = pos-&gt;q_forw)
++
+ #define list_for_each_entry(pos, head, member)				\
+ 	for (pos = list_entry((head)-&gt;q_forw, typeof(*pos), member);	\
+ 	     &amp;pos-&gt;member != (head); 	\
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000336.html">[Stgt-svn] r349 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#335">[ date ]</a>
+              <a href="thread.html#335">[ thread ]</a>
+              <a href="subject.html#335">[ subject ]</a>
+              <a href="author.html#335">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

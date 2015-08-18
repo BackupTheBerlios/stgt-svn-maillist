@@ -1,0 +1,82 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r404 - branches/use-scsi-ml
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r404%20-%20branches/use-scsi-ml&In-Reply-To=%3C200604140526.k3E5QQGW012750%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000390.html">
+   <LINK REL="Next"  HREF="000392.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r404 - branches/use-scsi-ml</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r404%20-%20branches/use-scsi-ml&In-Reply-To=%3C200604140526.k3E5QQGW012750%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r404 - branches/use-scsi-ml">tomo at berlios.de
+       </A><BR>
+    <I>Fri Apr 14 07:26:26 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000390.html">[Stgt-svn] r403 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000392.html">[Stgt-svn] r405 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#391">[ date ]</a>
+              <a href="thread.html#391">[ thread ]</a>
+              <a href="subject.html#391">[ subject ]</a>
+              <a href="author.html#391">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-14 07:26:21 +0200 (Fri, 14 Apr 2006)
+New Revision: 404
+
+Modified:
+   branches/use-scsi-ml/ibmv
+Log:
+Update the makeshift ibmvstgt script.
+
+Modified: branches/use-scsi-ml/ibmv
+===================================================================
+--- branches/use-scsi-ml/ibmv	2006-04-14 05:24:56 UTC (rev 403)
++++ branches/use-scsi-ml/ibmv	2006-04-14 05:26:21 UTC (rev 404)
+@@ -6,5 +6,5 @@
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ 
+ ${PWD}/usr/tgtadm --driver ibmvstgt --op new --tid 1
+-${PWD}/usr/tgtadm --driver ibmvstgt --op bind --tid 1 --hostno $1
++${PWD}/usr/tgtadm --driver ibmvstgt --op bind --tid 1 --bus vio,30000003
+ ${PWD}/usr/tgtadm --driver ibmvstgt --op new --tid 1 --lun 0 --params Path=/dev/sdb1
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000390.html">[Stgt-svn] r403 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000392.html">[Stgt-svn] r405 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#391">[ date ]</a>
+              <a href="thread.html#391">[ thread ]</a>
+              <a href="subject.html#391">[ subject ]</a>
+              <a href="author.html#391">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

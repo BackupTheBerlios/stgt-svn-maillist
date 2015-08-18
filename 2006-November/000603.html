@@ -1,0 +1,102 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r616 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r616%20-%20trunk/usr&In-Reply-To=%3C200611051544.kA5Figku016805%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000602.html">
+   <LINK REL="Next"  HREF="000604.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r616 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r616%20-%20trunk/usr&In-Reply-To=%3C200611051544.kA5Figku016805%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r616 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov  5 16:44:42 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000602.html">[Stgt-svn] r615 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000604.html">[Stgt-svn] r617 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#603">[ date ]</a>
+              <a href="thread.html#603">[ thread ]</a>
+              <a href="subject.html#603">[ subject ]</a>
+              <a href="author.html#603">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-05 16:44:42 +0100 (Sun, 05 Nov 2006)
+New Revision: 616
+
+Modified:
+   trunk/usr/bd_aio.c
+Log:
+From: Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+
+io_submit uses iocb on the stack so io_getevents returns bogus values.
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-11-03 16:02:52 UTC (rev 615)
++++ trunk/usr/bd_aio.c	2006-11-05 15:44:42 UTC (rev 616)
+@@ -65,7 +65,7 @@
+ 	struct tgt_device *dev;
+ 	struct bd_aio_info *bai;
+ 	int i, nr;
+-	struct iocb *iocb;
++/* 	struct iocb *iocb; */
+ 
+ 	dev = (struct tgt_device *) data;
+ 	bai = (struct bd_aio_info *) dev-&gt;bddata;
+@@ -73,9 +73,11 @@
+ 	nr = io_getevents(bai-&gt;ctx, 0, MAX_AIO_REQS, bai-&gt;events, NULL);
+ 
+ 	for (i = 0; i &lt; nr; i++) {
+-		iocb = bai-&gt;events[i].obj;
+-		dprintf(&quot;%p %p\n&quot;, iocb, iocb-&gt;data);
+-		target_cmd_io_done(iocb-&gt;data, 0);
++/* 		iocb = bai-&gt;events[i].obj; */
++/* 		dprintf(&quot;%p %p\n&quot;, iocb, iocb-&gt;data); */
++/* 		target_cmd_io_done(iocb-&gt;data, 0); */
++		dprintf(&quot;%p\n&quot;, bai-&gt;events[i].data);
++		target_cmd_io_done(bai-&gt;events[i].data, 0);
+ 	}
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000602.html">[Stgt-svn] r615 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000604.html">[Stgt-svn] r617 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#603">[ date ]</a>
+              <a href="thread.html#603">[ thread ]</a>
+              <a href="subject.html#603">[ subject ]</a>
+              <a href="author.html#603">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,268 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r387 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r387%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603141445.k2EEjN6v021525%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000373.html">
+   <LINK REL="Next"  HREF="000375.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r387 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r387%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603141445.k2EEjN6v021525%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r387 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Mar 14 15:45:23 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000373.html">[Stgt-svn] r386 - branches/use-scsi-ml/patchset
+</A></li>
+        <LI>Next message: <A HREF="000375.html">[Stgt-svn] r388 - branches/use-scsi-ml/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#374">[ date ]</a>
+              <a href="thread.html#374">[ thread ]</a>
+              <a href="subject.html#374">[ subject ]</a>
+              <a href="author.html#374">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-14 15:45:22 +0100 (Tue, 14 Mar 2006)
+New Revision: 387
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+Log:
+Add ABORT_TASK_SET and LOGICAL_UNIT_RESET TMF support (but not tested at all yet).
+
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-14 11:34:02 UTC (rev 386)
++++ branches/use-scsi-ml/usr/target.c	2006-03-14 14:45:22 UTC (rev 387)
+@@ -62,9 +62,14 @@
+ enum {
+ 	TGT_CMD_QUEUED,
+ 	TGT_CMD_PROCESSED,
+-	TGT_CMD_MGMT,
+ };
+ 
++struct mgmt_req {
++	uint64_t mid;
++	int busy;
++	int function;
++};
++
+ struct cmd {
+ 	struct list_head hlist;
+ 	struct list_head qlist;
+@@ -75,7 +80,6 @@
+ 	int mmapped;
+ 	struct tgt_device *dev;
+ 	unsigned long state;
+-	uint64_t mid;
+ 
+ 	/* Kill the followings when we use shared memory instead of netlink. */
+ 	int hostno;
+@@ -84,6 +88,7 @@
+ 	uint8_t lun[8];
+ 	int attribute;
+ 	uint64_t tag;
++	struct mgmt_req *mreq;
+ };
+ 
+ struct target {
+@@ -140,7 +145,6 @@
+ 
+ CMD_FNS(QUEUED, queued)
+ CMD_FNS(PROCESSED, processed)
+-CMD_FNS(MGMT, mgmt)
+ 
+ 
+ static struct target *target_get(int tid)
+@@ -575,6 +579,7 @@
+ {
+ 	struct target *target;
+ 	struct cmd *cmd;
++	struct mgmt_req *mreq;
+ 	int host_no = ev-&gt;k.cmd_done.host_no;
+ 	uint32_t cid = ev-&gt;k.cmd_done.cid;
+ 
+@@ -590,76 +595,116 @@
+ 		return;
+ 	}
+ 
+-	if (cmd_mgmt(cmd))
+-		tgt_kspace_send_tsk_mgmt(nl_fd, cmd-&gt;hostno, cmd-&gt;mid, -EEXIST);
++	mreq = cmd-&gt;mreq;
++	if (mreq &amp;&amp; !--mreq-&gt;busy) {
++		int err = mreq-&gt;function == ABORT_TASK ? -EEXIST : 0;
++		tgt_kspace_send_tsk_mgmt(nl_fd, cmd-&gt;hostno, mreq-&gt;mid, err);
++		free(mreq);
++	}
++
+ 	__cmd_done(target, cmd, nl_fd);
+ }
+ 
+-static int abort_task_by_tag(struct target* target, uint64_t tag, uint64_t mid,
+-			     int nl_fd)
++static int abort_cmd(struct target* target, struct mgmt_req *mreq,
++		     struct cmd *cmd, int nl_fd)
+ {
+-	struct cmd *cmd, *tmp;
++	int err = 0;
+ 
+-	eprintf(&quot;found %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, tag, mid);
++	eprintf(&quot;found %&quot; PRIx64 &quot; %lx\n&quot;, cmd-&gt;tag, cmd-&gt;state);
+ 
+-	list_for_each_entry_safe(cmd, tmp, &amp;target-&gt;cmd_list, clist) {
+-		if (cmd-&gt;tag == tag)
+-			goto found;
+-	}
+-	return -EEXIST;
+-
+-found:
+-	eprintf(&quot;found %&quot; PRIx64 &quot; %lx\n&quot;, cmd-&gt;tag, cmd-&gt;state);
+ 	if (cmd_processed(cmd)) {
+ 		/*
+ 		 * We've already sent this command to kernel space.
+ 		 * We'll send the tsk mgmt response when we get the
+ 		 * completion of this command.
+ 		 */
+-		set_cmd_mgmt(cmd);
+-		cmd-&gt;mid = mid;
+-		return -EBUSY;
++		cmd-&gt;mreq = mreq;
++		err = -EBUSY;
+ 	} else {
+ 		__cmd_done(target, cmd, nl_fd);
+ 		tgt_kspace_send_cmd(nl_fd, cmd, TASK_ABORTED, 0);
+ 	}
++	return err;
++}
+ 
+-	return 0;
++static int abort_task_set(struct mgmt_req *mreq, struct target* target, int host_no,
++			  uint64_t tag, uint8_t *lun, int all, int nl_fd)
++{
++	struct cmd *cmd, *tmp;
++	int err, count = 0;
++
++	eprintf(&quot;found %&quot; PRIx64 &quot; %d\n&quot;, tag, all);
++
++	list_for_each_entry_safe(cmd, tmp, &amp;target-&gt;cmd_list, clist) {
++		if ((all &amp;&amp; cmd-&gt;hostno == host_no)||
++		    (cmd-&gt;tag == tag &amp;&amp; cmd-&gt;hostno == host_no) ||
++		    (lun &amp;&amp; !memcmp(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun)))) {
++			err = abort_cmd(target, mreq, cmd, nl_fd);
++			if (err)
++				mreq-&gt;busy++;
++			count++;
++		}
++	}
++
++	return count;
+ }
+ 
+ static void tsk_mgmt_req(struct tgt_event *ev_req, int nl_fd)
+ {
+ 	struct target *target;
+-	int err = 0, send = 1;
++	struct mgmt_req *mreq;
++	int err = 0, count, send = 1;
++	int host_no = ev_req-&gt;k.cmd_req.host_no;
+ 
+-	target = host_to_target(ev_req-&gt;k.cmd_req.host_no);
++	target = host_to_target(host_no);
+ 	if (!target) {
+ 		eprintf(&quot;%d is not bind to any target\n&quot;,
+ 			ev_req-&gt;k.cmd_req.host_no);
+ 		return;
+ 	}
+ 
+-	switch (ev_req-&gt;k.tsk_mgmt_req.function) {
++	mreq = calloc(1, sizeof(*mreq));
++	mreq-&gt;mid = ev_req-&gt;k.tsk_mgmt_req.mid;
++	mreq-&gt;function = ev_req-&gt;k.tsk_mgmt_req.function;
++
++	switch (mreq-&gt;function) {
+ 	case ABORT_TASK:
+-		err = abort_task_by_tag(target, ev_req-&gt;k.tsk_mgmt_req.tag,
+-					ev_req-&gt;k.tsk_mgmt_req.mid, nl_fd);
+-		if (err == -EBUSY)
++		count = abort_task_set(mreq, target, host_no,
++				       ev_req-&gt;k.tsk_mgmt_req.tag,
++				       NULL, 0, nl_fd);
++		if (mreq-&gt;busy)
+ 			send = 0;
++		if (!count)
++			err = -EEXIST;
+ 		break;
+ 	case ABORT_TASK_SET:
++		count = abort_task_set(mreq, target, host_no, 0, NULL, 1, nl_fd);
++		if (mreq-&gt;busy)
++			send = 0;
++		break;
+ 	case CLEAR_ACA:
+ 	case CLEAR_TASK_SET:
+-	case LOGICAL_UNIT_RESET:
+ 		eprintf(&quot;Not supported yet %x\n&quot;,
+ 			ev_req-&gt;k.tsk_mgmt_req.function);
++		err = -EINVAL;
+ 		break;
++	case LOGICAL_UNIT_RESET:
++		count = abort_task_set(mreq, target, host_no, 0,
++				       ev_req-&gt;k.tsk_mgmt_req.lun, 0, nl_fd);
++		if (mreq-&gt;busy)
++			send = 0;
++		break;
+ 	default:
++		err = -EINVAL;
+ 		eprintf(&quot;Unknown task management %x\n&quot;,
+ 			ev_req-&gt;k.tsk_mgmt_req.function);
+ 	}
+ 
+-	tgt_kspace_send_tsk_mgmt(nl_fd, ev_req-&gt;k.cmd_req.host_no,
+-				 ev_req-&gt;k.tsk_mgmt_req.mid, err);
++	if (send) {
++		tgt_kspace_send_tsk_mgmt(nl_fd, ev_req-&gt;k.cmd_req.host_no,
++					 ev_req-&gt;k.tsk_mgmt_req.mid, err);
++		free(mreq);
++	}
+ }
+ 
+ void nl_event_handle(int nl_fd)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000373.html">[Stgt-svn] r386 - branches/use-scsi-ml/patchset
+</A></li>
+	<LI>Next message: <A HREF="000375.html">[Stgt-svn] r388 - branches/use-scsi-ml/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#374">[ date ]</a>
+              <a href="thread.html#374">[ thread ]</a>
+              <a href="subject.html#374">[ subject ]</a>
+              <a href="author.html#374">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

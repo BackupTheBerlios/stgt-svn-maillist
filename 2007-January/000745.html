@@ -1,0 +1,340 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r758 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r758%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701060943.l069hIBP019564%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000744.html">
+   <LINK REL="Next"  HREF="000746.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r758 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r758%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701060943.l069hIBP019564%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r758 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 10:43:18 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000744.html">[Stgt-svn] r757 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000746.html">[Stgt-svn] r759 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#745">[ date ]</a>
+              <a href="thread.html#745">[ thread ]</a>
+              <a href="subject.html#745">[ subject ]</a>
+              <a href="author.html#745">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 10:43:17 +0100 (Sat, 06 Jan 2007)
+New Revision: 758
+
+Modified:
+   trunk/usr/iscsi/iscsi_tcp.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Improve show operation.
+
+
+Modified: trunk/usr/iscsi/iscsi_tcp.c
+===================================================================
+--- trunk/usr/iscsi/iscsi_tcp.c	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/iscsi/iscsi_tcp.c	2007-01-06 09:43:17 UTC (rev 758)
+@@ -196,7 +196,7 @@
+ 		return 0;
+ 	}
+ 
+-	total = snprintf(buf, rest, &quot; ip:%s\n&quot;, dst);
++	total = snprintf(buf, rest, &quot;IP Address: %s&quot;, dst);
+ 
+ 	return total &gt; 0 ? total : 0;
+ }
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/iscsi/iscsid.h	2007-01-06 09:43:17 UTC (rev 758)
+@@ -79,6 +79,8 @@
+ 	uint32_t exp_cmd_sn;
+ 
+ 	struct param session_param[ISCSI_PARAM_MAX];
++
++	char *info;
+ };
+ 
+ struct iscsi_task {
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/iscsi/session.c	2007-01-06 09:43:17 UTC (rev 758)
+@@ -56,6 +56,7 @@
+ 	struct iscsi_session *session = NULL;
+ 	static uint16_t tsih, last_tsih = 0;
+ 	struct iscsi_target *target;
++	char addr[128];
+ 
+ 	target = target_find_by_id(conn-&gt;tid);
+ 	if (!target)
+@@ -81,9 +82,24 @@
+ 		return -ENOMEM;
+ 	}
+ 
+-	err = it_nexus_create(target-&gt;tid, tsih);
++	session-&gt;info = zalloc(1024);
++	if (!session-&gt;info) {
++		free(session-&gt;initiator);
++		free(session);
++		return -ENOMEM;
++	}
++
++	memset(addr, 0, sizeof(addr));
++	conn-&gt;tp-&gt;ep_show(conn-&gt;fd, addr, sizeof(addr));
++
++	snprintf(session-&gt;info, 1024, TAB3 &quot;Initiator: %s\n&quot;
++		 TAB3 &quot;Connection: %u\n&quot;
++		 TAB4 &quot;%s\n&quot;, session-&gt;initiator, conn-&gt;cid, addr);
++
++	err = it_nexus_create(target-&gt;tid, tsih, session-&gt;info);
+ 	if (err) {
+ 		free(session-&gt;initiator);
++		free(session-&gt;info);
+ 		free(session);
+ 		return err;
+ 	}
+@@ -129,6 +145,7 @@
+ 	list_del(&amp;session-&gt;hlist);
+ 
+ 	free(session-&gt;initiator);
++	free(session-&gt;info);
+ 	free(session);
+ }
+ 
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/iscsi/target.c	2007-01-06 09:43:17 UTC (rev 758)
+@@ -337,42 +337,6 @@
+ 	return total;
+ }
+ 
+-static int iscsi_target_show_connection(struct iscsi_target* target, uint64_t sid,
+-					uint32_t cid, char *buf, int rest)
+-{
+-	int len, total = 0;
+-	struct iscsi_session *session;
+-	struct iscsi_connection *conn;
+-
+-	session = session_lookup(sid_to_tsih(sid));
+-	if (!session)
+-		return 0;
+-
+-	len = 0;
+-	list_for_each_entry(conn, &amp;session-&gt;conn_list, clist) {
+-		if (conn-&gt;cid == cid || !cid) {
+-			if (cid) {
+-			} else {
+-				len = snprintf(buf, rest, &quot;cid:%u&quot;, conn-&gt;cid);
+-				buffer_check(buf, total, len, rest);
+-
+-				len = 0;
+-				if (conn-&gt;tp-&gt;ep_show) {
+-					len = conn-&gt;tp-&gt;ep_show(conn-&gt;fd, buf, rest);
+-					buffer_check(buf, total, len, rest);
+-				}
+-
+-				if (!len) {
+-					len = snprintf(buf, rest, &quot;\n&quot;);
+-					buffer_check(buf, total, len, rest);
+-				}
+-			}
+-		}
+-	}
+-
+-	return total;
+-}
+-
+ static int iscsi_target_show_session(struct iscsi_target* target, uint64_t sid,
+ 				     char *buf, int rest)
+ {
+@@ -413,10 +377,6 @@
+ 		len = iscsi_target_show_session(target, sid, buf, rest);
+ 		total += len;
+ 		break;
+-	case MODE_CONNECTION:
+-		len = iscsi_target_show_connection(target, sid, cid, buf, rest);
+-		total += len;
+-		break;
+ 	default:
+ 		break;
+ 	}
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/target.c	2007-01-06 09:43:17 UTC (rev 758)
+@@ -663,26 +663,43 @@
+ 	}
+ }
+ 
+-int it_nexus_create(int tid, uint32_t nid)
++static struct it_nexus *it_nexus_lookup(int tid, uint32_t nid)
+ {
+ 	struct target *target;
+ 	struct it_nexus *nexus;
+ 
+ 	target = target_lookup(tid);
+ 	if (!target)
+-		return -ENOENT;
++		return NULL;
+ 
+ 	list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
+ 		if (nexus-&gt;nexus_id == nid)
+-			return -EEXIST;
++			return nexus;
+ 	}
++	return NULL;
++}
+ 
++int it_nexus_create(int tid, uint32_t nid, char *info)
++{
++	struct target *target;
++	struct it_nexus *nexus;
++
++	target = target_lookup(tid);
++	if (!target)
++		return -ENOENT;
++
++	nexus = it_nexus_lookup(tid, nid);
++	if (nexus)
++		return -EEXIST;
++
+ 	nexus = zalloc(sizeof(*nexus));
+ 	if (!nexus)
+ 		return -ENOMEM;
+ 
+ 	nexus-&gt;nexus_id = nid;
+ 	nexus-&gt;nexus_target = target;
++	nexus-&gt;info = info;
++
+ 	list_add_tail(&amp;nexus-&gt;nexus_siblings, &amp;target-&gt;it_nexus_list);
+ 
+ 	return 0;
+@@ -1095,10 +1112,6 @@
+ 	return buf;
+ }
+ 
+-#define TAB1 &quot;    &quot;
+-#define TAB2 TAB1 TAB1
+-#define TAB3 TAB1 TAB1 TAB1
+-
+ int tgt_target_show_all(char *buf, int rest)
+ {
+ 	int total = 0, max = rest;
+@@ -1118,19 +1131,13 @@
+ 			 tgt_drivers[target-&gt;lid]-&gt;name,
+ 			 target_state_name(target-&gt;target_state));
+ 
+-		/* FIXME: brain-dead... */
++		shprintf(total, buf, rest, TAB1 &quot;I_T nexus information:\n&quot;);
+ 
+-		if (!strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;))
+-			shprintf(total, buf, rest, TAB1
+-				 &quot;Session information:\n&quot;);
+-		else
+-			shprintf(total, buf, rest, TAB1
+-				 &quot;I_T nexus information:\n&quot;);
+-
+ 		list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
+-			shprintf(total, buf, rest, TAB2 &quot;%s: %u\n&quot;,
+-				 strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;) ?
+-				 &quot;I_T nexus&quot; : &quot;Session&quot;, nexus-&gt;nexus_id);
++			shprintf(total, buf, rest, TAB2 &quot;I_T nexus: %u\n&quot;,
++				 nexus-&gt;nexus_id);
++			if (nexus-&gt;info)
++				shprintf(total, buf, rest, &quot;%s&quot;, nexus-&gt;info);
+ 		}
+ 
+ 		if (!strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;)) {
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/target.h	2007-01-06 09:43:17 UTC (rev 758)
+@@ -66,6 +66,9 @@
+ 
+ 	/* the list of i_t_nexus belonging to a target */
+ 	struct list_head nexus_siblings;
++
++	/* only used for show operation */
++	char *info;
+ };
+ 
+ struct cmd {
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-01-06 08:18:33 UTC (rev 757)
++++ trunk/usr/tgtd.h	2007-01-06 09:43:17 UTC (rev 758)
+@@ -6,6 +6,11 @@
+ #define SCSI_ID_LEN	24
+ #define SCSI_SN_LEN	8
+ 
++#define TAB1 &quot;    &quot;
++#define TAB2 TAB1 TAB1
++#define TAB3 TAB1 TAB1 TAB1
++#define TAB4 TAB2 TAB2
++
+ enum scsi_target_iotype {
+ 	SCSI_TARGET_FILEIO = 1,
+ 	SCSI_TARGET_RAWIO,
+@@ -120,7 +125,7 @@
+ extern int account_show(char *buf, int rest);
+ extern int account_available(int tid, int dir);
+ 
+-extern int it_nexus_create(int tid, uint32_t nid);
++extern int it_nexus_create(int tid, uint32_t nid, char *info);
+ extern int it_nexus_destroy(int tid, uint32_t nid);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000744.html">[Stgt-svn] r757 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000746.html">[Stgt-svn] r759 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#745">[ date ]</a>
+              <a href="thread.html#745">[ thread ]</a>
+              <a href="subject.html#745">[ subject ]</a>
+              <a href="author.html#745">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

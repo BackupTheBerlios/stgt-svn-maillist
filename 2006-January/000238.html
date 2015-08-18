@@ -1,0 +1,616 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r251 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r251%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200601302350.k0UNoUqE009854%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000237.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r251 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r251%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200601302350.k0UNoUqE009854%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r251 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Jan 31 00:50:30 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000237.html">[Stgt-svn] r250 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#238">[ date ]</a>
+              <a href="thread.html#238">[ thread ]</a>
+              <a href="subject.html#238">[ subject ]</a>
+              <a href="author.html#238">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-01-31 00:50:28 +0100 (Tue, 31 Jan 2006)
+New Revision: 251
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Update ibmvstgt for the scsi-ml model.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-01-29 23:33:56 UTC (rev 250)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-01-30 23:50:28 UTC (rev 251)
+@@ -4,25 +4,37 @@
+  *			   Santiago Leon (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">santil at us.ibm.com</A>) IBM Corp.
+  *			   Linda Xie (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">lxie at us.ibm.com</A>) IBM Corp.
+  *
+- * Rewritten for Linux target framework by FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005 - 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+  *
+- * This code is licenced under the GPL2.
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
+  */
+ 
++#include &lt;linux/interrupt.h&gt;
+ #include &lt;linux/module.h&gt;
++#include &lt;linux/mempool.h&gt;
+ #include &lt;scsi/scsi.h&gt;
++#include &lt;scsi/scsi_host.h&gt;
+ #include &lt;scsi/scsi_tcq.h&gt;
+-#include &lt;linux/mempool.h&gt;
++#include &lt;scsi/scsi_tgt.h&gt;
+ 
+ #include &lt;asm/hvcall.h&gt;
+-#include &lt;asm/vio.h&gt;
+ #include &lt;asm/iommu.h&gt;
+ #include &lt;asm/prom.h&gt;
++#include &lt;asm/vio.h&gt;
+ 
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_scsi.h&gt;
+-
+ #include &quot;viosrp.h&quot;
+ 
+ #define DEFAULT_TIMEOUT		30*HZ
+@@ -54,7 +66,14 @@
+ MODULE_AUTHOR(&quot;Dave Boutcher&quot;);
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
++/* tmp - will replace with SCSI logging stuff */
++#define dprintk(fmt, args...)					\
++do {								\
++	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
++} while (0)
+ 
++#define eprintk dprintk
++
+ /*
+  * an RPA command/response transport queue.  This is our structure
+  * that points to the actual queue (not architected by firmware)
+@@ -83,9 +102,7 @@
+ 	unsigned long riobn;
+ 
+ 	int max_sectors;
+-
+-	struct tgt_target *tt;
+-	struct tgt_session *ts;
++	struct Scsi_Host *shost;
+ };
+ 
+ enum iue_flags {
+@@ -116,8 +133,6 @@
+ 		int data_in_residual_count;
+ 		int timeout;
+ 	} req;
+-
+-	struct tgt_cmd *tc;
+ };
+ 
+ 
+@@ -295,17 +310,19 @@
+ 
+ static int process_cmd(struct iu_entry *iue)
+ {
+-	struct tgt_target *tt = iue-&gt;adapter-&gt;tt;
++	struct Scsi_host *shost = iue-&gt;adapter-&gt;shost;
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	enum dma_data_direction data_dir;
++	struct scsi_cmnd *scmd;
+ 	int tags, len;
+-	uint8_t lun[8];
+ 
+-	dprintk(&quot;%p %p %p\n&quot;, tt, iue-&gt;adapter, iue);
++	dprintk(&quot;%p %p\n&quot;, iue-&gt;adapter, iue);
+ 
+ 	if (getlink(iue))
+ 		__set_bit(V_LINKED, &amp;iue-&gt;req.flags);
+ 
++	tags = MSG_SIMPLE_TAG;
++#if 0
+ 	switch (iu-&gt;srp.cmd.task_attribute) {
+ 	case SRP_SIMPLE_TASK:
+ 		tags = MSG_SIMPLE_TAG;
+@@ -321,7 +338,7 @@
+ 			iu-&gt;srp.cmd.task_attribute);
+ 		tags = MSG_ORDERED_TAG;
+ 	}
+-
++#endif
+ 	switch (iu-&gt;srp.cmd.cdb[0]) {
+ 	case WRITE_6:
+ 	case WRITE_10:
+@@ -331,12 +348,6 @@
+ 		__set_bit(V_WRITE, &amp;iue-&gt;req.flags);
+ 	}
+ 
+-	memset(lun, 0, sizeof(lun));
+-	/* FIXME */
+-	lun[1] = GETLUN(iu-&gt;srp.cmd.lun);
+-	if (GETBUS(iu-&gt;srp.cmd.lun) || GETTARGET(iu-&gt;srp.cmd.lun))
+-		lun[0] = 3 &lt;&lt; 6;
+-
+ 	if (iu-&gt;srp.cmd.data_out_format) {
+ 		data_dir = DMA_TO_DEVICE;
+ 		len = vscsis_data_length(&amp;iu-&gt;srp.cmd, 1);
+@@ -345,15 +356,15 @@
+ 		len = vscsis_data_length(&amp;iu-&gt;srp.cmd, 0);
+ 	}
+ 
+-	dprintk(&quot;%p %x %lx %d %d %x %d\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, lun[1], tags);
++	dprintk(&quot;%p %x %lx %d %d %d\n&quot;,
++		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
+ 
+-	BUG_ON(!iue-&gt;adapter-&gt;ts);
+-	iue-&gt;tc = tgt_cmd_create(iue-&gt;adapter-&gt;ts, iue, iu-&gt;srp.cmd.cdb,
+-				 len, data_dir, lun, sizeof(lun), tags);
+-	BUG_ON(!iue-&gt;tc);
+-	dprintk(&quot;%p\n&quot;, iue-&gt;tc);
++	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
++	BUG_ON(!scmd);
+ 
++	scmd-&gt;SCp.ptr = (char *) iue;
++	scsi_tgt_queue_command(scmd, (struct scsi_lun *) iu-&gt;srp.cmd.lun, 0);
++
+ 	return 0;
+ }
+ 
+@@ -379,25 +390,27 @@
+ #define SEND	0
+ #define RECV	1
+ 
+-static int direct_data(struct tgt_cmd *tc, struct memory_descriptor *md, int op)
++static int direct_data(struct scsi_cmnd *scmd, struct memory_descriptor *md,
++		       int op)
+ {
+-	struct iu_entry *iue = (struct iu_entry *) tc-&gt;private;
++	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+-	struct scatterlist *sg = tc-&gt;sg;
++	struct scatterlist *sg = scmd-&gt;request_buffer;
+ 	unsigned int rest, len;
+ 	int i, done, nsg;
+ 	long err;
+ 	dma_addr_t token;
+ 
+-	dprintk(&quot;%p %u %u %d\n&quot;, iue, tc-&gt;bufflen, md-&gt;length, tc-&gt;sg_count);
++	dprintk(&quot;%p %u %u %d\n&quot;, iue, scmd-&gt;request_bufflen,
++		md-&gt;length, scmd-&gt;use_sg);
+ 
+-	nsg = dma_map_sg(adapter-&gt;dev, sg, tc-&gt;sg_count, DMA_BIDIRECTIONAL);
++	nsg = dma_map_sg(adapter-&gt;dev, sg, scmd-&gt;use_sg, DMA_BIDIRECTIONAL);
+ 	if (!nsg) {
+-		eprintk(&quot;fail to map %p %d\n&quot;, iue, tc-&gt;sg_count);
++		eprintk(&quot;fail to map %p %d\n&quot;, iue, scmd-&gt;use_sg);
+ 		return 0;
+ 	}
+ 
+-	rest = min(tc-&gt;bufflen, md-&gt;length);
++	rest = min(scmd-&gt;request_bufflen, md-&gt;length);
+ 
+ 	for (i = 0, done = 0; i &lt; nsg &amp;&amp; rest; i++) {
+ 		token = sg_dma_address(sg + i);
+@@ -428,14 +441,14 @@
+ 	return done;
+ }
+ 
+-static int indirect_data(struct tgt_cmd *tc, struct indirect_descriptor *id,
++static int indirect_data(struct scsi_cmnd *scmd, struct indirect_descriptor *id,
+ 			 int op)
+ {
+-	struct iu_entry *iue = (struct iu_entry *) tc-&gt;private;
++	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+ 	struct srp_cmd *cmd = &amp;vio_iu(iue)-&gt;srp.cmd;
+ 	struct memory_descriptor *mds;
+-	struct scatterlist *sg = tc-&gt;sg;
++	struct scatterlist *sg = scmd-&gt;request_buffer;
+ 	dma_addr_t token, itoken = 0;
+ 	long err;
+ 	unsigned int rest, done = 0;
+@@ -443,8 +456,8 @@
+ 
+ 	nmd = id-&gt;head.length / sizeof(struct memory_descriptor);
+ 
+-	dprintk(&quot;%p %u %u %lu %d %d %d\n&quot;,
+-		iue, tc-&gt;bufflen, id-&gt;total_length, tc-&gt;offset, nmd,
++	dprintk(&quot;%p %u %u %u %d %d %d\n&quot;,
++		iue, scmd-&gt;request_bufflen, id-&gt;total_length, scmd-&gt;offset, nmd,
+ 		cmd-&gt;data_in_count, cmd-&gt;data_out_count);
+ 
+ 	if ((op == SEND &amp;&amp; nmd == cmd-&gt;data_in_count) ||
+@@ -468,15 +481,15 @@
+ 	}
+ 
+ rdma:
+-	nsg = dma_map_sg(adapter-&gt;dev, sg, tc-&gt;sg_count, DMA_BIDIRECTIONAL);
++	nsg = dma_map_sg(adapter-&gt;dev, sg, scmd-&gt;use_sg, DMA_BIDIRECTIONAL);
+ 	if (!nsg) {
+-		eprintk(&quot;fail to map %p %d\n&quot;, iue, tc-&gt;sg_count);
++		eprintk(&quot;fail to map %p %d\n&quot;, iue, scmd-&gt;use_sg);
+ 		goto free_mem;
+ 	}
+ 
+ 	sidx = soff = 0;
+ 	token = sg_dma_address(sg + sidx);
+-	rest = min(tc-&gt;bufflen, id-&gt;total_length);
++	rest = min(scmd-&gt;request_bufflen, id-&gt;total_length);
+ 	for (i = 0; i &lt; nmd &amp;&amp; rest; i++) {
+ 		unsigned int mdone, mlen;
+ 
+@@ -514,7 +527,7 @@
+ 
+ 				if (sidx &gt; nsg) {
+ 					eprintk(&quot;out of sg %p %d %d %d\n&quot;,
+-						iue, sidx, nsg, tc-&gt;sg_count);
++						iue, sidx, nsg, scmd-&gt;use_sg);
+ 					goto unmap_sg;
+ 				}
+ 			}
+@@ -533,9 +546,9 @@
+ 	return done;
+ }
+ 
+-static int handle_cmd_data(struct tgt_cmd *tc, int op)
++static int handle_cmd_data(struct scsi_cmnd *scmd, int op)
+ {
+-	struct iu_entry *iue = (struct iu_entry *) tc-&gt;private;
++	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct srp_cmd *cmd = &amp;vio_iu(iue)-&gt;srp.cmd;
+ 	struct memory_descriptor *md;
+ 	struct indirect_descriptor *id;
+@@ -554,12 +567,12 @@
+ 	case SRP_DIRECT_BUFFER:
+ 		md = (struct memory_descriptor *)
+ 			(cmd-&gt;additional_data + offset);
+-		err = direct_data(tc, md, op);
++		err = direct_data(scmd, md, op);
+ 		break;
+ 	case SRP_INDIRECT_BUFFER:
+ 		id = (struct indirect_descriptor *)
+ 			(cmd-&gt;additional_data + offset);
+-		err = indirect_data(tc, id, op);
++		err = indirect_data(scmd, id, op);
+ 		break;
+ 	default:
+ 		eprintk(&quot;Unknown format %d %d\n&quot;, op, format);
+@@ -569,13 +582,12 @@
+ 	return err;
+ }
+ 
+-static int recv_cmd_data(struct tgt_cmd *tc)
++static int recv_cmd_data(struct scsi_cmnd *scmd,
++			 void (*done)(struct scsi_cmnd *))
+ {
+-	dprintk(&quot;%p\n&quot;, tc);
+-
+-	handle_cmd_data(tc, RECV);
+-	tc-&gt;done(tc);
+-
++	/* TODO: this can be called multiple times for a single command. */
++	handle_cmd_data(scmd, RECV);
++	done(scmd);
+ 	return 0;
+ }
+ 
+@@ -590,7 +602,6 @@
+ 	memset(&amp;iue-&gt;req, 0, sizeof(iue-&gt;req));
+ 	iue-&gt;adapter = adapter;
+ 	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
+-	iue-&gt;tc = NULL;
+ 
+ 	iue-&gt;iu_token = dma_map_single(adapter-&gt;dev, vio_iu(iue),
+ 				       sizeof(union viosrp_iu),
+@@ -609,31 +620,28 @@
+ 
+ 	dprintk(&quot;%p %p\n&quot;, adapter, iue);
+ 
+-	if (iue-&gt;tc)
+-		iue-&gt;tc-&gt;done(iue-&gt;tc);
+-
+ 	dma_unmap_single(adapter-&gt;dev, iue-&gt;iu_token,
+ 			 sizeof(union viosrp_iu), DMA_BIDIRECTIONAL);
+-
+ 	mempool_free(iue, adapter-&gt;iu_pool);
+ }
+ 
+-static int ibmvstgt_cmd_done(struct tgt_cmd *tc)
++static int ibmvstgt_cmd_done(struct scsi_cmnd *scmd,
++			     void (*done)(struct scsi_cmnd *))
+ {
+ 	int sent = 0;
+ 	unsigned long flags;
+-	struct iu_entry *iue = (struct iu_entry *) tc-&gt;private;
++	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+ 
+-	dprintk(&quot;%p %p %p %x\n&quot;, tc, iue, adapter, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
++	dprintk(&quot;%p %p %x\n&quot;, iue, adapter, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+ 
+ 	spin_lock_irqsave(&amp;adapter-&gt;lock, flags);
+ 	list_del(&amp;iue-&gt;ilist);
+ 	spin_unlock_irqrestore(&amp;adapter-&gt;lock, flags);
+ 
+-	if (tc-&gt;result != SAM_STAT_GOOD) {
++	if (scmd-&gt;result != SAM_STAT_GOOD) {
+ 		eprintk(&quot;operation failed %p %d %x\n&quot;,
+-			iue, tc-&gt;result, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
++			iue, scmd-&gt;result, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+ 		send_rsp(iue, HARDWARE_ERROR, 0x00);
+ 		goto out;
+ 	}
+@@ -661,18 +669,19 @@
+ 		break;
+ 	}
+ 
+-	sent = handle_cmd_data(tc, SEND);
+-	if (sent != tc-&gt;bufflen) {
++	sent = handle_cmd_data(scmd, SEND);
++	if (sent != scmd-&gt;request_bufflen) {
+ 		eprintk(&quot;sending data on response %p (tried %u, sent %d\n&quot;,
+-			iue, tc-&gt;bufflen, sent);
++			iue, scmd-&gt;request_bufflen, sent);
+ 		send_rsp(iue, ABORTED_COMMAND, 0x00);
+ 	} else
+ 		send_rsp(iue, NO_SENSE, 0x00);
+ 
+ out:
++	done(scmd);
+ 	put_iu(iue);
+ 
+-	return TGT_CMD_XMIT_OK;
++	return 0;
+ }
+ 
+ int send_adapter_info(struct iu_entry *iue,
+@@ -1069,23 +1078,20 @@
+ 	handle_cmd_queue(adapter);
+ }
+ 
+-struct session_wait {
+-	struct completion event;
+-	struct tgt_session *ts;
++static struct scsi_host_template ibmvstgt_sht = {
++	.name			= TGT_NAME,
++	.module			= THIS_MODULE,
++	.can_queue		= INITIAL_SRP_LIMIT,
++	.sg_tablesize		= SG_ALL,
++	.use_clustering		= DISABLE_CLUSTERING,
++	.max_sectors		= DEFAULT_MAX_SECTORS,
++	.transfer_response	= ibmvstgt_cmd_done,
++	.transfer_data		= recv_cmd_data,
+ };
+ 
+-static void session_done(void *arg, struct tgt_session *session)
+-{
+-	struct session_wait *w = (struct session_wait *) arg;
+-
+-	w-&gt;ts = session;
+-	complete(&amp;w-&gt;event);
+-}
+-
+ static int ibmvstgt_probe(struct vio_dev *dev, const struct vio_device_id *id)
+ {
+-	struct tgt_target *tt;
+-	struct session_wait w;
++	struct Scsi_Host *shost;
+ 	struct server_adapter *adapter;
+ 	unsigned int *dma, dma_size;
+ 	int err = -ENOMEM;
+@@ -1093,15 +1099,14 @@
+ 	dprintk(&quot;%s %s %x %u\n&quot;, dev-&gt;name, dev-&gt;type,
+ 		dev-&gt;unit_address, dev-&gt;irq);
+ 
+-	tt = tgt_target_create(TGT_NAME, INITIAL_SRP_LIMIT);
+-	if (!tt)
++	shost = scsi_host_alloc(&amp;ibmvstgt_sht, sizeof(struct server_adapter));
++	if (!shost)
+ 		return err;
++	if (scsi_tgt_alloc_queue(shost))
++		goto put_host;
+ 
+-	adapter = tt-&gt;tt_data;
+-
+-	dprintk(&quot;%p %p\n&quot;, tt, adapter);
+-
+-	adapter-&gt;tt = tt;
++	adapter = (struct server_adapter *) shost-&gt;hostdata;
++	adapter-&gt;shost = shost;
+ 	adapter-&gt;dma_dev = dev;
+ 	adapter-&gt;dev = &amp;dev-&gt;dev;
+ 	adapter-&gt;dev-&gt;driver_data = adapter;
+@@ -1114,7 +1119,7 @@
+ 	if (!dma || dma_size != 40) {
+ 		eprintk(&quot;Couldn't get window property %d\n&quot;, dma_size);
+ 		err = -EIO;
+-		goto free_tt;
++		goto put_host;
+ 	}
+ 
+ 	adapter-&gt;liobn = dma[0];
+@@ -1123,31 +1128,26 @@
+ 	INIT_WORK(&amp;adapter-&gt;crq_work, handle_crq, adapter);
+ 	INIT_LIST_HEAD(&amp;adapter-&gt;cmd_queue);
+ 
+-	init_completion(&amp;w.event);
+-	if (tgt_session_create(tt, session_done, &amp;w))
+-		goto free_tt;
+-	wait_for_completion(&amp;w.event);
+-	if (!w.ts)
+-		goto free_tt;
+-	adapter-&gt;ts = w.ts;
+ 	adapter-&gt;iu_pool = mempool_create(INITIAL_SRP_LIMIT,
+ 					  mempool_alloc_slab,
+ 					  mempool_free_slab, iu_cache);
+ 	if (!adapter-&gt;iu_pool)
+-		goto free_ts;
++		goto put_host;
+ 
+ 	err = crq_queue_create(&amp;adapter-&gt;crq_queue, adapter);
+ 	if (err)
+ 		goto free_pool;
+ 
++	if (scsi_add_host(shost, adapter-&gt;dev))
++		goto destroy_queue;
+ 	return 0;
+ 
++destroy_queue:
++	crq_queue_destroy(adapter);
+ free_pool:
+ 	mempool_destroy(adapter-&gt;iu_pool);
+-free_ts:
+-	tgt_session_destroy(adapter-&gt;ts, NULL, NULL);
+-free_tt:
+-	tgt_target_destroy(tt);
++put_host:
++	scsi_host_put(shost);
+ 
+ 	return err;
+ }
+@@ -1156,27 +1156,16 @@
+ {
+ 	struct server_adapter *adapter =
+ 		(struct server_adapter *) dev-&gt;dev.driver_data;
+-	struct tgt_target *tt = adapter-&gt;tt;
++	struct Scsi_Host *shost = adapter-&gt;shost;
+ 
++	scsi_remove_host(shost);
++	scsi_host_put(shost);
+ 	crq_queue_destroy(adapter);
+ 	mempool_destroy(adapter-&gt;iu_pool);
+-	tgt_session_destroy(adapter-&gt;ts, NULL, NULL);
+ 
+-	tgt_target_destroy(tt);
+-
+ 	return 0;
+ }
+ 
+-static struct tgt_target_template ibmvstgt_template = {
+-	.name = TGT_NAME,
+-	.module = THIS_MODULE,
+-	.protocol = &quot;scsi&quot;,
+-	.subprotocol = &quot;rdma&quot;,
+-	.transfer_response = ibmvstgt_cmd_done,
+-	.transfer_write_data = recv_cmd_data,
+-	.priv_data_size = sizeof(struct server_adapter),
+-};
+-
+ static struct vio_device_id ibmvstgt_device_table[] __devinitdata = {
+ 	{&quot;v-scsi-host&quot;, &quot;IBM,v-scsi-host&quot;},
+ 	{&quot;&quot;,&quot;&quot;}
+@@ -1185,10 +1174,13 @@
+ MODULE_DEVICE_TABLE(vio, ibmvstgt_device_table);
+ 
+ static struct vio_driver ibmvstgt_driver = {
+-	.name = &quot;ibmvscsi&quot;,
+ 	.id_table = ibmvstgt_device_table,
+ 	.probe = ibmvstgt_probe,
+ 	.remove = ibmvstgt_remove,
++	.driver = {
++		.name = &quot;ibmvscsi&quot;,
++		.owner = THIS_MODULE,
++	}
+ };
+ 
+ static int get_system_info(void)
+@@ -1231,23 +1223,17 @@
+ 	if (!iu_cache)
+ 		return -ENOMEM;
+ 
+-	err = tgt_target_template_register(&amp;ibmvstgt_template);
+-	if (err &lt; 0)
+-		goto iu_cache;
+-
+ 	err = get_system_info();
+ 	if (err &lt; 0)
+-		goto unregister_template;
++		goto free_iu_cache;
+ 
+ 	err = vio_register_driver(&amp;ibmvstgt_driver);
+ 	if (err)
+-		goto unregister_template;
++		goto free_iu_cache;
+ 
+ 	return 0;
+ 
+-unregister_template:
+-	tgt_target_template_unregister(&amp;ibmvstgt_template);
+-iu_cache:
++free_iu_cache:
+ 	kmem_cache_destroy(iu_cache);
+ 
+ 	return err;
+@@ -1258,7 +1244,6 @@
+ 	printk(&quot;Unregister IBM virtual SCSI driver\n&quot;);
+ 
+ 	vio_unregister_driver(&amp;ibmvstgt_driver);
+-	tgt_target_template_unregister(&amp;ibmvstgt_template);
+ 	kmem_cache_destroy(iu_cache);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000237.html">[Stgt-svn] r250 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#238">[ date ]</a>
+              <a href="thread.html#238">[ thread ]</a>
+              <a href="subject.html#238">[ subject ]</a>
+              <a href="author.html#238">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

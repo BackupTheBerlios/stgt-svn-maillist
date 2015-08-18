@@ -1,0 +1,252 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r453 - branches/use-scsi-ml/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r453%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605051400.k45E03WH014741%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000439.html">
+   <LINK REL="Next"  HREF="000441.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r453 - branches/use-scsi-ml/istgt/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r453%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605051400.k45E03WH014741%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r453 - branches/use-scsi-ml/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri May  5 16:00:03 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000439.html">[Stgt-svn] r452 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000441.html">[Stgt-svn] r454 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#440">[ date ]</a>
+              <a href="thread.html#440">[ thread ]</a>
+              <a href="subject.html#440">[ subject ]</a>
+              <a href="author.html#440">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-05 15:59:59 +0200 (Fri, 05 May 2006)
+New Revision: 453
+
+Modified:
+   branches/use-scsi-ml/istgt/usr/conn.c
+   branches/use-scsi-ml/istgt/usr/iscsid.h
+   branches/use-scsi-ml/istgt/usr/istgt.c
+   branches/use-scsi-ml/istgt/usr/netlink.c
+Log:
+Fix netlink code.
+
+Modified: branches/use-scsi-ml/istgt/usr/conn.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/conn.c	2006-05-05 13:58:01 UTC (rev 452)
++++ branches/use-scsi-ml/istgt/usr/conn.c	2006-05-05 13:59:59 UTC (rev 453)
+@@ -68,22 +68,21 @@
+ {
+ 	int err;
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
+-	uint32_t cid = conn-&gt;cid;
+ 
+ 	log_debug(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64,
+ 		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 
+ 	conn-&gt;session-&gt;conn_cnt++;
+ 
+-	err = ki-&gt;create_conn(thandle, sid, cid, &amp;cid);
++	err = ki-&gt;create_conn(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid,
++			      &amp;conn-&gt;kcid);
+ 	if (err) {
+ 		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
+ 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 		goto out;
+ 	}
+-	conn-&gt;cid = cid;
+ 
+-	if (ki-&gt;bind_conn(thandle, sid, conn-&gt;cid, fd, 1, &amp;err) || err) {
++	if (ki-&gt;bind_conn(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid, fd, 1, &amp;err) || err) {
+ 		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
+ 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 		goto out;
+@@ -95,6 +94,12 @@
+ /* 		goto out; */
+ /* 	} */
+ 
++	if (ki-&gt;start_conn(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid, &amp;err) || err) {
++		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
++			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
++		goto out;
++	}
++
+ /* 	conn-&gt;stat_sn */
+ /* 		conn-&gt;session_param[key_header_digest].val, */
+ /* 		conn-&gt;session_param[key_data_digest].val); */
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-05 13:58:01 UTC (rev 452)
++++ branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-05 13:59:59 UTC (rev 453)
+@@ -84,6 +84,9 @@
+ 	int session_type;
+ 	int auth_method;
+ 
++	/* workaroud */
++	uint32_t kcid;
++
+ 	uint32_t stat_sn;
+ 	uint32_t exp_stat_sn;
+ 
+
+Modified: branches/use-scsi-ml/istgt/usr/istgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-05 13:58:01 UTC (rev 452)
++++ branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-05 13:59:59 UTC (rev 453)
+@@ -311,7 +311,7 @@
+ 			dprintf(&quot;connection closed\n&quot;);
+ 			conn_free_pdu(conn);
+ 			conn_free(conn);
+-			close(pfd-&gt;fd);
++/* 			close(pfd-&gt;fd); */
+ 			pfd-&gt;fd = -1;
+ 			incoming[i] = NULL;
+ 		}
+
+Modified: branches/use-scsi-ml/istgt/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/netlink.c	2006-05-05 13:58:01 UTC (rev 452)
++++ branches/use-scsi-ml/istgt/usr/netlink.c	2006-05-05 13:59:59 UTC (rev 453)
+@@ -97,8 +97,7 @@
+ 
+ 	nlh = (struct nlmsghdr *) buf;
+ 
+-	dprintf(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type, nlh-&gt;nlmsg_len, getpid());
+-
++/* 	dprintf(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type, nlh-&gt;nlmsg_len, getpid()); */
+ read_again:
+ 	err = __nl_read(nl_fd, buf, nlh-&gt;nlmsg_len, 0);
+ 	if (err &lt; 0) {
+@@ -111,28 +110,22 @@
+ 	return err;
+ }
+ 
+-static void nlmsg_init(struct nlmsghdr *nlh, uint32_t pid, uint16_t type,
+-		       uint32_t len)
+-{
+-	nlh-&gt;nlmsg_pid = pid;
+-	nlh-&gt;nlmsg_len = len;
+-	nlh-&gt;nlmsg_type = type;
+-}
+-
+ static int __kipc_call(struct iscsi_uevent *ev, int len)
+ {
+ 	struct nlmsghdr *nlh;
+ 	char sbuf[NL_BUFSIZE];
+ 	int err;
+ 
+-	len = NLMSG_SPACE(len);
++	nlh = (struct nlmsghdr *) sbuf;
+ 	memset(sbuf, 0, NL_BUFSIZE);
+-	nlh = (struct nlmsghdr *) sbuf;
+-	nlmsg_init(nlh, getpid(), ev-&gt;type, len);
+-	memcpy(NLMSG_DATA(sbuf), ev, len);
++	memcpy(NLMSG_DATA(nlh), ev, len);
+ 
+-	err = sendto(nl_fd, ev, len, 0, (struct sockaddr *) &amp;daddr,
+-		     sizeof(daddr));
++	len = NLMSG_SPACE(len);
++	nlh-&gt;nlmsg_pid = getpid();
++	nlh-&gt;nlmsg_len = len;
++	nlh-&gt;nlmsg_type = ev-&gt;type;
++
++	err = sendto(nl_fd, nlh, len, 0, (struct sockaddr *) &amp;daddr, sizeof(daddr));
+ 	if (err &lt; 0) {
+ 		eprintf(&quot;%d\n&quot;, err);
+ 		return err;
+@@ -156,6 +149,9 @@
+ 	int rc;
+ 	struct iscsi_uevent ev;
+ 
++	dprintf(&quot;%&quot;PRIx64 &quot; %u %u %u\n&quot;,
++		transport_handle, initial_cmdsn, *out_sid, *out_hostno);
++
+ 	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+ 
+ 	ev.type = ISCSI_UEVENT_CREATE_SESSION;
+@@ -196,6 +192,8 @@
+ 	int rc;
+ 	struct iscsi_uevent ev;
+ 
++	dprintf(&quot;%&quot;PRIx64 &quot; %u %u\n&quot;, transport_handle, sid, cid);
++
+ 	memset(&amp;ev, 0, sizeof(struct iscsi_uevent));
+ 
+ 	ev.type = ISCSI_UEVENT_CREATE_CONN;
+@@ -327,10 +325,33 @@
+ 	return 0;
+ }
+ 
++static int transport_handle_init(void)
++{
++	int fd, err;
++	char buf[64];
++
++	fd = open(&quot;/sys/class/iscsi_transport/iscsi_tgt_tcp/handle&quot;, O_RDONLY);
++	if (fd &lt; 0)
++		return fd;
++	err = read(fd, buf, sizeof(buf));
++	if (err &lt; 0)
++		goto out;
++	thandle = strtoull(buf, NULL, 10);
++	dprintf(&quot;%&quot; PRIx64 &quot;\n&quot;, thandle);
++	err = 0;
++out:
++	close(fd);
++	return err;
++}
++
+ int nl_init(void)
+ {
+-	int err = 0, rsize = 256 * 1024;
++	int err, rsize = 256 * 1024;
+ 
++	err = transport_handle_init();
++	if (err)
++		return err;
++
+ 	nl_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_ISCSI);
+ 	if (nl_fd &lt; 0) {
+ 		eprintf(&quot;Fail to create the netlink socket %d\n&quot;, errno);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000439.html">[Stgt-svn] r452 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000441.html">[Stgt-svn] r454 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#440">[ date ]</a>
+              <a href="thread.html#440">[ thread ]</a>
+              <a href="subject.html#440">[ subject ]</a>
+              <a href="author.html#440">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

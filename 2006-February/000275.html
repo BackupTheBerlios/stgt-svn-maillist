@@ -1,0 +1,119 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r288 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r288%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602100737.k1A7bXWl019045%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000274.html">
+   <LINK REL="Next"  HREF="000276.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r288 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r288%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602100737.k1A7bXWl019045%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r288 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Feb 10 08:37:33 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000274.html">[Stgt-svn] r287 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000276.html">[Stgt-svn] r289 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#275">[ date ]</a>
+              <a href="thread.html#275">[ thread ]</a>
+              <a href="subject.html#275">[ subject ]</a>
+              <a href="author.html#275">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-10 08:37:29 +0100 (Fri, 10 Feb 2006)
+New Revision: 288
+
+Modified:
+   branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+Log:
+Update the kernel patch.
+
+Modified: branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch
+===================================================================
+--- branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-02-10 07:32:04 UTC (rev 287)
++++ branches/use-scsi-ml/kernel/tgt-scsi-ml8.patch	2006-02-10 07:37:29 UTC (rev 288)
+@@ -228,10 +228,23 @@
+  void scsi_free_queue(struct request_queue *q)
+  {
+ diff --git a/fs/bio.c b/fs/bio.c
+-index 1f3bb50..fd1e419 100644
++index 1f3bb50..3e940c9 100644
+ --- a/fs/bio.c
+ +++ b/fs/bio.c
+-@@ -719,19 +719,21 @@ static struct bio *__bio_map_user_iov(re
++@@ -620,10 +620,9 @@ static struct bio *__bio_map_user_iov(re
++ 
++ 		nr_pages += end - start;
++ 		/*
++-		 * transfer and buffer must be aligned to at least hardsector
++-		 * size for now, in the future we can relax this restriction
+++		 * buffer must be aligned to at least hardsector size for now
++ 		 */
++-		if ((uaddr &amp; queue_dma_alignment(q)) || (len &amp; queue_dma_alignment(q)))
+++		if (uaddr &amp; queue_dma_alignment(q))
++ 			return ERR_PTR(-EINVAL);
++ 	}
++ 
++@@ -719,19 +718,21 @@ static struct bio *__bio_map_user_iov(re
+   *	@uaddr: start of user address
+   *	@len: length in bytes
+   *	@write_to_vm: bool indicating writing to pages or not
+@@ -255,7 +268,7 @@
+  }
+  
+  /**
+-@@ -741,13 +743,14 @@ struct bio *bio_map_user(request_queue_t
++@@ -741,13 +742,14 @@ struct bio *bio_map_user(request_queue_t
+   *	@iov:	the iovec.
+   *	@iov_count: number of elements in the iovec
+   *	@write_to_vm: bool indicating writing to pages or not
+@@ -271,7 +284,7 @@
+  {
+  	struct bio *bio;
+  	int len = 0, i;
+-@@ -768,7 +771,7 @@ struct bio *bio_map_user_iov(request_que
++@@ -768,7 +770,7 @@ struct bio *bio_map_user_iov(request_que
+  	for (i = 0; i &lt; iov_count; i++)
+  		len += iov[i].iov_len;
+  
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000274.html">[Stgt-svn] r287 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000276.html">[Stgt-svn] r289 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#275">[ date ]</a>
+              <a href="thread.html#275">[ thread ]</a>
+              <a href="subject.html#275">[ subject ]</a>
+              <a href="author.html#275">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,310 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r100 - trunk/iscsi/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r100%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509251006.j8PA6r5H007920%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000093.html">
+   <LINK REL="Next"  HREF="000095.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r100 - trunk/iscsi/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r100%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509251006.j8PA6r5H007920%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r100 - trunk/iscsi/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 12:06:53 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000093.html">[Stgt-svn] r99 - trunk/iscsi/usr
+</A></li>
+        <LI>Next message: <A HREF="000095.html">[Stgt-svn] r101 - in trunk/iscsi: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#94">[ date ]</a>
+              <a href="thread.html#94">[ thread ]</a>
+              <a href="subject.html#94">[ subject ]</a>
+              <a href="author.html#94">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 12:06:52 +0200 (Sun, 25 Sep 2005)
+New Revision: 100
+
+Modified:
+   trunk/iscsi/usr/conn.c
+   trunk/iscsi/usr/iscsid.c
+   trunk/iscsi/usr/iscsid.h
+   trunk/iscsi/usr/session.c
+Log:
+Kill conn_test requring kernel service.
+
+Modified: trunk/iscsi/usr/conn.c
+===================================================================
+--- trunk/iscsi/usr/conn.c	2005-09-25 08:42:02 UTC (rev 99)
++++ trunk/iscsi/usr/conn.c	2005-09-25 10:06:52 UTC (rev 100)
+@@ -17,6 +17,18 @@
+ #define ISCSI_CONN_NEW		1
+ #define ISCSI_CONN_EXIT		5
+ 
++void conn_add_to_session(struct connection *conn, struct session *session)
++{
++	if (!list_empty(&amp;conn-&gt;clist)) {
++		eprintf(&quot;%&quot; PRIx64 &quot; %u\n&quot;,
++			sid64(session-&gt;isid, session-&gt;tsih), conn-&gt;cid);
++		exit(0);
++	}
++
++	conn-&gt;session = session;
++	insque(&amp;conn-&gt;clist, &amp;session-&gt;conn_list);
++}
++
+ struct connection *conn_alloc(void)
+ {
+ 	struct connection *conn;
+@@ -28,77 +40,28 @@
+ 	conn-&gt;state = STATE_FREE;
+ 	param_set_defaults(conn-&gt;session_param, session_keys);
+ 
++	INIT_LIST_HEAD(&amp;conn-&gt;clist);
++
+ 	return conn;
+ }
+ 
+ void conn_free(struct connection *conn)
+ {
++	remque(&amp;conn-&gt;clist);
+ 	free(conn-&gt;initiator);
+ 	free(conn);
+ }
+ 
+-int conn_test(struct connection *conn)
++struct connection *conn_find(struct session *session, u32 cid)
+ {
+-	FILE *f;
+-	char buf[8192], *p;
+-	u32 tid, t_tid, cid, t_cid;
+-	u64 sid, t_sid;
+-	int err = -ENOENT, find = 0;
++	struct connection *conn;
+ 
+-	t_tid = conn-&gt;tid;
+-	t_sid = sid64(conn-&gt;session-&gt;isid, conn-&gt;session-&gt;tsih);
+-	t_cid = conn-&gt;cid;
+-
+-	if ((f = fopen(PROC_SESSION, &quot;r&quot;)) == NULL) {
+-		fprintf(stderr, &quot;Can't open %s\n&quot;, PROC_SESSION);
+-		return -errno;
++	list_for_each_entry(conn, &amp;session-&gt;conn_list, clist) {
++		if (conn-&gt;cid == cid)
++			return conn;
+ 	}
+ 
+-	while (fgets(buf, sizeof(buf), f)) {
+-		p = buf;
+-		while (isspace((int) *p))
+-			p++;
+-
+-		if (!strncmp(p, &quot;tid:&quot;, 4)) {
+-			if (sscanf(p, &quot;tid:%u&quot;, &amp;tid) != 1) {
+-				err = -EIO;
+-				goto out;
+-			}
+-			if (tid == t_tid)
+-				find = 1;
+-			else
+-				find = 0;
+-		} else if (!strncmp(p, &quot;sid:&quot;, 4)) {
+-			if (!find)
+-				continue;
+-			if (sscanf(p, &quot;sid:%&quot; SCNu64, &amp;sid) != 1) {
+-				err = -EIO;
+-				goto out;
+-			}
+-
+-			if (sid == t_sid)
+-				find = 1;
+-			else
+-				find = 0;
+-		} else if (!strncmp(p, &quot;cid:&quot;, 4)) {
+-			if (!find)
+-				continue;
+-			if (sscanf(p, &quot;cid:%u&quot;, &amp;cid) != 1) {
+-				err = -EIO;
+-				goto out;
+-			}
+-
+-			if (cid == t_cid) {
+-				err = 0;
+-				goto out;
+-			}
+-		}
+-	}
+-
+-out:
+-	fclose(f);
+-
+-	return err;
++	return NULL;
+ }
+ 
+ void conn_take_fd(struct connection *conn, int fd)
+
+Modified: trunk/iscsi/usr/iscsid.c
+===================================================================
+--- trunk/iscsi/usr/iscsid.c	2005-09-25 08:42:02 UTC (rev 99)
++++ trunk/iscsi/usr/iscsid.c	2005-09-25 10:06:52 UTC (rev 100)
+@@ -169,7 +169,6 @@
+ 
+ static void login_security_done(struct connection *conn)
+ {
+-	int err;
+ 	struct iscsi_login *req = (struct iscsi_login *)&amp;conn-&gt;req.bhs;
+ 	struct iscsi_login_rsp *rsp = (struct iscsi_login_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct session *session;
+@@ -177,23 +176,24 @@
+ 	if (!conn-&gt;tid)
+ 		return;
+ 
+-	if ((session = session_find_name(conn-&gt;tid, conn-&gt;initiator, req-&gt;isid))) {
++	session = session_find_name(conn-&gt;tid, conn-&gt;initiator, req-&gt;isid);
++	if (session) {
+ 		if (!req-&gt;tsih) {
+-			uint64_t sid = sid64(session-&gt;isid, session-&gt;tsih);
+ 			/* do session reinstatement */
++			/* We need to close all connections in this session */
+ /* 			session_conns_close(conn-&gt;tid, sid); */
+-			session = NULL;
++/* 			session = NULL; */
+ 		} else if (req-&gt;tsih != session-&gt;tsih) {
+ 			/* fail the login */
+ 			rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
+ 			rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_TGT_NOT_FOUND;
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+-		} else if ((err = conn_test(conn)) == -ENOENT) {
++		} else if (conn_find(session, conn-&gt;cid)) {
+ 			/* do connection reinstatement */
+ 		}
+ 		/* add a new connection to the session */
+-		conn-&gt;session = session;
++		conn_add_to_session(conn, session);
+ 	} else {
+ 		if (req-&gt;tsih) {
+ 			/* fail the login */
+@@ -202,7 +202,10 @@
+ 			conn-&gt;state = STATE_EXIT;
+ 			return;
+ 		}
+-		/* instantiate a new session */
++		/*
++		 * We do nothing here and instantiate a new session
++		 * later at login_finish().
++		 */
+ 	}
+ }
+ 
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-09-25 08:42:02 UTC (rev 99)
++++ trunk/iscsi/usr/iscsid.h	2005-09-25 10:06:52 UTC (rev 100)
+@@ -47,6 +47,7 @@
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+ 
++	struct qelem conn_list;
+ 	int conn_cnt;
+ };
+ 
+@@ -55,6 +56,7 @@
+ 	int iostate;
+ 	int fd;
+ 
++	struct qelem clist;
+ 	struct session *session;
+ 
+ 	u32 tid;
+@@ -150,11 +152,12 @@
+ /* conn.c */
+ extern struct connection *conn_alloc(void);
+ extern void conn_free(struct connection *conn);
+-extern int conn_test(struct connection *conn);
++extern struct connection * conn_find(struct session *session, u32 cid);
+ extern void conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+ extern void conn_write_pdu(struct connection *conn);
+ extern void conn_free_pdu(struct connection *conn);
++extern void conn_add_to_session(struct connection *conn, struct session *session);
+ 
+ /* iscsid.c */
+ extern int iscsi_debug;
+
+Modified: trunk/iscsi/usr/session.c
+===================================================================
+--- trunk/iscsi/usr/session.c	2005-09-25 08:42:02 UTC (rev 99)
++++ trunk/iscsi/usr/session.c	2005-09-25 10:06:52 UTC (rev 100)
+@@ -31,6 +31,8 @@
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+ 	insque(&amp;session-&gt;slist, &amp;target-&gt;sessions_list);
+ 
++	INIT_LIST_HEAD(&amp;session-&gt;conn_list);
++
+ 	return session;
+ }
+ 
+@@ -91,7 +93,7 @@
+ 	memcpy(session-&gt;isid, conn-&gt;isid, sizeof(session-&gt;isid));
+ 	session-&gt;tsih = tsih++;
+ 
+-	conn-&gt;session = session;
++	conn_add_to_session(conn, session);
+ 	conn-&gt;session-&gt;initiator = strdup(conn-&gt;initiator);
+ 
+ 	log_debug(&quot;session_create: %#&quot; PRIx64, sid);
+@@ -105,8 +107,11 @@
+ {
+ 	uint64_t sid = sid64(session-&gt;isid, session-&gt;tsih);
+ 
+-	eprintf(&quot;session_remove: %#&quot;  PRIx64, sid);
++	eprintf(&quot;%#&quot;  PRIx64 &quot;\n&quot;, sid);
+ 
++	if (!list_empty(&amp;session-&gt;conn_list))
++		eprintf(&quot;%&quot; PRIx64 &quot; conn_list is not null\n&quot;, sid);
++
+ 	if (!session-&gt;tsih)
+ 		ki-&gt;session_destroy(session-&gt;target-&gt;tid, sid);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000093.html">[Stgt-svn] r99 - trunk/iscsi/usr
+</A></li>
+	<LI>Next message: <A HREF="000095.html">[Stgt-svn] r101 - in trunk/iscsi: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#94">[ date ]</a>
+              <a href="thread.html#94">[ thread ]</a>
+              <a href="subject.html#94">[ subject ]</a>
+              <a href="author.html#94">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

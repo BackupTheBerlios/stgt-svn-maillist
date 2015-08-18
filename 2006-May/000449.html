@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r462 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r462%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061520.k46FKdDU026279%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000448.html">
+   <LINK REL="Next"  HREF="000450.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r462 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r462%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061520.k46FKdDU026279%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r462 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat May  6 17:20:39 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000448.html">[Stgt-svn] r461 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000450.html">[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#449">[ date ]</a>
+              <a href="thread.html#449">[ thread ]</a>
+              <a href="subject.html#449">[ subject ]</a>
+              <a href="author.html#449">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-06 17:20:39 +0200 (Sat, 06 May 2006)
+New Revision: 462
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Fix recvworker.
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 14:59:49 UTC (rev 461)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 15:20:39 UTC (rev 462)
+@@ -233,7 +233,7 @@
+ 
+ 		dprintk(&quot;%p %x %x\n&quot;, ctask, ctask-&gt;hdr-&gt;cmdsn, session-&gt;exp_cmdsn);
+ 
+-		if (ctask-&gt;hdr-&gt;cmdsn != session-&gt;exp_cmdsn)
++		if (be32_to_cpu(ctask-&gt;hdr-&gt;cmdsn) != session-&gt;exp_cmdsn)
+ 			break;
+ 
+ 		list_del(&amp;ctask-&gt;tgtlist);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000448.html">[Stgt-svn] r461 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000450.html">[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#449">[ date ]</a>
+              <a href="thread.html#449">[ thread ]</a>
+              <a href="subject.html#449">[ subject ]</a>
+              <a href="author.html#449">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,368 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r362 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r362%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031418.k23EICoY014750%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000348.html">
+   <LINK REL="Next"  HREF="000350.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r362 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r362%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031418.k23EICoY014750%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r362 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 15:18:12 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000348.html">[Stgt-svn] r361 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000350.html">[Stgt-svn] r363 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#349">[ date ]</a>
+              <a href="thread.html#349">[ thread ]</a>
+              <a href="subject.html#349">[ subject ]</a>
+              <a href="author.html#349">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 15:18:09 +0100 (Fri, 03 Mar 2006)
+New Revision: 362
+
+Added:
+   branches/use-scsi-ml/usr/list.h
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+   branches/use-scsi-ml/usr/util.h
+Log:
+Replace qelem with list_head that taken from kernel for type checking.
+
+
+Added: branches/use-scsi-ml/usr/list.h
+===================================================================
+--- branches/use-scsi-ml/usr/list.h	2006-03-03 12:41:36 UTC (rev 361)
++++ branches/use-scsi-ml/usr/list.h	2006-03-03 14:18:09 UTC (rev 362)
+@@ -0,0 +1,81 @@
++/* taken from linux kernel */
++
++#undef offsetof
++#ifdef __compiler_offsetof
++#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
++#else
++#define offsetof(TYPE, MEMBER) ((size_t) &amp;((TYPE *)0)-&gt;MEMBER)
++#endif
++
++#define container_of(ptr, type, member) ({			\
++        const typeof( ((type *)0)-&gt;member ) *__mptr = (ptr);	\
++        (type *)( (char *)__mptr - offsetof(type,member) );})
++
++struct list_head {
++	struct list_head *next, *prev;
++};
++
++#define LIST_HEAD_INIT(name) { &amp;(name), &amp;(name) }
++
++#define LIST_HEAD(name) \
++	struct list_head name = LIST_HEAD_INIT(name)
++
++static inline void INIT_LIST_HEAD(struct list_head *list)
++{
++	list-&gt;next = list;
++	list-&gt;prev = list;
++}
++
++static inline int list_empty(const struct list_head *head)
++{
++	return head-&gt;next == head;
++}
++
++#define list_entry(ptr, type, member) \
++	container_of(ptr, type, member)
++
++#define list_for_each(pos, head) \
++	for (pos = (head)-&gt;next; pos != (head); pos = pos-&gt;next)
++
++#define list_for_each_entry(pos, head, member)				\
++	for (pos = list_entry((head)-&gt;next, typeof(*pos), member);	\
++	     &amp;pos-&gt;member != (head);				 	\
++	     pos = list_entry(pos-&gt;member.next, typeof(*pos), member))
++
++#define list_for_each_entry_safe(pos, n, head, member)			\
++	for (pos = list_entry((head)-&gt;next, typeof(*pos), member),	\
++		n = list_entry(pos-&gt;member.next, typeof(*pos), member);	\
++	     &amp;pos-&gt;member != (head); 					\
++	     pos = n, n = list_entry(n-&gt;member.next, typeof(*n), member))
++
++static inline void __list_add(struct list_head *new,
++			      struct list_head *prev,
++			      struct list_head *next)
++{
++	next-&gt;prev = new;
++	new-&gt;next = next;
++	new-&gt;prev = prev;
++	prev-&gt;next = new;
++}
++
++static inline void list_add(struct list_head *new, struct list_head *head)
++{
++	__list_add(new, head, head-&gt;next);
++}
++
++static inline void list_add_tail(struct list_head *new, struct list_head *head)
++{
++	__list_add(new, head-&gt;prev, head);
++}
++
++static inline void __list_del(struct list_head * prev, struct list_head * next)
++{
++	next-&gt;prev = prev;
++	prev-&gt;next = next;
++}
++
++static inline void list_del(struct list_head *entry)
++{
++	__list_del(entry-&gt;prev, entry-&gt;next);
++	entry-&gt;next = entry-&gt;prev = NULL;
++}
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-03-03 12:41:36 UTC (rev 361)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-03 14:18:09 UTC (rev 362)
+@@ -372,7 +372,7 @@
+ 	return ((uint64_t) result) &lt;&lt; 48;
+ }
+ 
+-static int report_luns(struct qelem *dev_list, uint8_t *lun_buf, uint8_t *scb,
++static int report_luns(struct list_head *dev_list, uint8_t *lun_buf, uint8_t *scb,
+ 		       uint8_t *p, int *len)
+ {
+ 	struct tgt_device *dev;
+@@ -607,7 +607,7 @@
+ int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+-		     struct tgt_device *dev, struct qelem *dev_list)
++		     struct tgt_device *dev, struct list_head *dev_list)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t *data = NULL, *scb = pdu;
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-03 12:41:36 UTC (rev 361)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 14:18:09 UTC (rev 362)
+@@ -25,7 +25,6 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+-#include &lt;search.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/mman.h&gt;
+@@ -59,8 +58,8 @@
+ };
+ 
+ struct cmd {
+-	struct qelem hlist;
+-	struct qelem qlist;
++	struct list_head hlist;
++	struct list_head qlist;
+ 	uint32_t cid;
+ 	uint64_t uaddr;
+ 	uint32_t len;
+@@ -80,9 +79,9 @@
+ 
+ 	uint64_t max_device;
+ 	struct tgt_device **devt;
+-	struct qelem device_list;
++	struct list_head device_list;
+ 
+-	struct qelem cmd_hash_list[1 &lt;&lt; HASH_ORDER];
++	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
+ 	struct tgt_cmd_queue cmd_queue;
+ };
+ 
+@@ -145,14 +144,14 @@
+ static void tgt_device_link(struct target *target, struct tgt_device *dev)
+ {
+ 	struct tgt_device *ent;
+-	struct qelem *pos;
++	struct list_head *pos;
+ 
+ 	list_for_each(pos, &amp;target-&gt;device_list) {
+ 		ent = list_entry(pos, struct tgt_device, dlist);
+ 		if (dev-&gt;lun &lt; ent-&gt;lun)
+ 			break;
+ 	}
+-	insque(&amp;dev-&gt;dlist, pos);
++	list_add(&amp;dev-&gt;dlist, pos);
+ }
+ 
+ void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
+@@ -255,7 +254,7 @@
+ 
+ 	tgt_device_dir_delete(tid, dev_id);
+ 
+-	remque(&amp;device-&gt;dlist);
++	list_del(&amp;device-&gt;dlist);
+ 
+ 	free(device);
+ 	return 0;
+@@ -349,7 +348,7 @@
+ 	cmd-&gt;hostno = ev_req-&gt;k.cmd_req.host_no;
+  	cmd-&gt;cid = ev_req-&gt;k.cmd_req.cid;
+ 	cmd-&gt;attribute = ev_req-&gt;k.cmd_req.attribute;
+-	insque(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cmd-&gt;cid)]);
++	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cmd-&gt;cid)]);
+ 
+ 	dev_id = scsi_get_devid(ev_req-&gt;k.cmd_req.lun);
+ 	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
+@@ -382,14 +381,14 @@
+ 		memcpy(cmd-&gt;scb, ev_req-&gt;k.cmd_req.scb, sizeof(cmd-&gt;scb));
+ 		memcpy(cmd-&gt;lun, ev_req-&gt;k.cmd_req.lun, sizeof(cmd-&gt;lun));
+ 		cmd-&gt;len = ev_req-&gt;k.cmd_req.data_len;
+-		insque(&amp;cmd-&gt;qlist, q-&gt;queue.q_back);
++		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
+ }
+ 
+ static struct cmd *find_cmd(struct target *target, uint32_t cid)
+ {
+ 	struct cmd *cmd;
+-	struct qelem *head = &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)];
++	struct list_head *head = &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)];
+ 
+ 	list_for_each_entry(cmd, head, hlist) {
+ 		if (cmd-&gt;cid == cid)
+@@ -435,7 +434,7 @@
+ 		eprintf(&quot;Cannot find cmd %d %u\n&quot;, host_no, cid);
+ 		return;
+ 	}
+-	remque(&amp;cmd-&gt;hlist);
++	list_del(&amp;cmd-&gt;hlist);
+ 
+ 	do_munmap = cmd-&gt;mmapped;
+ 	if (do_munmap) {
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-03-03 12:41:36 UTC (rev 361)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-03 14:18:09 UTC (rev 362)
+@@ -10,7 +10,7 @@
+ struct tgt_cmd_queue {
+ 	int active_cmd;
+ 	unsigned long state;
+-	struct qelem queue;
++	struct list_head queue;
+ };
+ 
+ struct tgt_device {
+@@ -19,7 +19,7 @@
+ 	uint64_t size;
+ 	uint64_t lun;
+ 	char scsi_id[SCSI_ID_LEN];
+-	struct qelem dlist;
++	struct list_head dlist;
+ 
+ 	struct tgt_cmd_queue cmd_queue;
+ };
+@@ -46,6 +46,6 @@
+ extern int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+-			    struct tgt_device *dev, struct qelem *dev_list);
++			    struct tgt_device *dev, struct list_head *dev_list);
+ 
+ #endif
+
+Modified: branches/use-scsi-ml/usr/util.h
+===================================================================
+--- branches/use-scsi-ml/usr/util.h	2006-03-03 12:41:36 UTC (rev 361)
++++ branches/use-scsi-ml/usr/util.h	2006-03-03 14:18:09 UTC (rev 362)
+@@ -1,47 +1,8 @@
+ #include &lt;sys/user.h&gt;
++#include &quot;list.h&quot;
+ 
+-/* taken from linux kernel */
+-
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ 
+-#undef offsetof
+-#ifdef __compiler_offsetof
+-#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
+-#else
+-#define offsetof(TYPE, MEMBER) ((size_t) &amp;((TYPE *)0)-&gt;MEMBER)
+-#endif
+-
+-#define container_of(ptr, type, member) ({			\
+-        const typeof( ((type *)0)-&gt;member ) *__mptr = (ptr);	\
+-        (type *)( (char *)__mptr - offsetof(type,member) );})
+-
+-struct qelem {
+-	struct qelem *q_forw;
+-	struct qelem *q_back;
+-};
+-
+-#define LIST_HEAD_INIT(name) { &amp;(name), &amp;(name) }
+-
+-#define INIT_LIST_HEAD(ptr) do { \
+-	(ptr)-&gt;q_forw = (ptr); (ptr)-&gt;q_back = (ptr); \
+-} while (0)
+-
+-static inline int list_empty(const struct qelem *head)
+-{
+-	return head-&gt;q_forw == head;
+-}
+-
+-#define list_entry(ptr, type, member) \
+-	container_of(ptr, type, member)
+-
+-#define list_for_each(pos, head) \
+-	for (pos = (head)-&gt;q_forw; pos != (head); pos = pos-&gt;q_forw)
+-
+-#define list_for_each_entry(pos, head, member)				\
+-	for (pos = list_entry((head)-&gt;q_forw, typeof(*pos), member);	\
+-	     &amp;pos-&gt;member != (head); 	\
+-	     pos = list_entry(pos-&gt;member.q_forw, typeof(*pos), member))
+-
+ #ifndef PAGE_SHIFT
+ #define	PAGE_SHIFT	12
+ #define	PAGE_SIZE	(1UL &lt;&lt; PAGE_SHIFT)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000348.html">[Stgt-svn] r361 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000350.html">[Stgt-svn] r363 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#349">[ date ]</a>
+              <a href="thread.html#349">[ thread ]</a>
+              <a href="subject.html#349">[ subject ]</a>
+              <a href="author.html#349">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

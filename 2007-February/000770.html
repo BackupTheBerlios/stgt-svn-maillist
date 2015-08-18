@@ -1,0 +1,312 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r783 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r783%20-%20trunk/usr&In-Reply-To=%3C200702241524.l1OFOBZF025586%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000769.html">
+   <LINK REL="Next"  HREF="000771.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r783 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r783%20-%20trunk/usr&In-Reply-To=%3C200702241524.l1OFOBZF025586%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r783 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Feb 24 16:24:11 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000769.html">[Stgt-svn] r782 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000771.html">[Stgt-svn] r784 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#770">[ date ]</a>
+              <a href="thread.html#770">[ thread ]</a>
+              <a href="subject.html#770">[ subject ]</a>
+              <a href="author.html#770">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-24 16:24:10 +0100 (Sat, 24 Feb 2007)
+New Revision: 783
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+I tried to separate scsi stuff from target.[hc] because we thought
+about non-scsi protocols too. However, all we care about is SCSI. So
+stop all crazy stuff like passing over 16 arguments to
+scsi_cmd_perform. This is just the first try. There are tons of things
+to clean up.
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/scsi.c	2007-02-24 15:24:10 UTC (rev 783)
+@@ -24,6 +24,7 @@
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
+ #include &quot;driver.h&quot;
+ #include &quot;scsi.h&quot;
+ 
+@@ -478,14 +479,25 @@
+ 	return fn(p);
+ }
+ 
+-int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu,
+-		     int *len, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+-		     struct tgt_device *dev, struct list_head *dev_list, int *async,
+-		     void *key, bkio_submit_t *submit)
++int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key)
+ {
++	struct target *target = cmd-&gt;c_target;
+ 	int result = SAM_STAT_GOOD;
+-	uint8_t *data = NULL, *scb = pdu;
++	int lid = target-&gt;lid;
++	uint8_t *rw = &amp;cmd-&gt;rw;
++	uint8_t *data = NULL;
++	uint8_t *scb = cmd-&gt;scb;
++	uint32_t datalen = cmd-&gt;len;
++	int *try_map = &amp;cmd-&gt;mmapped;
++	uint64_t *offset = &amp;cmd-&gt;offset;
++	uint8_t *lun_buf = cmd-&gt;lun;
++	int *len = &amp;cmd-&gt;len;
++	int *async = &amp;cmd-&gt;async;
++	uint64_t nid = cmd-&gt;cmd_nexus_id;
++	unsigned long *uaddr = (unsigned long *)&amp;cmd-&gt;uaddr;
++	struct tgt_device *dev = cmd-&gt;dev;
++	struct list_head *dev_list = &amp;target-&gt;device_list;
++	bkio_submit_t *submit = target-&gt;bdt-&gt;bd_cmd_submit;
+ 
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/target.c	2007-02-24 15:24:10 UTC (rev 783)
+@@ -377,13 +377,8 @@
+ 	return enabled;
+ }
+ 
+-static void cmd_post_perform(struct tgt_cmd_queue *q, struct scsi_cmd *cmd,
+-			     unsigned long uaddr, int len, uint8_t mmapped)
++static void cmd_post_perform(struct tgt_cmd_queue *q, struct scsi_cmd *cmd)
+ {
+-	cmd-&gt;uaddr = uaddr;
+-	cmd-&gt;len = len;
+-	cmd-&gt;mmapped = mmapped;
+-
+ 	q-&gt;active_cmd++;
+ 	switch (cmd-&gt;attribute) {
+ 	case MSG_ORDERED_TAG:
+@@ -402,9 +397,8 @@
+ 	struct tgt_cmd_queue *q;
+ 	struct it_nexus *nexus;
+ 	struct scsi_cmd *cmd;
+-	int result, enabled = 0, async, len = 0;
+-	uint64_t offset, dev_id;
+-	uint8_t mmapped = 0;
++	int result, enabled = 0;
++	uint64_t dev_id;
+ 
+ 	nexus = it_nexus_lookup(nid);
+ 	if (!nexus) {
+@@ -423,6 +417,11 @@
+ 	cmd-&gt;c_target = target;
+ 	cmd-&gt;attribute = attribute;
+ 	cmd-&gt;tag = tag;
++	cmd-&gt;uaddr = uaddr;
++	cmd-&gt;len = data_len;
++	memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
++	memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
++
+ 	cmd_hlist_insert(target, cmd);
+ 
+ 	dev_id = scsi_get_devid(target-&gt;lid, lun);
+@@ -432,11 +431,13 @@
+ 
+ 	/* FIXME */
+ 	if (target-&gt;target_iotype == SCSI_TARGET_RAWIO) {
+-		memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
+ 		dprintf(&quot;%u %s\n&quot;, scb[0], cmd-&gt;dev ? &quot;do sg&quot; : &quot;fake&quot;);
+ 
+ 		/* we can't pass through REPORT_LUNS. */
+ 		if (cmd-&gt;dev &amp;&amp; scb[0] != REPORT_LUNS) {
++			uint64_t offset = 0;
++			int async = 0;
++
+ 			target-&gt;bdt-&gt;bd_cmd_submit(cmd-&gt;dev, cmd-&gt;scb, rw,
+ 						   data_len, &amp;uaddr, offset,
+ 						   &amp;async, (void *) cmd);
+@@ -456,34 +457,23 @@
+ 		enabled = cmd_enabled(q, cmd);
+ 
+ 	if (enabled) {
+-		result = scsi_cmd_perform(target-&gt;tid, target-&gt;lid,
+-					  nexus-&gt;host_no, scb,
+-					  &amp;len, data_len,
+-					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+-					  lun, cmd-&gt;dev,
+-					  &amp;target-&gt;device_list, &amp;async, (void *) cmd,
+-					  target-&gt;bdt-&gt;bd_cmd_submit);
++		result = scsi_cmd_perform(nexus-&gt;host_no, cmd, (void *)cmd);
+ 
+-		cmd_post_perform(q, cmd, uaddr, len, mmapped);
++		cmd_post_perform(q, cmd);
+ 
+-		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d %d %d\n&quot;,
+-			tag, scb[0], uaddr, offset, len, result, async);
++		dprintf(&quot;%&quot; PRIx64 &quot; %x %&quot; PRIx64 &quot; %&quot; PRIu64 &quot; %u %d %d\n&quot;,
++			tag, scb[0], cmd-&gt;uaddr, cmd-&gt;offset, cmd-&gt;len, result, cmd-&gt;async);
+ 
+-		cmd-&gt;rw = rw;
+ 		set_cmd_processed(cmd);
+-		if (!async)
+-			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(nid, len, result,
+-								 rw, uaddr, tag);
++		if (!cmd-&gt;async)
++			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(nid, cmd-&gt;len, result,
++								 cmd-&gt;rw, cmd-&gt;uaddr, tag);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %&quot; PRIx64 &quot; %x %&quot; PRIu64 &quot; %d\n&quot;,
+ 			tag, scb[0], cmd-&gt;dev ? cmd-&gt;dev-&gt;lun : UINT64_MAX,
+ 			q-&gt;active_cmd);
+ 
+-		memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
+-		memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
+-		cmd-&gt;len = data_len;
+-		cmd-&gt;uaddr = uaddr;
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
+ out:
+@@ -505,9 +495,7 @@
+ static void post_cmd_done(struct tgt_cmd_queue *q)
+ {
+ 	struct scsi_cmd *cmd, *tmp;
+-	int enabled, result, async, len = 0;
+-	uint8_t rw = 0, mmapped = 0;
+-	uint64_t offset;
++	int enabled, result;
+ 	int (* notify_fn)(uint64_t, int, int, int, uint64_t, uint64_t);
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+@@ -521,22 +509,12 @@
+ 
+ 			list_del(&amp;cmd-&gt;qlist);
+ 			dprintf(&quot;perform %&quot; PRIx64 &quot; %x\n&quot;, cmd-&gt;tag, cmd-&gt;attribute);
+-			result = scsi_cmd_perform(cmd-&gt;c_target-&gt;tid,
+-						  cmd-&gt;c_target-&gt;lid,
+-						  nexus-&gt;host_no, cmd-&gt;scb,
+-						  &amp;len, cmd-&gt;len,
+-						  (unsigned long *) &amp;cmd-&gt;uaddr,
+-						  &amp;rw, &amp;mmapped, &amp;offset,
+-						  cmd-&gt;lun, cmd-&gt;dev,
+-						  &amp;cmd-&gt;c_target-&gt;device_list,
+-						  &amp;async, (void *) cmd,
+-						  cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit);
+-			cmd-&gt;rw = rw;
+-			cmd_post_perform(q, cmd, cmd-&gt;uaddr, len, mmapped);
++			result = scsi_cmd_perform(nexus-&gt;host_no, cmd, (void *)cmd);
++			cmd_post_perform(q, cmd);
+ 			set_cmd_processed(cmd);
+-			if (!async) {
++			if (!cmd-&gt;async) {
+ 				notify_fn = tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify;
+-				notify_fn(cmd-&gt;cmd_nexus_id, len, result, rw,
++				notify_fn(cmd-&gt;cmd_nexus_id, cmd-&gt;len, result, cmd-&gt;rw,
+ 					  cmd-&gt;uaddr, cmd-&gt;tag);
+ 			}
+ 		} else
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/target.h	2007-02-24 15:24:10 UTC (rev 783)
+@@ -1,6 +1,7 @@
+ #ifndef __TARGET_H__
+ #define __TARGET_H__
+ 
++#include &lt;limits.h&gt;
+ #define BITS_PER_LONG (ULONG_MAX == 0xFFFFFFFFUL ? 32 : 64)
+ #include &lt;linux/hash.h&gt;
+ 
+@@ -87,11 +88,13 @@
+ 
+ 	uint64_t cmd_nexus_id;
+ 	uint32_t data_len;
++	uint64_t offset;
+ 	uint8_t scb[16];
+ 	uint8_t lun[8];
+ 	int attribute;
+ 	uint64_t tag;
+-	int rw;
++	uint8_t rw;
++	int async;
+ 	struct mgmt_req *mreq;
+ };
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/tgtd.h	2007-02-24 15:24:10 UTC (rev 783)
+@@ -106,13 +106,10 @@
+ 
+ extern void target_cmd_io_done(void *key, int result);
+ 
+-extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+-extern int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu, int *len,
+-			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+-			    struct tgt_device *dev, struct list_head *dev_list,
+-			    int *async, void *key, bkio_submit_t *submit);
++struct scsi_cmd;
+ 
++extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
++extern int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key);
+ extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000769.html">[Stgt-svn] r782 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000771.html">[Stgt-svn] r784 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#770">[ date ]</a>
+              <a href="thread.html#770">[ thread ]</a>
+              <a href="subject.html#770">[ subject ]</a>
+              <a href="author.html#770">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

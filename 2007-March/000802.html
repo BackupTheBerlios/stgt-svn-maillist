@@ -1,0 +1,772 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r815 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r815%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703100716.l2A7GMpw006784%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000801.html">
+   <LINK REL="Next"  HREF="000803.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r815 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r815%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703100716.l2A7GMpw006784%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r815 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 10 08:16:22 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000801.html">[Stgt-svn] r814 - in trunk/usr: . xen
+</A></li>
+        <LI>Next message: <A HREF="000803.html">[Stgt-svn] r816 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#802">[ date ]</a>
+              <a href="thread.html#802">[ thread ]</a>
+              <a href="subject.html#802">[ subject ]</a>
+              <a href="author.html#802">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-10 08:16:20 +0100 (Sat, 10 Mar 2007)
+New Revision: 815
+
+Modified:
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/mmc.c
+   trunk/usr/osd.c
+   trunk/usr/sbc.c
+   trunk/usr/spc.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+- llds allocate scb.
+- pass scsi_cmd struct to bd_cmd_submit (btw, should be renamed).
+- fix mmc capacity bug.
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/bd_aio.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -77,6 +77,7 @@
+ 
+ 	ret = io_getevents(info-&gt;ctx, 1, MAX_AIO_REQS, info-&gt;events, NULL);
+ 	nr = ret;
++	dprintf(&quot;%d&quot;, ret);
+ 	if (nr &gt; 0) {
+ 	rewrite:
+ 		ret = write(info-&gt;done_fd[1], &amp;nr, sizeof(nr));
+@@ -177,35 +178,37 @@
+ 	close(dev-&gt;fd);
+ }
+ 
+-static int bd_aio_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+-			     uint32_t datalen, unsigned long *uaddr,
+-			     uint64_t offset, int *async, void *key)
++static int bd_aio_cmd_submit(struct scsi_cmd *cmd)
+ {
+-	struct bd_aio_info *info;
++	struct tgt_device *dev = cmd-&gt;dev;
++	struct bd_aio_info *info = (struct bd_aio_info *)((char *)dev + sizeof(*dev));
+ 	struct iocb iocb, *io;
+ 	int ret;
+ 
+-	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
+-
+ 	io = &iocb;
+ 	memset(io, 0, sizeof(*io));
+ 
+-	dprintf(&quot;%d %d %u %lx %&quot; PRIx64 &quot; %p %p\n&quot;, dev-&gt;fd, rw, datalen,
+-		*uaddr, offset, io, key);
++	dprintf(&quot;%d %d %u %&quot;  PRIx64 &quot; %&quot; PRIx64 &quot; %p\n&quot;, dev-&gt;fd, cmd-&gt;rw, cmd-&gt;len,
++		cmd-&gt;uaddr, cmd-&gt;offset, cmd);
+ 
+-	if (rw == READ)
+-		io_prep_pread(io, dev-&gt;fd, (void *) *uaddr, datalen, offset);
++	if (cmd-&gt;rw == READ)
++		io_prep_pread(io, dev-&gt;fd, (void *)(unsigned long)cmd-&gt;uaddr,
++			      cmd-&gt;len,	cmd-&gt;offset);
+ 	else
+-		io_prep_pwrite(io, dev-&gt;fd, (void *) *uaddr, datalen, offset);
++		io_prep_pwrite(io, dev-&gt;fd, (void *)(unsigned long)cmd-&gt;uaddr,
++			       cmd-&gt;len, cmd-&gt;offset);
+ 
+-	io-&gt;data = key;
++	io-&gt;data = cmd;
+ 	ret = io_submit(info-&gt;ctx, 1, &amp;io);
+ 
+ 	if (ret == 1) {
+-		*async = 1;
++		cmd-&gt;async = 1;
+ 		return 0;
+-	} else
++	} else {
++		dprintf(&quot;%d %d %u %&quot;  PRIx64 &quot; %&quot; PRIx64 &quot; %p\n&quot;, dev-&gt;fd, cmd-&gt;rw, cmd-&gt;len,
++			cmd-&gt;uaddr, cmd-&gt;offset, cmd);
+ 		return 1;
++	}
+ }
+ 
+ static int bd_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/bd_mmap.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -46,29 +46,28 @@
+ 
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; (pagesize - 1))) + (pagesize - 1)) &gt;&gt; pageshift)
+ 
+-static int bd_mmap_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+-			      uint32_t datalen, unsigned long *uaddr,
+-			      uint64_t offset, int *async, void *key)
++static int bd_mmap_cmd_submit(struct scsi_cmd *cmd)
+ {
+-	int fd = dev-&gt;fd;
++	int fd = cmd-&gt;dev-&gt;fd;
+ 	void *p;
+ 	int err = 0;
+ 
+-	if (*uaddr)
+-		*uaddr = *uaddr + offset;
++	if (cmd-&gt;uaddr)
++		cmd-&gt;uaddr += cmd-&gt;offset;
+ 	else {
+-		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; pageshift,
++		p = mmap64(NULL, pgcnt(cmd-&gt;len, cmd-&gt;offset) &lt;&lt; pageshift,
+ 			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   offset &amp; ~((1ULL &lt;&lt; pageshift) - 1));
++			   cmd-&gt;offset &amp; ~((1ULL &lt;&lt; pageshift) - 1));
+ 
+-		*uaddr = (unsigned long) p + (offset &amp; (pagesize - 1));
++		cmd-&gt;uaddr = (unsigned long) p + (cmd-&gt;offset &amp; (pagesize - 1));
+ 		if (p == MAP_FAILED) {
+ 			err = -EINVAL;
+-			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
++			eprintf(&quot;%&quot; PRIx64 &quot; %u %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;uaddr,
++				cmd-&gt;len, cmd-&gt;offset);
+ 		}
+ 	}
+ 
+-	dprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
++	dprintf(&quot;%&quot; PRIx64 &quot; %u %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;uaddr, cmd-&gt;len, cmd-&gt;offset);
+ 
+ 	return err;
+ }
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/iscsi/iscsid.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -743,7 +743,7 @@
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
+-	dprintf(&quot;%p %x\n&quot;, task, task-&gt;scmd-&gt;scb[0]);
++	dprintf(&quot;%p %x\n&quot;, task, task-&gt;scmd.scb[0]);
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
+@@ -777,8 +777,8 @@
+ 	rsp-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 
+-	sense = (struct iscsi_sense_data *)task-&gt;scmd-&gt;sense_buffer;
+-	sense_len = task-&gt;scmd-&gt;sense_len;
++	sense = (struct iscsi_sense_data *)task-&gt;scmd.sense_buffer;
++	sense_len = task-&gt;scmd.sense_len;
+ 
+ 	memmove(sense-&gt;data, sense, sense_len);
+ 	sense-&gt;length = cpu_to_be16(sense_len);
+@@ -895,11 +895,15 @@
+ 	conn_put(conn);
+ }
+ 
++static inline struct iscsi_task *ITASK(struct scsi_cmd *scmd)
++{
++	return container_of(scmd, struct iscsi_task, scmd);
++}
++
+ static void iscsi_free_cmd_task(struct iscsi_task *task)
+ {
+-	struct iscsi_connection *conn = task-&gt;conn;
++	target_cmd_done(&amp;task-&gt;scmd);
+ 
+-	target_cmd_done(conn-&gt;session-&gt;iscsi_nexus_id, task-&gt;tag);
+ 	list_del(&amp;task-&gt;c_hlist);
+ 	if (task-&gt;c_buffer) {
+ 		if ((unsigned long) task-&gt;c_buffer != task-&gt;addr)
+@@ -908,27 +912,10 @@
+ 	iscsi_free_task(task);
+ }
+ 
+-int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd)
++int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *scmd)
+ {
+-	struct iscsi_session *session;
+-	struct iscsi_task *task;
++	struct iscsi_task *task = ITASK(scmd);
+ 
+-	dprintf(&quot;%&quot; PRIu64 &quot; %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, nid,
+-		cmd-&gt;len, result, cmd-&gt;rw, cmd-&gt;uaddr, cmd-&gt;tag);
+-	session = session_lookup(nid);
+-	if (!session)
+-		return -EINVAL;
+-
+-	list_for_each_entry(task, &amp;session-&gt;cmd_list, c_hlist) {
+-		if (task-&gt;tag == cmd-&gt;tag)
+-			goto found;
+-	}
+-	eprintf(&quot;Cannot find a task %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;tag);
+-	return -EINVAL;
+-
+-found:
+-	dprintf(&quot;found a task %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;tag);
+-
+ 	/*
+ 	 * Since the connection is closed we just free the task.
+ 	 * We could delay the closing of the conn in some cases and send
+@@ -940,11 +927,10 @@
+ 		return 0;
+ 	}
+ 
+-	task-&gt;addr = cmd-&gt;uaddr;
++	task-&gt;addr = scmd-&gt;uaddr;
+ 	task-&gt;result = result;
+-	task-&gt;len = cmd-&gt;len;
+-	task-&gt;rw = cmd-&gt;rw;
+-	task-&gt;scmd = cmd;
++	task-&gt;len = scmd-&gt;len;
++	task-&gt;rw = scmd-&gt;rw;
+ 
+ 	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+@@ -972,11 +958,32 @@
+ 	return attr;
+ }
+ 
+-static int iscsi_scsi_cmd_execute(struct iscsi_task *task)
++static int iscsi_target_cmd_queue(struct iscsi_task *task)
+ {
++	struct scsi_cmd *scmd = &amp;task-&gt;scmd;
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 	unsigned long uaddr = (unsigned long) task-&gt;c_buffer;
++
++	scmd-&gt;cmd_nexus_id = conn-&gt;session-&gt;iscsi_nexus_id;
++	/* tmp hack */
++	scmd-&gt;scb = req-&gt;cdb;
++	scmd-&gt;scb_len = sizeof(req-&gt;cdb);
++
++	memcpy(scmd-&gt;lun, task-&gt;req.lun, sizeof(scmd-&gt;lun));
++	scmd-&gt;rw = req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE;
++	scmd-&gt;len = ntohl(req-&gt;data_length);
++	scmd-&gt;attribute = cmd_attr(task);
++	scmd-&gt;tag = req-&gt;itt;
++	scmd-&gt;uaddr = uaddr;
++
++	return target_cmd_queue(scmd);
++}
++
++static int iscsi_scsi_cmd_execute(struct iscsi_task *task)
++{
++	struct iscsi_connection *conn = task-&gt;conn;
++	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 	int err = 0;
+ 
+ 	if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
+@@ -986,18 +993,9 @@
+ 			else
+ 				list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 		} else
+-			err = target_cmd_queue(conn-&gt;session-&gt;iscsi_nexus_id,
+-					       req-&gt;cdb,
+-					       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+-					       uaddr, req-&gt;lun,
+-					       ntohl(req-&gt;data_length),
+-					       cmd_attr(task), req-&gt;itt);
++			err = iscsi_target_cmd_queue(task);
+ 	} else
+-		err = target_cmd_queue(conn-&gt;session-&gt;iscsi_nexus_id,
+-				       req-&gt;cdb,
+-				       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+-				       uaddr, req-&gt;lun, ntohl(req-&gt;data_length),
+-				       cmd_attr(task), req-&gt;itt);
++		err = iscsi_target_cmd_queue(task);
+ 
+ 	tgt_event_modify(conn-&gt;fd, EPOLLIN|EPOLLOUT);
+ 
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/iscsi/iscsid.h	2007-03-10 07:16:20 UTC (rev 815)
+@@ -15,6 +15,7 @@
+ #include &quot;list.h&quot;
+ #include &quot;param.h&quot;
+ #include &quot;log.h&quot;
++#include &quot;tgtd.h&quot;
+ 
+ #include &lt;scsi/iscsi_if.h&gt;
+ #include &lt;scsi/iscsi_proto.h&gt;
+@@ -113,11 +114,7 @@
+ 
+ 	void *c_buffer;
+ 
+-	/*
+-	 * temp hack.
+-	 * TODO: move most of iscsi_task to scsi_cmd
+-	 */
+-	struct scsi_cmd *scmd;
++	struct scsi_cmd scmd;
+ };
+ 
+ struct iscsi_connection {
+
+Modified: trunk/usr/mmc.c
+===================================================================
+--- trunk/usr/mmc.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/mmc.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -130,13 +130,9 @@
+ static int mmc_rw(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
+-	unsigned long uaddr;
+-	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
+ 
+ 	cmd-&gt;offset = (scsi_rw_offset(cmd-&gt;scb) &lt;&lt; MMC_BLK_SHIFT);
+-	uaddr = cmd-&gt;uaddr;
+-	ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
+-		     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
++	ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
+ 	if (ret) {
+ 		cmd-&gt;offset = 0;
+ 		cmd-&gt;len = 0;
+@@ -144,7 +140,6 @@
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	} else {
+ 		cmd-&gt;mmapped = 1;
+-		cmd-&gt;uaddr = uaddr;
+ 		return SAM_STAT_GOOD;
+ 	}
+ 	return 0;
+@@ -188,7 +183,7 @@
+ static int mmc_read_capacity(int host_no, struct scsi_cmd *cmd)
+ {
+ 	uint64_t size;
+-	uint8_t *data;
++	uint32_t *data;
+ 
+ 	data = valloc(pagesize);
+ 	if (!data) {
+
+Modified: trunk/usr/osd.c
+===================================================================
+--- trunk/usr/osd.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/osd.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -122,8 +122,6 @@
+ 	int ret = SAM_STAT_GOOD;
+ 	uint16_t action;
+ 	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+-	unsigned long uaddr;
+-	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
+ 
+ 	dprintf(&quot;cdb[0] %x datalen %u\n&quot;, cmd-&gt;scb[0], cmd-&gt;len);
+ 	if (cmd-&gt;scb[7] != 200 - 8) {
+@@ -162,8 +160,7 @@
+ 	case OSD_SET_MASTER_KEY:
+ 	case OSD_SET_MEMBER_ATTRIBUTES:
+ 	case OSD_WRITE:
+-		ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
+-			     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
++		ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
+ 		if (ret)
+ 			goto sense;
+ 		break;
+
+Modified: trunk/usr/sbc.c
+===================================================================
+--- trunk/usr/sbc.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/sbc.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -30,8 +30,6 @@
+ static int sbc_rw(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
+-	unsigned long uaddr;
+-	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
+ 	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+ 
+ 	if (cmd-&gt;dev) {
+@@ -55,15 +53,12 @@
+ 	}
+ 
+ 	cmd-&gt;offset = (scsi_rw_offset(cmd-&gt;scb) &lt;&lt; BLK_SHIFT);
+-	uaddr = cmd-&gt;uaddr;
+-	ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
+-		     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
++	ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
+ 	if (ret) {
+ 		key = HARDWARE_ERROR;
+ 		asc = 0;
+ 	} else {
+ 		cmd-&gt;mmapped = 1;
+-		cmd-&gt;uaddr = uaddr;
+ 		return SAM_STAT_GOOD;
+ 	}
+ sense:
+
+Modified: trunk/usr/spc.c
+===================================================================
+--- trunk/usr/spc.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/spc.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -38,7 +38,6 @@
+ 	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
+ 	uint64_t lun, *data;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+-	int *len = &amp;cmd-&gt;len;
+ 	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
+ 	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+@@ -81,10 +80,10 @@
+ 
+ 	cmd-&gt;uaddr = (unsigned long)data;
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+-	*len = min(oalen, nr_luns * 8 + 8);
++	cmd-&gt;len = min(oalen, nr_luns * 8 + 8);
+ 	return SAM_STAT_GOOD;
+ sense:
+-	*len = 0;
++	cmd-&gt;len = 0;
+ 	sense_data_build(cmd, key, asc, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/target.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -391,18 +391,15 @@
+ 	}
+ }
+ 
+-int target_cmd_queue(uint64_t nid, uint8_t *scb, uint8_t rw,
+-		     unsigned long uaddr,
+-		     uint8_t *lun, uint32_t data_len,
+-		     int attribute, uint64_t tag)
++int target_cmd_queue(struct scsi_cmd *cmd)
+ {
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+ 	struct it_nexus *nexus;
+-	struct scsi_cmd *cmd;
+ 	int result, enabled = 0;
+-	uint64_t dev_id;
++	uint64_t dev_id, nid;
+ 
++	nid = cmd-&gt;cmd_nexus_id;
+ 	nexus = it_nexus_lookup(nid);
+ 	if (!nexus) {
+ 		eprintf(&quot;invalid nid %u %u\n&quot;, (int)NID2TID(nid),
+@@ -410,26 +407,12 @@
+ 		return -ENOENT;
+ 	}
+ 
+-	target = nexus-&gt;nexus_target;
+-	/* TODO: preallocate cmd */
+-	cmd = zalloc(sizeof(*cmd));
+-	if (!cmd)
+-		return -ENOMEM;
++	cmd-&gt;c_target = target = nexus-&gt;nexus_target;
+ 
+-	cmd-&gt;cmd_nexus_id = nid;
+-	cmd-&gt;c_target = target;
+-	cmd-&gt;attribute = attribute;
+-	cmd-&gt;tag = tag;
+-	cmd-&gt;uaddr = uaddr;
+-	cmd-&gt;len = data_len;
+-	cmd-&gt;rw = rw;
+-	memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
+-	memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
+-
+ 	cmd_hlist_insert(target, cmd);
+ 
+-	dev_id = scsi_get_devid(target-&gt;lid, lun);
+-	dprintf(&quot;%p %x %&quot; PRIx64 &quot;\n&quot;, cmd, scb[0], dev_id);
++	dev_id = scsi_get_devid(target-&gt;lid, cmd-&gt;lun);
++	dprintf(&quot;%p %x %&quot; PRIx64 &quot;\n&quot;, cmd, cmd-&gt;scb[0], dev_id);
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
+ 
+@@ -439,7 +422,7 @@
+ 		q = &amp;target-&gt;cmd_queue;
+ 
+ 	enabled = cmd_enabled(q, cmd);
+-	dprintf(&quot;%p %x %&quot; PRIx64 &quot; %d\n&quot;, cmd, scb[0], dev_id, enabled);
++	dprintf(&quot;%p %x %&quot; PRIx64 &quot; %d\n&quot;, cmd, cmd-&gt;scb[0], dev_id, enabled);
+ 
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(nexus-&gt;host_no, cmd, (void *)cmd);
+@@ -447,7 +430,8 @@
+ 		cmd_post_perform(q, cmd);
+ 
+ 		dprintf(&quot;%&quot; PRIx64 &quot; %x %&quot; PRIx64 &quot; %&quot; PRIu64 &quot; %u %d %d\n&quot;,
+-			tag, scb[0], cmd-&gt;uaddr, cmd-&gt;offset, cmd-&gt;len, result, cmd-&gt;async);
++			cmd-&gt;tag, cmd-&gt;scb[0], cmd-&gt;uaddr, cmd-&gt;offset, cmd-&gt;len,
++			result, cmd-&gt;async);
+ 
+ 		set_cmd_processed(cmd);
+ 		if (!cmd-&gt;async)
+@@ -455,7 +439,7 @@
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %&quot; PRIx64 &quot; %x %&quot; PRIu64 &quot; %d\n&quot;,
+-			tag, scb[0], cmd-&gt;dev ? cmd-&gt;dev-&gt;lun : UINT64_MAX,
++			cmd-&gt;tag, cmd-&gt;scb[0], cmd-&gt;dev ? cmd-&gt;dev-&gt;lun : UINT64_MAX,
+ 			q-&gt;active_cmd);
+ 
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+@@ -464,11 +448,8 @@
+ 	return 0;
+ }
+ 
+-void target_cmd_io_done(void *key, int result)
++void target_cmd_io_done(struct scsi_cmd *cmd, int result)
+ {
+-	struct scsi_cmd *cmd = (struct scsi_cmd *) key;
+-
+-	/* TODO: sense in case of error. */
+ 	tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id,
+ 							result, cmd);
+ 	return;
+@@ -538,30 +519,32 @@
+ 		break;
+ 	}
+ 
+-	free(cmd);
+-
+ 	post_cmd_done(q);
+ }
+ 
+-void target_cmd_done(uint64_t nid, uint64_t tag)
++struct scsi_cmd *target_cmd_lookup(uint64_t nid, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct scsi_cmd *cmd;
+-	struct mgmt_req *mreq;
+ 
+ 	target = target_lookup(NID2TID(nid));
+ 	if (!target) {
+ 		eprintf(&quot;invalid nid %u %u\n&quot;, (int)NID2TID(nid),
+ 			(uint32_t)(nid &amp; NID_MASK));
+-		return;
++		return NULL;
+ 	}
+ 
+ 	cmd = cmd_lookup(target, tag);
+-	if (!cmd) {
++	if (!cmd)
+ 		eprintf(&quot;Cannot find cmd %d %&quot; PRIx64 &quot;\n&quot;, (int)NID2TID(nid), tag);
+-		return;
+-	}
+ 
++	return cmd;
++}
++
++void target_cmd_done(struct scsi_cmd *cmd)
++{
++	struct mgmt_req *mreq;
++
+ 	mreq = cmd-&gt;mreq;
+ 	if (mreq &amp;&amp; !--mreq-&gt;busy) {
+ 		int err = mreq-&gt;function == ABORT_TASK ? -EEXIST : 0;
+@@ -570,7 +553,7 @@
+ 		free(mreq);
+ 	}
+ 
+-	__cmd_done(target, cmd);
++	__cmd_done(cmd-&gt;c_target, cmd);
+ }
+ 
+ static int abort_cmd(struct target* target, struct mgmt_req *mreq,
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/tgtd.h	2007-03-10 07:16:20 UTC (rev 815)
+@@ -46,18 +46,6 @@
+ 	uint64_t reserve_id;
+ };
+ 
+-typedef int (bkio_submit_t) (struct tgt_device *dev, uint8_t *scb,
+-			     int rw, uint32_t datalen, unsigned long *uaddr,
+-			     uint64_t offset, int *async, void *key);
+-
+-struct backedio_template {
+-	int bd_datasize;
+-	int (*bd_open)(struct tgt_device *dev, char *path, int *fd, uint64_t *size);
+-	void (*bd_close)(struct tgt_device *dev);
+-	bkio_submit_t *bd_cmd_submit;
+-	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+-};
+-
+ struct scsi_cmd {
+ 	struct target *c_target;
+ 	/* linked target-&gt;cmd_hash_list */
+@@ -73,7 +61,8 @@
+ 	uint64_t cmd_nexus_id;
+ 	uint32_t data_len;
+ 	uint64_t offset;
+-	uint8_t scb[16];
++	uint8_t *scb;
++	int scb_len;
+ 	uint8_t lun[8];
+ 	int attribute;
+ 	uint64_t tag;
+@@ -86,6 +75,14 @@
+ 	int sense_len;
+ };
+ 
++struct backedio_template {
++	int bd_datasize;
++	int (*bd_open)(struct tgt_device *dev, char *path, int *fd, uint64_t *size);
++	void (*bd_close)(struct tgt_device *dev);
++	int (*bd_cmd_submit)(struct scsi_cmd *cmd);
++	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
++};
++
+ #ifdef USE_KERNEL
+ extern int kreq_init(void);
+ #else
+@@ -125,19 +122,14 @@
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+ extern void tgt_event_del(int fd);
+ extern int tgt_event_modify(int fd, int events);
+-
+-extern int target_cmd_queue(uint64_t nid, uint8_t *scb, uint8_t rw,
+-			    unsigned long uaddr,
+-			    uint8_t *lun, uint32_t data_len,
+-			    int attribute, uint64_t tag);
+-extern void target_cmd_done(uint64_t nid, uint64_t tag);
++extern int target_cmd_queue(struct scsi_cmd *cmd);
++extern void target_cmd_done(struct scsi_cmd *cmd);
++struct scsi_cmd *target_cmd_lookup(uint64_t nid, uint64_t tag);
+ extern void target_mgmt_request(uint64_t nid, uint64_t req_id, int function,
+ 				uint8_t *lun, uint64_t tag);
+ 
+-extern void target_cmd_io_done(void *key, int result);
++extern void target_cmd_io_done(struct scsi_cmd *cmd, int result);
+ 
+-struct scsi_cmd;
+-
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+ extern int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key);
+ extern void sense_data_build(struct scsi_cmd *cmd, uint8_t key, uint8_t asc,
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-03-09 15:29:08 UTC (rev 814)
++++ trunk/usr/tgtif.c	2007-03-10 07:16:20 UTC (rev 815)
+@@ -123,9 +123,39 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
++static int kern_queue_cmd(struct tgt_event *ev)
++{
++	struct scsi_cmd *cmd;
++	int scb_len = 16;
++
++	/* TODO: define scsi_kcmd and move mmap stuff */
++
++	cmd = zalloc(sizeof(*cmd) + scb_len);
++	if (!cmd)
++		return ENOMEM;
++
++	cmd-&gt;cmd_nexus_id = host_no_to_it_nexus(ev-&gt;p.cmd_req.host_no);
++	cmd-&gt;scb = (char *)cmd + sizeof(*cmd);
++	memcpy(cmd-&gt;scb, ev-&gt;p.cmd_req.scb, scb_len);
++	cmd-&gt;scb_len = scb_len;
++	memcpy(cmd-&gt;lun, ev-&gt;p.cmd_req.lun, sizeof(cmd-&gt;lun));
++
++	cmd-&gt;len = ev-&gt;p.cmd_req.data_len;
++	cmd-&gt;attribute = ev-&gt;p.cmd_req.attribute;
++	cmd-&gt;tag = ev-&gt;p.cmd_req.tag;
++/* 	cmd-&gt;uaddr = ev-&gt;k.cmd_req.uaddr; */
++	cmd-&gt;uaddr = 0;
++
++	return target_cmd_queue(cmd);
++}
++
+ static void kern_event_handler(int fd, int events, void *data)
+ {
++	int ret;
++	uint64_t nid;
+ 	struct tgt_event *ev;
++	/* temp hack */
++	struct scsi_cmd *cmd;
+ 
+ retry:
+ 	ev = head_ring_hdr(&amp;kuring);
+@@ -136,15 +166,18 @@
+ 
+ 	switch (ev-&gt;hdr.type) {
+ 	case TGT_KEVENT_CMD_REQ:
+-		target_cmd_queue(host_no_to_it_nexus(ev-&gt;p.cmd_req.host_no),
+-				 ev-&gt;p.cmd_req.scb,
+-				 0, 0,
+-/* 				 ev-&gt;k.cmd_req.uaddr, */
+-				 ev-&gt;p.cmd_req.lun, ev-&gt;p.cmd_req.data_len,
+-				 ev-&gt;p.cmd_req.attribute, ev-&gt;p.cmd_req.tag);
++		ret = kern_queue_cmd(ev);
++		if (ret)
++			eprintf(&quot;can't queue this command %d\n&quot;, ret);
+ 		break;
+ 	case TGT_KEVENT_CMD_DONE:
+-		target_cmd_done(host_no_to_it_nexus(ev-&gt;p.cmd_done.host_no),
++		nid = host_no_to_it_nexus(ev-&gt;p.cmd_done.host_no);
++		cmd = target_cmd_lookup(nid, ev-&gt;p.cmd_done.tag);
++		if (cmd) {
++			target_cmd_done(cmd);
++			free(cmd);
++		} else
++			eprintf(&quot;unknow command %&quot; PRIu64 &quot; %&quot; PRIu64 &quot;\n&quot;, nid,
+ 				ev-&gt;p.cmd_done.tag);
+ 		break;
+ 	case TGT_KEVENT_TSK_MGMT_REQ:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000801.html">[Stgt-svn] r814 - in trunk/usr: . xen
+</A></li>
+	<LI>Next message: <A HREF="000803.html">[Stgt-svn] r816 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#802">[ date ]</a>
+              <a href="thread.html#802">[ thread ]</a>
+              <a href="subject.html#802">[ subject ]</a>
+              <a href="author.html#802">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

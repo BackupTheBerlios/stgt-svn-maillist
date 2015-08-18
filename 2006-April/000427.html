@@ -1,0 +1,328 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r440 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r440%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291634.k3TGYYq1032214%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000426.html">
+   <LINK REL="Next"  HREF="000428.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r440 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r440%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200604291634.k3TGYYq1032214%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r440 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 29 18:34:34 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000426.html">[Stgt-svn] r439 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000428.html">[Stgt-svn] r441 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#427">[ date ]</a>
+              <a href="thread.html#427">[ thread ]</a>
+              <a href="subject.html#427">[ subject ]</a>
+              <a href="author.html#427">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-29 18:34:32 +0200 (Sat, 29 Apr 2006)
+New Revision: 440
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+iscsi_tcp_tgt.c can use iscsi_tcp_data_recv.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 16:33:30 UTC (rev 439)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-04-29 16:34:32 UTC (rev 440)
+@@ -318,61 +318,20 @@
+  * the followings are taken from iscsi_tcp.
+  */
+ 
+-int iscsi_tcp_hdr_recv(struct iscsi_conn *conn)
++static int istgt_tcp_hdr_recv(struct iscsi_conn *conn)
+ {
+-	int rc = 0, opcode, ahslen;
++	int rc, opcode, ahslen;
+ 	struct iscsi_hdr *hdr;
+ 	struct iscsi_session *session = conn-&gt;session;
+ 	struct iscsi_cls_session *cls_session = session_to_cls(session);
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	struct Scsi_Host *shost;
+ 	uint32_t cdgst, rdgst = 0;
+ 	struct iscsi_cmd_task *ctask = NULL;
+ 
+-	shost = iscsi_session_to_shost(cls_session);
+-	hdr = tcp_conn-&gt;in.hdr;
++	rc = iscsi_tcp_hdr_recv_pre(conn);
++	if (rc)
++		return rc;
+ 
+-	/* verify PDU length */
+-	tcp_conn-&gt;in.datalen = ntoh24(hdr-&gt;dlength);
+-	if (tcp_conn-&gt;in.datalen &gt; conn-&gt;max_recv_dlength) {
+-		printk(KERN_ERR &quot;iscsi_tcp: datalen %d &gt; %d\n&quot;,
+-		       tcp_conn-&gt;in.datalen, conn-&gt;max_recv_dlength);
+-		return ISCSI_ERR_DATALEN;
+-	}
+-	tcp_conn-&gt;data_copied = 0;
+-
+-	/* read AHS */
+-	ahslen = hdr-&gt;hlength &lt;&lt; 2;
+-	tcp_conn-&gt;in.offset += ahslen;
+-	tcp_conn-&gt;in.copy -= ahslen;
+-	if (tcp_conn-&gt;in.copy &lt; 0) {
+-		printk(KERN_ERR &quot;iscsi_tcp: can't handle AHS with length &quot;
+-		       &quot;%d bytes\n&quot;, ahslen);
+-		return ISCSI_ERR_AHSLEN;
+-	}
+-
+-	/* calculate read padding */
+-	tcp_conn-&gt;in.padding = tcp_conn-&gt;in.datalen &amp; (ISCSI_PAD_LEN-1);
+-	if (tcp_conn-&gt;in.padding) {
+-		tcp_conn-&gt;in.padding = ISCSI_PAD_LEN - tcp_conn-&gt;in.padding;
+-		dprintk(&quot;read padding %d bytes\n&quot;, tcp_conn-&gt;in.padding);
+-	}
+-
+-	if (conn-&gt;hdrdgst_en) {
+-		struct scatterlist sg;
+-
+-		sg_init_one(&amp;sg, (u8 *)hdr,
+-			    sizeof(struct iscsi_hdr) + ahslen);
+-		crypto_digest_digest(tcp_conn-&gt;rx_tfm, &amp;sg, 1, (u8 *)&amp;cdgst);
+-		rdgst = *(uint32_t*)((char*)hdr + sizeof(struct iscsi_hdr) +
+-				     ahslen);
+-		if (cdgst != rdgst) {
+-			printk(KERN_ERR &quot;iscsi_tcp: hdrdgst error &quot;
+-			       &quot;recv 0x%x calc 0x%x\n&quot;, rdgst, cdgst);
+-			return ISCSI_ERR_HDR_DGST;
+-		}
+-	}
+-
+ 	opcode = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	dprintk(&quot;opcode 0x%x offset %d copy %d ahslen %d datalen %d\n&quot;,
+ 		opcode, tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy,
+@@ -412,7 +371,7 @@
+ }
+ 
+ static int
+-iscsi_data_recv(struct iscsi_conn *conn)
++istgt_data_recv(struct iscsi_conn *conn)
+ {
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	int rc = 0, opcode;
+@@ -449,127 +408,10 @@
+ 	return rc;
+ }
+ 
+-static int
+-iscsi_tcp_data_recv(read_descriptor_t *rd_desc, struct sk_buff *skb,
+-		unsigned int offset, size_t len)
++static int stgt_pdu_recv_finish(struct iscsi_conn *conn)
+ {
+-	int rc;
+-	struct iscsi_conn *conn = rd_desc-&gt;arg.data;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+-	int processed;
+-	char pad[ISCSI_PAD_LEN];
+-	struct scatterlist sg;
+ 
+-	/*
+-	 * Save current SKB and its offset in the corresponding
+-	 * connection context.
+-	 */
+-	tcp_conn-&gt;in.copy = skb-&gt;len - offset;
+-	tcp_conn-&gt;in.offset = offset;
+-	tcp_conn-&gt;in.skb = skb;
+-	tcp_conn-&gt;in.len = tcp_conn-&gt;in.copy;
+-	BUG_ON(tcp_conn-&gt;in.copy &lt;= 0);
+-	dprintk(&quot;in %d bytes\n&quot;, tcp_conn-&gt;in.copy);
+-
+-more:
+-	tcp_conn-&gt;in.copied = 0;
+-	rc = 0;
+-
+-	if (unlikely(conn-&gt;suspend_rx)) {
+-		dprintk(&quot;conn %d Rx suspended!\n&quot;, conn-&gt;id);
+-		return 0;
+-	}
+-
+-	if (tcp_conn-&gt;in_progress == IN_PROGRESS_WAIT_HEADER ||
+-	    tcp_conn-&gt;in_progress == IN_PROGRESS_HEADER_GATHER) {
+-		rc = iscsi_hdr_extract(tcp_conn);
+-		if (rc) {
+-		       if (rc == -EAGAIN)
+-				goto nomore;
+-		       else {
+-				iscsi_conn_failure(conn, rc);
+-				return 0;
+-		       }
+-		}
+-
+-		/*
+-		 * Verify and process incoming PDU header.
+-		 */
+-		rc = iscsi_tcp_hdr_recv(conn);
+-		if (!rc &amp;&amp; tcp_conn-&gt;in.datalen) {
+-			if (conn-&gt;datadgst_en) {
+-				BUG_ON(!tcp_conn-&gt;data_rx_tfm);
+-				crypto_digest_init(tcp_conn-&gt;data_rx_tfm);
+-			}
+-			tcp_conn-&gt;in_progress = IN_PROGRESS_DATA_RECV;
+-		} else if (rc) {
+-			iscsi_conn_failure(conn, rc);
+-			return 0;
+-		}
+-	}
+-
+-	if (unlikely(conn-&gt;suspend_rx))
+-		goto nomore;
+-
+-	if (tcp_conn-&gt;in_progress == IN_PROGRESS_DDIGEST_RECV) {
+-		uint32_t recv_digest;
+-
+-		dprintk(&quot;extra data_recv offset %d copy %d\n&quot;,
+-			  tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy);
+-		skb_copy_bits(tcp_conn-&gt;in.skb, tcp_conn-&gt;in.offset,
+-				&amp;recv_digest, 4);
+-		tcp_conn-&gt;in.offset += 4;
+-		tcp_conn-&gt;in.copy -= 4;
+-		if (recv_digest != tcp_conn-&gt;in.datadgst) {
+-			dprintk(&quot;iscsi_tcp: data digest error!&quot;
+-				  &quot;0x%x != 0x%x\n&quot;, recv_digest,
+-				  tcp_conn-&gt;in.datadgst);
+-			iscsi_conn_failure(conn, ISCSI_ERR_DATA_DGST);
+-			return 0;
+-		} else {
+-			dprintk(&quot;iscsi_tcp: data digest match!&quot;
+-				  &quot;0x%x == 0x%x\n&quot;, recv_digest,
+-				  tcp_conn-&gt;in.datadgst);
+-			tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-		}
+-	}
+-
+-	if (tcp_conn-&gt;in_progress == IN_PROGRESS_DATA_RECV &amp;&amp;
+-	   tcp_conn-&gt;in.copy) {
+-
+-		dprintk(&quot;data_recv offset %d copy %d\n&quot;,
+-		       tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy);
+-
+-		rc = iscsi_data_recv(conn);
+-		if (rc) {
+-			if (rc == -EAGAIN)
+-				goto again;
+-			iscsi_conn_failure(conn, rc);
+-			return 0;
+-		}
+-		tcp_conn-&gt;in.copy -= tcp_conn-&gt;in.padding;
+-		tcp_conn-&gt;in.offset += tcp_conn-&gt;in.padding;
+-		if (conn-&gt;datadgst_en) {
+-			if (tcp_conn-&gt;in.padding) {
+-				dprintk(&quot;padding -&gt; %d\n&quot;,
+-					  tcp_conn-&gt;in.padding);
+-				memset(pad, 0, tcp_conn-&gt;in.padding);
+-				sg_init_one(&amp;sg, pad, tcp_conn-&gt;in.padding);
+-				crypto_digest_update(tcp_conn-&gt;data_rx_tfm,
+-						     &amp;sg, 1);
+-			}
+-			crypto_digest_final(tcp_conn-&gt;data_rx_tfm,
+-					    (u8 *) &amp; tcp_conn-&gt;in.datadgst);
+-			dprintk(&quot;rx digest 0x%x\n&quot;, tcp_conn-&gt;in.datadgst);
+-			tcp_conn-&gt;in_progress = IN_PROGRESS_DDIGEST_RECV;
+-		} else
+-			tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-	}
+-
+-	dprintk(&quot;f, processed %d from out of %d padding %d\n&quot;,
+-	       tcp_conn-&gt;in.offset - offset, (int)len, tcp_conn-&gt;in.padding);
+-	BUG_ON(tcp_conn-&gt;in.offset - offset &gt; len);
+-
+ 	if (tcp_conn-&gt;in_progress == IN_PROGRESS_WAIT_HEADER)
+ 		if (tcp_conn-&gt;in.ctask) {
+ 			struct iscsi_cls_session *cls_session =
+@@ -582,26 +424,7 @@
+ 			schedule_work(&amp;istgt_session-&gt;recvwork);
+ 		}
+ 
+-	if (tcp_conn-&gt;in.offset - offset != len) {
+-		dprintk(&quot;continue to process %d bytes\n&quot;,
+-		       (int)len - (tcp_conn-&gt;in.offset - offset));
+-		goto more;
+-	}
+-
+-nomore:
+-	processed = tcp_conn-&gt;in.offset - offset;
+-	BUG_ON(processed == 0);
+-	return processed;
+-
+-again:
+-	processed = tcp_conn-&gt;in.offset - offset;
+-	dprintk(&quot;c, processed %d from out of %d rd_desc_cnt %d\n&quot;,
+-	          processed, (int)len, (int)rd_desc-&gt;count);
+-	BUG_ON(processed == 0);
+-	BUG_ON(processed &gt; len);
+-
+-	conn-&gt;rxdata_octets += processed;
+-	return processed;
++	return 0;
+ }
+ 
+ static void
+@@ -609,11 +432,17 @@
+ {
+ 	struct iscsi_conn *conn = sk-&gt;sk_user_data;
+ 	read_descriptor_t rd_desc;
++	struct data_ready_desc d;
+ 
++	d.conn = conn;
++	d.hdr_recv = istgt_tcp_hdr_recv;
++	d.data_recv = istgt_data_recv;
++	d.finish = istgt_pdu_recv_finish;
++
+ 	read_lock(&amp;sk-&gt;sk_callback_lock);
+ 
+ 	/* use rd_desc to pass 'conn' to iscsi_tcp_data_recv */
+-	rd_desc.arg.data = conn;
++	rd_desc.arg.data = &d;
+ 	rd_desc.count = 1;
+ 	tcp_read_sock(sk, &amp;rd_desc, iscsi_tcp_data_recv);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000426.html">[Stgt-svn] r439 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000428.html">[Stgt-svn] r441 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#427">[ date ]</a>
+              <a href="thread.html#427">[ thread ]</a>
+              <a href="subject.html#427">[ subject ]</a>
+              <a href="author.html#427">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

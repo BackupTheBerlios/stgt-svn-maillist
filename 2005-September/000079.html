@@ -1,0 +1,310 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r86 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r86%20-%20trunk/kernel&In-Reply-To=%3C200509221948.j8MJmUG7003587%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000078.html">
+   <LINK REL="Next"  HREF="000080.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r86 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r86%20-%20trunk/kernel&In-Reply-To=%3C200509221948.j8MJmUG7003587%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r86 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Thu Sep 22 21:48:30 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000078.html">[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000080.html">[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#79">[ date ]</a>
+              <a href="thread.html#79">[ thread ]</a>
+              <a href="subject.html#79">[ subject ]</a>
+              <a href="author.html#79">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-22 21:48:27 +0200 (Thu, 22 Sep 2005)
+New Revision: 86
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+Log:
+prep for module/struct reorg by moving command allocation to protocol so that it can account for its priv size in the kmemcache
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-22 17:59:36 UTC (rev 85)
++++ trunk/kernel/tgt.c	2005-09-22 19:48:27 UTC (rev 86)
+@@ -54,8 +54,6 @@
+ static int tgt_pid, daemon_pid;
+ static struct sock *nls;
+ 
+-static kmem_cache_t *cmnd_slab;
+-
+ /* TODO: lock per session */
+ static spinlock_t cmnd_hash_lock;
+ #define TGT_HASH_ORDER		8
+@@ -245,10 +243,11 @@
+ static int session_init(struct tgt_session *session, int max_cmnds)
+ {
+ 	struct tgt_target *target = session-&gt;target;
++	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 	unsigned long flags;
+ 
+ 	session-&gt;cmnd_pool = mempool_create(max_cmnds, mempool_alloc_slab,
+-					    mempool_free_slab, cmnd_slab);
++					mempool_free_slab, proto-&gt;cmnd_cache);
+ 	if (!session-&gt;cmnd_pool)
+ 		goto out;
+ 
+@@ -532,29 +531,15 @@
+ {
+ 	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 	struct tgt_cmnd *cmnd;
+-	void *pcmnd_data;
+ 	unsigned long flags;
+ 
+-	/*
+-	 * slab in tgt_protocol structure like struct proto (in net/sock.h) ?
+-	 * However, how can we guarantee the specified number of commands ?
+-	 */
+-	pcmnd_data = kmalloc(proto-&gt;priv_cmd_data_size, GFP_ATOMIC);
+-	if (!pcmnd_data) {
+-		eprintk(&quot;Could not allocate command private data for %p&quot;,
+-			 session);
+-		return NULL;
+-	}
+-
+ 	cmnd = mempool_alloc(session-&gt;cmnd_pool, GFP_ATOMIC);
+ 	if (!cmnd) {
+ 		eprintk(&quot;Could not allocate tgt_cmnd for %p\n&quot;, session);
+-		kfree(pcmnd_data);
+ 		return NULL;
+ 	}
+ 
+ 	memset(cmnd, 0, sizeof(*cmnd));
+-	cmnd-&gt;tgt_protocol_private = pcmnd_data;
+ 	cmnd-&gt;session = session;
+ 	cmnd-&gt;cid = (uint64_t) (unsigned long) cmnd;
+ 	INIT_LIST_HEAD(&amp;cmnd-&gt;clist);
+@@ -579,8 +564,6 @@
+ 
+ 	dprintk(&quot;cid %llu\n&quot;, cmnd-&gt;cid);
+ 
+-	kfree(cmnd-&gt;tgt_protocol_private);
+-
+ 	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+ 		__free_page(cmnd-&gt;sg[i].page);
+ 	kfree(cmnd-&gt;sg);
+@@ -963,9 +946,6 @@
+ 
+ static void __exit tgt_exit(void)
+ {
+-	if (cmnd_slab)
+-		kmem_cache_destroy(cmnd_slab);
+-
+ 	if (nls)
+ 		sock_release(nls-&gt;sk_socket);
+ 
+@@ -987,12 +967,6 @@
+ 	if (err)
+ 		return err;
+ 
+-	cmnd_slab = kmem_cache_create(&quot;tgt_cmnd&quot;, sizeof(struct tgt_cmnd), 0,
+-				      SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
+-				      NULL, NULL);
+-	if (!cmnd_slab)
+-		goto out;
+-
+ 	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
+ 	if (!nls)
+ 		goto out;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-22 17:59:36 UTC (rev 85)
++++ trunk/kernel/tgt.h	2005-09-22 19:48:27 UTC (rev 86)
+@@ -48,7 +48,10 @@
+ 	 */
+ 	void *private;
+ 
+-	void *tgt_protocol_private;
++	/*
++	 * is the alignment still needed?  See scsi_host.h
++	 */
++	unsigned long proto_priv[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
+ extern struct tgt_session *
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-09-22 17:59:36 UTC (rev 85)
++++ trunk/kernel/tgt_protocol.h	2005-09-22 19:48:27 UTC (rev 86)
+@@ -8,6 +8,8 @@
+ #ifndef __TGT_PROTOCOL_H
+ #define __TGT_PROTOCOL_H
+ 
++#include &lt;linux/slab.h&gt;
++
+ struct module;
+ struct tgt_cmnd;
+ 
+@@ -15,7 +17,7 @@
+ 	const char *name;
+ 	struct module *module;
+ 
+-	int priv_cmd_data_size;
++	kmem_cache_t *cmnd_cache;
+ 	int uspace_pdu_size;
+ 
+ 	/*
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-22 17:59:36 UTC (rev 85)
++++ trunk/kernel/tgt_scsi.c	2005-09-22 19:48:27 UTC (rev 86)
+@@ -15,6 +15,8 @@
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
++static kmem_cache_t *scsi_tgt_cmnd_cache;
++
+ struct scsi_tgt_cmnd {
+ 	uint8_t scb[MAX_COMMAND_SIZE];
+ 	uint8_t sense_buff[SCSI_SENSE_BUFFERSIZE];
+@@ -46,8 +48,8 @@
+ 
+ static void scsi_tgt_init_cmnd_buffer(struct tgt_cmnd *cmnd)
+ {
+-	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
+-	uint8_t *scb = scsi_tgt_cmnd-&gt;scb;
++	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
++	uint8_t *scb = scmnd-&gt;scb;
+ 	uint64_t off = 0;
+ 	uint32_t len = 0;
+ 
+@@ -87,10 +89,10 @@
+ static void scsi_tgt_init_cmnd(struct tgt_cmnd *cmnd, uint8_t *proto_data,
+ 			       uint8_t *id_buff, int buff_size)
+ {
+-	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
+-	uint8_t *scb = scsi_tgt_cmnd-&gt;scb;
++	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
++	uint8_t *scb = scmnd-&gt;scb;
+ 
+-	memcpy(scb, proto_data, sizeof(scsi_tgt_cmnd-&gt;scb));
++	memcpy(scb, proto_data, sizeof(scmnd-&gt;scb));
+ 
+ 	/* set operation */
+ 	switch (scb[0]) {
+@@ -138,11 +140,11 @@
+ 
+ static int sense_data_build(struct tgt_cmnd *cmnd, int err)
+ {
+-	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
++	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
+ 	int len = 8, alen = 6;
+-	uint8_t *data = scsi_tgt_cmnd-&gt;sense_buff;
++	uint8_t *data = scmnd-&gt;sense_buff;
+ 
+-	memset(data, 0, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
++	memset(data, 0, sizeof(scmnd-&gt;sense_buff));
+ 
+ 	if (cmnd-&gt;rw == READ || cmnd-&gt;rw == WRITE) {
+ 		uint8_t key = error_to_sense_key(err);
+@@ -160,7 +162,7 @@
+ 	} else {
+ 		/* uspace command failure */
+ 
+-		len = min(cmnd-&gt;bufflen, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
++		len = min(cmnd-&gt;bufflen, sizeof(scmnd-&gt;sense_buff));
+ 		alen = 0;
+ 
+ 		memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
+@@ -183,9 +185,8 @@
+ 
+ void scsi_tgt_build_uspace_pdu(struct tgt_cmnd *cmnd, void *data)
+ {
+-	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
+-
+-	memcpy(data, scsi_tgt_cmnd-&gt;scb, sizeof(scsi_tgt_cmnd-&gt;scb));
++	struct scsi_tgt_cmnd *scmnd = (struct scsi_tgt_cmnd *)cmnd-&gt;proto_priv;
++	memcpy(data, scmnd-&gt;scb, sizeof(scmnd-&gt;scb));
+ }
+ 
+ static struct tgt_protocol scsi_tgt_proto = {
+@@ -195,17 +196,30 @@
+ 	.init_cmnd_buffer = scsi_tgt_init_cmnd_buffer,
+ 	.cmnd_done = scsi_tgt_cmnd_done,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
+-	.priv_cmd_data_size = sizeof(struct scsi_tgt_cmnd),
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+ 
+ static int __init scsi_tgt_init(void)
+ {
+-	return tgt_protocol_register(&amp;scsi_tgt_proto);
++	int err;
++
++	scsi_tgt_cmnd_cache = kmem_cache_create(&quot;scsi_tgt_cmnd&quot;,
++			sizeof(struct tgt_cmnd) + sizeof(struct scsi_tgt_cmnd),
++			0, SLAB_HWCACHE_ALIGN | SLAB_NO_REAP, NULL, NULL);
++	if (!scsi_tgt_cmnd_cache)
++		return -ENOMEM;
++	scsi_tgt_proto.cmnd_cache = scsi_tgt_cmnd_cache;
++
++	err = tgt_protocol_register(&amp;scsi_tgt_proto);
++	if (err)
++		kmem_cache_destroy(scsi_tgt_cmnd_cache);
++
++	return err;
+ }
+ 
+ static void __exit scsi_tgt_exit(void)
+ {
++	kmem_cache_destroy(scsi_tgt_cmnd_cache);
+ 	tgt_protocol_unregister(&amp;scsi_tgt_proto);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000078.html">[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000080.html">[Stgt-svn] r87 - in trunk: . iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#79">[ date ]</a>
+              <a href="thread.html#79">[ thread ]</a>
+              <a href="subject.html#79">[ subject ]</a>
+              <a href="author.html#79">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

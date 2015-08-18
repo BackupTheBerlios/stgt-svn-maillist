@@ -1,0 +1,107 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r679 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r679%20-%20trunk/usr&In-Reply-To=%3C200611261557.kAQFvtZG003617%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000665.html">
+   <LINK REL="Next"  HREF="000667.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r679 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r679%20-%20trunk/usr&In-Reply-To=%3C200611261557.kAQFvtZG003617%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r679 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 26 16:57:55 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000665.html">[Stgt-svn] r678 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000667.html">[Stgt-svn] r680 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#666">[ date ]</a>
+              <a href="thread.html#666">[ thread ]</a>
+              <a href="subject.html#666">[ subject ]</a>
+              <a href="author.html#666">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-26 16:57:54 +0100 (Sun, 26 Nov 2006)
+New Revision: 679
+
+Modified:
+   trunk/usr/tgtadm-iscsi.c
+Log:
+Add PATH workaround
+
+
+Modified: trunk/usr/tgtadm-iscsi.c
+===================================================================
+--- trunk/usr/tgtadm-iscsi.c	2006-11-26 14:58:59 UTC (rev 678)
++++ trunk/usr/tgtadm-iscsi.c	2006-11-26 15:57:54 UTC (rev 679)
+@@ -42,7 +42,8 @@
+  * to implement this program by using Python or Perl.
+  */
+ 
+-static char cmdstr[] = &quot;tgtadm --lld iscsi&quot;;
++/* static char cmdstr[] = &quot;tgtadm --lld iscsi&quot;; */
++static char cmdstr[256];
+ static char cmdline[2048];
+ 
+ static struct option const long_options[] =
+@@ -400,6 +401,20 @@
+ 	start = stop = in = out = 0;
+ 	name = value = iqn = path = user = password = NULL;
+ 
++	/* workaround */
++	{
++		char *p;
++
++		if (*argv[0] == '.') {
++			getcwd(cmdstr, sizeof(cmdstr));
++			sprintf(cmdstr + strlen(cmdstr), &quot;/%s&quot;, argv[0] + 1);
++		} else
++			strcpy(cmdstr, argv[0]);
++
++		p = strstr(cmdstr, &quot;tgtadm-iscsi&quot;);
++		sprintf(p, &quot;tgtadm --lld iscsi&quot;);
++	}
++
+ 	while ((ch = getopt_long(argc, argv, short_options,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000665.html">[Stgt-svn] r678 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000667.html">[Stgt-svn] r680 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#666">[ date ]</a>
+              <a href="thread.html#666">[ thread ]</a>
+              <a href="subject.html#666">[ subject ]</a>
+              <a href="author.html#666">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,203 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r839 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r839%20-%20trunk/usr&In-Reply-To=%3C200703171216.l2HCGuEp008308%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000825.html">
+   <LINK REL="Next"  HREF="000827.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r839 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r839%20-%20trunk/usr&In-Reply-To=%3C200703171216.l2HCGuEp008308%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r839 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 17 13:16:56 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000825.html">[Stgt-svn] r838 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000827.html">[Stgt-svn] r840 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#826">[ date ]</a>
+              <a href="thread.html#826">[ thread ]</a>
+              <a href="subject.html#826">[ subject ]</a>
+              <a href="author.html#826">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-17 13:16:55 +0100 (Sat, 17 Mar 2007)
+New Revision: 839
+
+Removed:
+   trunk/usr/osd.h
+Modified:
+   trunk/usr/osd.c
+Log:
+remove obsolete service action codes and let bd_submit do what it wants
+
+Signed-off-by: Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+
+
+Modified: trunk/usr/osd.c
+===================================================================
+--- trunk/usr/osd.c	2007-03-17 05:00:39 UTC (rev 838)
++++ trunk/usr/osd.c	2007-03-17 12:16:55 UTC (rev 839)
+@@ -1,8 +1,7 @@
+ /*
+  * SCSI object storage device command processing
+  *
+- * Copyright (C) 2006 Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+- *
++ * Copyright (C) 2006-2007 Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+  * Copyright (C) 2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+  * Copyright (C) 2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  *
+@@ -21,7 +20,6 @@
+ #include &quot;driver.h&quot;
+ #include &quot;scsi.h&quot;
+ #include &quot;spc.h&quot;
+-#include &quot;osd.h&quot;
+ 
+ #define PRODUCT_ID	&quot;OSD&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+@@ -119,61 +117,18 @@
+ 
+ static int osd_varlen_cdb(int host_no, struct scsi_cmd *cmd)
+ {
+-	int ret = SAM_STAT_GOOD;
+-	uint16_t action;
+ 	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+ 
+ 	dprintf(&quot;cdb[0] %x datalen %u\n&quot;, cmd-&gt;scb[0], cmd-&gt;len);
+ 	if (cmd-&gt;scb[7] != 200 - 8) {
+ 		eprintf(&quot;request size %d wrong, should be 200\n&quot;,
+ 			cmd-&gt;scb[7] + 8);
+-		goto sense;
++		sense_data_build(cmd, key, asc, 0);
++		cmd-&gt;len = 0;
++		return SAM_STAT_CHECK_CONDITION;
+ 	}
+ 
+-	action = (cmd-&gt;scb[8] &lt;&lt; 8) | cmd-&gt;scb[9];
+-
+-	switch (action) {
+-	case OSD_APPEND:
+-	case OSD_CREATE:
+-	case OSD_CREATE_AND_WRITE:
+-	case OSD_CREATE_COLLECTION:
+-	case OSD_CREATE_PARTITION:
+-	case OSD_FLUSH:
+-	case OSD_FLUSH_COLLECTION:
+-	case OSD_FLUSH_OSD:
+-	case OSD_FLUSH_PARTITION:
+-	case OSD_FORMAT_OSD:
+-	case OSD_GET_ATTRIBUTES:
+-	case OSD_GET_MEMBER_ATTRIBUTES:
+-	case OSD_LIST:
+-	case OSD_LIST_COLLECTION:
+-	case OSD_PERFORM_SCSI_COMMAND:
+-	case OSD_PERFORM_TASK_MGMT_FUNC:
+-	case OSD_QUERY:
+-	case OSD_READ:
+-	case OSD_REMOVE:
+-	case OSD_REMOVE_COLLECTION:
+-	case OSD_REMOVE_MEMBER_OBJECTS:
+-	case OSD_REMOVE_PARTITION:
+-	case OSD_SET_ATTRIBUTES:
+-	case OSD_SET_KEY:
+-	case OSD_SET_MASTER_KEY:
+-	case OSD_SET_MEMBER_ATTRIBUTES:
+-	case OSD_WRITE:
+-		ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
+-		if (ret)
+-			goto sense;
+-		break;
+-	default:
+-		eprintf(&quot;unknown service action 0x%04x\n&quot;, action);
+-		goto sense;
+-	}
+-
+-	return SAM_STAT_GOOD;
+-sense:
+-	sense_data_build(cmd, key, asc, 0);
+-	cmd-&gt;len = 0;
+-	return SAM_STAT_CHECK_CONDITION;
++	return cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
+ }
+ 
+ static void device_osd_init(struct tgt_device *dev)
+
+Deleted: trunk/usr/osd.h
+===================================================================
+--- trunk/usr/osd.h	2007-03-17 05:00:39 UTC (rev 838)
++++ trunk/usr/osd.h	2007-03-17 12:16:55 UTC (rev 839)
+@@ -1,33 +0,0 @@
+-#ifndef __OSD_H
+-#define __OSD_H
+-
+-/* varlen cdb service actions for OSD-2 (before SNIA changes 17 jan 07) */
+-#define OSD_APPEND			0x8807
+-#define OSD_CREATE			0x8802
+-#define OSD_CREATE_AND_WRITE		0x8812
+-#define OSD_CREATE_COLLECTION		0x8815
+-#define OSD_CREATE_PARTITION		0x880b
+-#define OSD_FLUSH			0x8808
+-#define OSD_FLUSH_COLLECTION		0x881a
+-#define OSD_FLUSH_OSD			0x881c
+-#define OSD_FLUSH_PARTITION		0x881b
+-#define OSD_FORMAT_OSD			0x8801
+-#define OSD_GET_ATTRIBUTES		0x880e
+-#define OSD_GET_MEMBER_ATTRIBUTES	0x8822
+-#define OSD_LIST			0x8803
+-#define OSD_LIST_COLLECTION		0x8817
+-#define OSD_PERFORM_SCSI_COMMAND	0x8f7e
+-#define OSD_PERFORM_TASK_MGMT_FUNC	0x8f7f
+-#define OSD_QUERY			0x8820
+-#define OSD_READ			0x8805
+-#define OSD_REMOVE			0x880a
+-#define OSD_REMOVE_COLLECTION		0x8816
+-#define OSD_REMOVE_MEMBER_OBJECTS	0x8821
+-#define OSD_REMOVE_PARTITION		0x880c
+-#define OSD_SET_ATTRIBUTES		0x880f
+-#define OSD_SET_KEY			0x8818
+-#define OSD_SET_MASTER_KEY		0x8819
+-#define OSD_SET_MEMBER_ATTRIBUTES	0x8823
+-#define OSD_WRITE			0x8806
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000825.html">[Stgt-svn] r838 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000827.html">[Stgt-svn] r840 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#826">[ date ]</a>
+              <a href="thread.html#826">[ thread ]</a>
+              <a href="subject.html#826">[ subject ]</a>
+              <a href="author.html#826">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

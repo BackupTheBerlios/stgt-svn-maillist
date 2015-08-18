@@ -1,0 +1,131 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r274 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r274%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602060647.k166l2Aq006153%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000260.html">
+   <LINK REL="Next"  HREF="000262.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r274 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r274%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602060647.k166l2Aq006153%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r274 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb  6 07:47:02 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000260.html">[Stgt-svn] r273 - in branches/use-scsi-ml: ibmvstgt/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000262.html">[Stgt-svn] r275 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#261">[ date ]</a>
+              <a href="thread.html#261">[ thread ]</a>
+              <a href="subject.html#261">[ subject ]</a>
+              <a href="author.html#261">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-06 07:46:58 +0100 (Mon, 06 Feb 2006)
+New Revision: 274
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+   branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+Log:
+Rename scsi_tgt_nl_init/exit scsi_tgt_if_init/exit.
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-06 06:43:33 UTC (rev 273)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-06 06:46:58 UTC (rev 274)
+@@ -268,12 +268,12 @@
+ 	}
+ }
+ 
+-void __exit scsi_tgt_nl_exit(void)
++void __exit scsi_tgt_if_exit(void)
+ {
+ 	sock_release(nls-&gt;sk_socket);
+ }
+ 
+-int __init scsi_tgt_nl_init(void)
++int __init scsi_tgt_if_init(void)
+ {
+ 	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv,
+ 				    THIS_MODULE);
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-06 06:43:33 UTC (rev 273)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-06 06:46:58 UTC (rev 274)
+@@ -457,7 +457,7 @@
+ 	if (!scsi_tgtd)
+ 		return -ENOMEM;
+ 
+-	err = scsi_tgt_nl_init();
++	err = scsi_tgt_if_init();
+ 	if (err)
+ 		destroy_workqueue(scsi_tgtd);
+ 	return err;
+@@ -466,7 +466,7 @@
+ static void __exit scsi_tgt_exit(void)
+ {
+ 	destroy_workqueue(scsi_tgtd);
+-	scsi_tgt_nl_exit();
++	scsi_tgt_if_exit();
+ }
+ 
+ module_init(scsi_tgt_init);
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-06 06:43:33 UTC (rev 273)
++++ branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-06 06:46:58 UTC (rev 274)
+@@ -14,8 +14,8 @@
+ 	struct socket *sock;
+ };
+ 
+-extern void scsi_tgt_nl_exit(void);
+-extern int scsi_tgt_nl_init(void);
++extern void scsi_tgt_if_exit(void);
++extern int scsi_tgt_if_init(void);
+ 
+ extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd);
+ extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000260.html">[Stgt-svn] r273 - in branches/use-scsi-ml: ibmvstgt/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000262.html">[Stgt-svn] r275 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#261">[ date ]</a>
+              <a href="thread.html#261">[ thread ]</a>
+              <a href="subject.html#261">[ subject ]</a>
+              <a href="author.html#261">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

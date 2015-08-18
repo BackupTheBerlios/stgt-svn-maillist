@@ -1,0 +1,224 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r760 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r760%20-%20trunk/doc&In-Reply-To=%3C200701061010.l06AAVZh021882%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000746.html">
+   <LINK REL="Next"  HREF="000748.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r760 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r760%20-%20trunk/doc&In-Reply-To=%3C200701061010.l06AAVZh021882%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r760 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 11:10:31 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000746.html">[Stgt-svn] r759 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000748.html">[Stgt-svn] r761 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#747">[ date ]</a>
+              <a href="thread.html#747">[ thread ]</a>
+              <a href="subject.html#747">[ subject ]</a>
+              <a href="author.html#747">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 11:10:31 +0100 (Sat, 06 Jan 2007)
+New Revision: 760
+
+Modified:
+   trunk/doc/README.iscsi
+Log:
+Improve README.iscsi
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2007-01-06 09:50:10 UTC (rev 759)
++++ trunk/doc/README.iscsi	2007-01-06 10:10:31 UTC (rev 760)
+@@ -35,6 +35,8 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
++    Account information:
+     ACL information:
+     LUN information:
+         LUN: 0
+@@ -54,6 +56,8 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
++    Account information:
+     ACL information:
+         ALL
+     LUN information:
+@@ -77,6 +81,8 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
++    Account information:
+     ACL information:
+     LUN information:
+         LUN: 0
+@@ -96,6 +102,8 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
++    Account information:
+     ACL information:
+         192.168.2.29
+         192.168.11.0/24
+@@ -116,6 +124,8 @@
+     System information:
+         Driver: iscsi
+         Status: suspended
++    I_T nexus information:
++    Account information:
+     LUN information:
+         LUN: 0
+             SCSI ID: deadbeaf1:0
+@@ -201,6 +211,7 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
+     Account information:
+         fujita
+     ACL information:
+@@ -228,6 +239,7 @@
+     System information:
+         Driver: iscsi
+         Status: running
++    I_T nexus information:
+     Account information:
+         fujita
+         hoge (outgoing)
+@@ -242,6 +254,86 @@
+             Backing store type: file
+ 
+ 
++Initiator Information
++-------------
++After the target accepts initiators, the system information would be
++something like the followings:
++
++host:~/tgt# ./tgt/usr/tgtadm --lld iscsi --op show --mode target
++Target 1: iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++    System information:
++        Driver: iscsi
++        Status: running
++    I_T nexus information:
++        I_T nexus: 2
++            Initiator: iqn.1987-05.com.cisco:01.4438aca09387
++            Connection: 0
++                IP Address: 192.168.11.5
++    Account information:
++    ACL information:
++        ALL
++    LUN information:
++        LUN: 0
++            SCSI ID: deadbeaf1:0
++            SCSI SN:
++            Size: 1G
++            Backing store: /var/tmp/image
++            Backing store type: file
++
++
++One initiator (192.168.11.5) logs in now. Let's try again:
++
++host:~/tgt# ./tgt/usr/tgtadm --lld iscsi --op show --mode target
++Target 1: iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++    System information:
++        Driver: iscsi
++        Status: running
++    I_T nexus information:
++        I_T nexus: 2
++            Initiator: iqn.1987-05.com.cisco:01.4438aca09387
++            Connection: 0
++                IP Address: 192.168.11.5
++        I_T nexus: 3
++            Initiator: iqn.1991-05.com.microsoft:kernel
++            Connection: 1
++                IP Address: 192.168.11.133
++     Account information:
++    ACL information:
++        ALL
++    LUN information:
++        LUN: 0
++            SCSI ID: deadbeaf1:0
++            SCSI SN:
++            Size: 1G
++            Backing store: /var/tmp/image
++            Backing store type: file
++
++
++Now we have two initiators. You can see the parameters that the target
++and initiator negotiated (use the values follows &quot;I_T nexus:&quot;):
++
++host:~/tgt# ./tgt/usr/tgtadm --lld iscsi --op show --mode session --tid 1 --sid 3
++MaxRecvDataSegmentLength=8192
++MaxXmitDataSegmentLength=8192
++HeaderDigest=None
++DataDigest=None
++InitialR2T=Yes
++MaxOutstandingR2T=1
++ImmediateData=Yes
++FirstBurstLength=65536
++MaxBurstLength=262144
++DataPDUInOrder=Yes
++DataSequenceInOrder=Yes
++ErrorRecoveryLevel=0
++IFMarker=No
++OFMarker=No
++DefaultTime2Wait=2
++DefaultTime2Retain=20
++OFMarkInt=Reject
++IFMarkInt=Reject
++MaxConnections=1
++
++
+ Shutdown
+ -------------
+ host:~/tgt# killall -9 tgtd
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000746.html">[Stgt-svn] r759 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000748.html">[Stgt-svn] r761 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#747">[ date ]</a>
+              <a href="thread.html#747">[ thread ]</a>
+              <a href="subject.html#747">[ subject ]</a>
+              <a href="author.html#747">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

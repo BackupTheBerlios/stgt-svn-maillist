@@ -1,0 +1,88 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r472 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r472%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605071441.k47EfDRi028519%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000458.html">
+   <LINK REL="Next"  HREF="000460.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r472 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r472%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605071441.k47EfDRi028519%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r472 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun May  7 16:41:13 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000458.html">[Stgt-svn] r471 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000460.html">[Stgt-svn] r473 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#459">[ date ]</a>
+              <a href="thread.html#459">[ thread ]</a>
+              <a href="subject.html#459">[ subject ]</a>
+              <a href="author.html#459">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-07 16:41:12 +0200 (Sun, 07 May 2006)
+New Revision: 472
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+Log:
+Add suspend_rx check before IN_PROGESS_DATA_RECV because we need to wait for WRITE command buffer.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-07 12:28:06 UTC (rev 471)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-07 14:41:12 UTC (rev 472)
+@@ -937,6 +937,11 @@
+ 		}
+ 	}
+ 
++	if (unlikely(conn-&gt;suspend_rx)) {
++		debug_tcp(&quot;conn %d Rx suspended!\n&quot;, conn-&gt;id);
++		return 0;
++	}
++
+ 	if (tcp_conn-&gt;in_progress == IN_PROGRESS_DATA_RECV &amp;&amp;
+ 	   tcp_conn-&gt;in.copy) {
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000458.html">[Stgt-svn] r471 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000460.html">[Stgt-svn] r473 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#459">[ date ]</a>
+              <a href="thread.html#459">[ thread ]</a>
+              <a href="subject.html#459">[ subject ]</a>
+              <a href="author.html#459">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

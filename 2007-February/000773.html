@@ -1,0 +1,262 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r786 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r786%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200702251701.l1PH1BWl010460%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000772.html">
+   <LINK REL="Next"  HREF="000774.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r786 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r786%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200702251701.l1PH1BWl010460%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r786 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Feb 25 18:01:11 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000772.html">[Stgt-svn] r785 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000774.html">[Stgt-svn] r787 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#773">[ date ]</a>
+              <a href="thread.html#773">[ thread ]</a>
+              <a href="subject.html#773">[ subject ]</a>
+              <a href="author.html#773">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-25 18:01:03 +0100 (Sun, 25 Feb 2007)
+New Revision: 786
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+cmd_end_notify uses scsi_cmd structure directly. TODO: kill most of members in iscsi_task. We can do something like struct inode does.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/driver.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -17,8 +17,7 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
+-	int (*cmd_end_notify)(uint64_t nid, int len, int result, int rw, uint64_t addr,
+-			      uint64_t tag);
++	int (*cmd_end_notify)(uint64_t nid, int result, struct scsi_cmd *);
+ 	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+ 
+ 	struct backedio_template *default_bdt;
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/iscsi/iscsi.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -6,8 +6,7 @@
+ extern int iscsi_target_update(int, char *);
+ extern int iscsi_mgmt_account(uint32_t op, int tid, uint32_t uid, char *param,
+ 			      char *buf, int len);
+-extern int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw,
+-			       uint64_t addr, uint64_t tag);
++extern int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd);
+ extern int iscsi_tm_done(uint64_t nid, uint64_t mid, int result);
+ 
+ struct tgt_driver iscsi = {
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/iscsi/iscsid.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -874,27 +874,26 @@
+ 	iscsi_free_task(task);
+ }
+ 
+-int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw, uint64_t addr,
+-			uint64_t tag)
++int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd)
+ {
+ 	struct iscsi_session *session;
+ 	struct iscsi_task *task;
+ 
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot;\n&quot;, nid,
+-		len, result, rw, addr, tag);
++		cmd-&gt;len, result, cmd-&gt;rw, cmd-&gt;uaddr, cmd-&gt;tag);
+ 	session = session_lookup(nid);
+ 	if (!session)
+ 		return -EINVAL;
+ 
+ 	list_for_each_entry(task, &amp;session-&gt;cmd_list, c_hlist) {
+-		if (task-&gt;tag == tag)
++		if (task-&gt;tag == cmd-&gt;tag)
+ 			goto found;
+ 	}
+-	eprintf(&quot;Cannot find a task %&quot; PRIx64 &quot;\n&quot;, tag);
++	eprintf(&quot;Cannot find a task %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;tag);
+ 	return -EINVAL;
+ 
+ found:
+-	dprintf(&quot;found a task %&quot; PRIx64 &quot;\n&quot;, tag);
++	dprintf(&quot;found a task %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;tag);
+ 
+ 	/*
+ 	 * Since the connection is closed we just free the task.
+@@ -907,10 +906,10 @@
+ 		return 0;
+ 	}
+ 
+-	task-&gt;addr = addr;
++	task-&gt;addr = cmd-&gt;uaddr;
+ 	task-&gt;result = result;
+-	task-&gt;len = len;
+-	task-&gt;rw = rw;
++	task-&gt;len = cmd-&gt;len;
++	task-&gt;rw = cmd-&gt;rw;
+ 
+ 	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/target.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -466,8 +466,7 @@
+ 
+ 		set_cmd_processed(cmd);
+ 		if (!cmd-&gt;async)
+-			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(nid, cmd-&gt;len, result,
+-								 cmd-&gt;rw, cmd-&gt;uaddr, tag);
++			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(nid, result, cmd);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %&quot; PRIx64 &quot; %x %&quot; PRIu64 &quot; %d\n&quot;,
+@@ -486,9 +485,7 @@
+ 
+ 	/* TODO: sense in case of error. */
+ 	tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id,
+-							cmd-&gt;len, result,
+-							cmd-&gt;rw, cmd-&gt;uaddr,
+-							cmd-&gt;tag);
++							result, cmd);
+ 	return;
+ }
+ 
+@@ -496,7 +493,6 @@
+ {
+ 	struct scsi_cmd *cmd, *tmp;
+ 	int enabled, result;
+-	int (* notify_fn)(uint64_t, int, int, int, uint64_t, uint64_t);
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+ 		enabled = cmd_enabled(q, cmd);
+@@ -513,9 +509,8 @@
+ 			cmd_post_perform(q, cmd);
+ 			set_cmd_processed(cmd);
+ 			if (!cmd-&gt;async) {
+-				notify_fn = tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify;
+-				notify_fn(cmd-&gt;cmd_nexus_id, cmd-&gt;len, result, cmd-&gt;rw,
+-					  cmd-&gt;uaddr, cmd-&gt;tag);
++				tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(
++					cmd-&gt;cmd_nexus_id, result, cmd);
+ 			}
+ 		} else
+ 			break;
+@@ -610,8 +605,8 @@
+ 		err = -EBUSY;
+ 	} else {
+ 		__cmd_done(target, cmd);
+-		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id, 0,
+-								TASK_ABORTED, 0, 0, cmd-&gt;tag);
++		tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;cmd_nexus_id,
++								TASK_ABORTED, cmd);
+ 	}
+ 	return err;
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/tgtd.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -102,8 +102,8 @@
+ #endif
+ 
+ extern int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result);
+-extern int kspace_send_cmd_res(uint64_t nid, int len, int result,
+-			       int rw, uint64_t addr, uint64_t tag);
++extern int kspace_send_cmd_res(uint64_t nid, int result, struct scsi_cmd *);
++
+ extern int ipc_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, char *args);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/tgtif.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -100,8 +100,7 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-int kspace_send_cmd_res(uint64_t nid, int len, int result,
+-			int rw, uint64_t addr, uint64_t tag)
++int kspace_send_cmd_res(uint64_t nid, int result, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_event ev;
+ 
+@@ -109,11 +108,11 @@
+ 
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+ 	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+-	ev.p.cmd_rsp.len = len;
++	ev.p.cmd_rsp.len = cmd-&gt;len;
+ 	ev.p.cmd_rsp.result = result;
+-	ev.p.cmd_rsp.uaddr = addr;
+-	ev.p.cmd_rsp.rw = rw;
+-	ev.p.cmd_rsp.tag = tag;
++	ev.p.cmd_rsp.uaddr = cmd-&gt;uaddr;
++	ev.p.cmd_rsp.rw = cmd-&gt;rw;
++	ev.p.cmd_rsp.tag = cmd-&gt;tag;
+ 
+ 	return kreq_send(&amp;ev);
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000772.html">[Stgt-svn] r785 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000774.html">[Stgt-svn] r787 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#773">[ date ]</a>
+              <a href="thread.html#773">[ thread ]</a>
+              <a href="subject.html#773">[ subject ]</a>
+              <a href="author.html#773">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

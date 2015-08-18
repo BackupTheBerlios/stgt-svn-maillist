@@ -1,0 +1,355 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r688 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r688%20-%20trunk/usr&In-Reply-To=%3C200612181254.kBICs54p004830%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000674.html">
+   <LINK REL="Next"  HREF="000676.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r688 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r688%20-%20trunk/usr&In-Reply-To=%3C200612181254.kBICs54p004830%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r688 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Dec 18 13:54:05 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000674.html">[Stgt-svn] r687 - trunk/patches
+</A></li>
+        <LI>Next message: <A HREF="000676.html">[Stgt-svn] r689 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#675">[ date ]</a>
+              <a href="thread.html#675">[ thread ]</a>
+              <a href="subject.html#675">[ subject ]</a>
+              <a href="author.html#675">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-18 13:54:04 +0100 (Mon, 18 Dec 2006)
+New Revision: 688
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+Log:
+Add backing-store option to tgtadm.
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-12-18 06:31:44 UTC (rev 687)
++++ trunk/usr/mgmt.c	2006-12-18 12:54:04 UTC (rev 688)
+@@ -114,7 +114,7 @@
+ 
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+-		err = tgt_device_create(req-&gt;tid, req-&gt;lun);
++		err = tgt_device_create(req-&gt;tid, req-&gt;lun, params);
+ 		break;
+ 	case OP_DELETE:
+ 		err = tgt_device_destroy(req-&gt;tid, req-&gt;lun);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-12-18 06:31:44 UTC (rev 687)
++++ trunk/usr/target.c	2006-12-18 12:54:04 UTC (rev 688)
+@@ -131,10 +131,37 @@
+ 	INIT_LIST_HEAD(&amp;q-&gt;queue);
+ }
+ 
+-int tgt_device_create(int tid, uint64_t lun)
++static int tgt_device_path_update(struct target *target,
++				  struct tgt_device *device, char *path)
+ {
++	char *p;
++	int err, dev_fd;
++	uint64_t size;
++
++	p = strdup(path);
++	if (!p)
++		return -ENOMEM;
++
++	err = target-&gt;bdt-&gt;bd_open(device, path, &amp;dev_fd, &amp;size);
++	if (err) {
++		free(p);
++		return -EINVAL;
++	}
++
++	device-&gt;fd = dev_fd;
++	device-&gt;addr = 0;
++	device-&gt;size = size;
++	device-&gt;path = p;
++
++	return 0;
++}
++
++int tgt_device_create(int tid, uint64_t lun, char *args)
++{
+ 	struct target *target;
+ 	struct tgt_device *device;
++	char *val = args + strlen(args) + 1;
++	int err;
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot;\n&quot;, tid, lun);
+ 
+@@ -148,15 +175,28 @@
+ 		return -EINVAL;
+ 	}
+ 
++	if (!*args)
++		return -EINVAL;
++
+ 	device = zalloc(sizeof(*device) + target-&gt;bdt-&gt;bd_datasize);
+ 	if (!device)
+ 		return -ENOMEM;
+ 
++	if (!strcmp(args, &quot;path&quot;)) {
++		err = tgt_device_path_update(target, device, val);
++		if (err) {
++			free(device);
++			return -EINVAL;
++		}
++	} else {
++		free(device);
++		return -EINVAL;
++	}
++
+ 	device-&gt;lun = lun;
+ 
+ 	snprintf(device-&gt;scsi_id, sizeof(device-&gt;scsi_id),
+ 		 &quot;deadbeaf%d:%&quot; PRIu64, tid, lun);
+-	memset(device-&gt;scsi_sn, 0, sizeof(device-&gt;scsi_sn));
+ 
+ 	tgt_cmd_queue_init(&amp;device-&gt;cmd_queue);
+ 	device_hlist_insert(target, device);
+@@ -232,36 +272,6 @@
+ 	return rest;
+ }
+ 
+-static int tgt_device_path_update(struct target *target,
+-				  struct tgt_device *device, char *path)
+-{
+-	char *p;
+-	int err, dev_fd;
+-	uint64_t size;
+-
+-	if (device-&gt;path) {
+-		eprintf(&quot;path is already set %p\n&quot;, device-&gt;path);
+-		return -EINVAL;
+-	}
+-
+-	p = strdup(path);
+-	if (!p)
+-		return -ENOMEM;
+-
+-	err = target-&gt;bdt-&gt;bd_open(device, path, &amp;dev_fd, &amp;size);
+-	if (err) {
+-		free(p);
+-		return -EINVAL;
+-	}
+-
+-	device-&gt;fd = dev_fd;
+-	device-&gt;addr = 0;
+-	device-&gt;size = size;
+-	device-&gt;path = p;
+-
+-	return 0;
+-}
+-
+ int tgt_device_update(int tid, uint64_t dev_id, char *name)
+ {
+ 	int err = 0;
+@@ -279,9 +289,7 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	if (!strcmp(name, &quot;path&quot;))
+-		err = tgt_device_path_update(target, device, val);
+-	else if (!strcmp(name, &quot;scsi_id&quot;))
++	if (!strcmp(name, &quot;scsi_id&quot;))
+ 		memcpy(device-&gt;scsi_id, val, sizeof(device-&gt;scsi_id) - 1);
+ 	else if (!strcmp(name, &quot;scsi_sn&quot;))
+ 		memcpy(device-&gt;scsi_sn, val, sizeof(device-&gt;scsi_sn) - 1);
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-18 06:31:44 UTC (rev 687)
++++ trunk/usr/tgtadm.c	2006-12-18 12:54:04 UTC (rev 688)
+@@ -71,9 +71,10 @@
+ 	{&quot;lun&quot;, required_argument, NULL, 'u'},
+ 	{&quot;aid&quot;, required_argument, NULL, 'a'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+-	{&quot;bus&quot;, required_argument, NULL, 'b'},
++	{&quot;bus&quot;, required_argument, NULL, 'B'},
+ 	{&quot;name&quot;, required_argument, NULL, 'n'},
+ 	{&quot;value&quot;, required_argument, NULL, 'v'},
++	{&quot;backing-store&quot;, required_argument, NULL, 'b'},
+ 	{&quot;debug&quot;, no_argument, NULL, 'd'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+@@ -303,11 +304,11 @@
+ 	char *lldname;
+ 	struct tgtadm_req *req;
+ 	char buf[BUFSIZE];
+-	char *name, *value;
++	char *name, *value, *path;
+ 	int mode = MODE_SYSTEM;
+ 
+ 	cid = hostno = aid = sid = lun = 0;
+-	lldname = name = value = NULL;
++	lldname = name = value = path = NULL;
+ 
+ 	optind = 1;
+ 	while ((ch = getopt_long(argc, argv, short_options,
+@@ -340,9 +341,12 @@
+ 		case 'i':
+ 			hostno = strtol(optarg, NULL, 10);
+ 			break;
+-		case 'b':
++		case 'B':
+ 			hostno = bus_to_host(optarg);
+ 			break;
++		case 'b':
++			path = optarg;
++			break;
+ 		case 'n':
+ 			name = optarg;
+ 			break;
+@@ -356,7 +360,7 @@
+ 			usage(0);
+ 			break;
+ 		default:
+-			usage(-1);
++			usage(1);
+ 		}
+ 	}
+ 	if (op &lt; 0) {
+@@ -369,12 +373,12 @@
+ 		while (optind &lt; argc)
+ 			fprintf(stderr, &quot;%s&quot;, argv[optind++]);
+ 		fprintf(stderr, &quot;\n&quot;);
+-		usage(-1);
++		usage(1);
+ 	}
+ 
+ 	if (mode &lt; 0) {
+ 		fprintf(stderr, &quot;unknown mode\n&quot;);
+-		usage(-1);
++		usage(1);
+ 	}
+ 
+ 	memset(buf, 0, sizeof(buf));
+@@ -390,10 +394,18 @@
+ 	req-&gt;aid = aid;
+ 	req-&gt;host_no = hostno;
+ 
+-	if (name &amp;&amp; value) {
+-		int rest = sizeof(buf) - sizeof(*req);
++	/* FIXME */
++	if ((name &amp;&amp; value) || path) {
++		int rest;
+ 		char *p = (char *) req-&gt;data;
+ 
++		if (path) {
++			name = &quot;path&quot;;
++			value = path;
++		}
++		rest = sizeof(buf) - sizeof(*req);
++		p = (char *) req-&gt;data;
++
+ 		len = snprintf(p, rest, &quot;%s&quot;, name);
+ 		len += 1;
+ 		len += snprintf(p + len, rest - len, &quot;%s&quot;, value);
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-18 06:31:44 UTC (rev 687)
++++ trunk/usr/tgtadm.h	2006-12-18 12:54:04 UTC (rev 688)
+@@ -23,6 +23,19 @@
+ 	MODE_ACCOUNT,
+ };
+ 
++enum tgtadm_target_type {
++	TARGET_SBC, /* disk */
++	TARGET_SSC, /* tape */
++	TARGET_MMC, /* cdrom */
++	TARGET_OSD, /* object storage device */
++};
++
++/* backing store type */
++enum tgtadm_lu_bs_type {
++	LU_BS_FILE,
++	LU_BS_RAW, /* pass through */
++};
++
+ struct tgtadm_req {
+ 	enum tgtadm_mode mode;
+ 	enum tgtadm_op op;
+@@ -36,12 +49,12 @@
+ 	char lld[TGT_LLD_NAME_LEN];
+ 	uint32_t host_no;
+ 	uint64_t data[0];
+-} __attribute__ ((aligned (sizeof(uint64_t))));
++};
+ 
+ struct tgtadm_res {
+ 	uint32_t err;
+ 	uint32_t len;
+ 	uint64_t data[0];
+-} __attribute__ ((aligned (sizeof(uint64_t))));;
++};
+ 
+ #endif
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-12-18 06:31:44 UTC (rev 687)
++++ trunk/usr/tgtd.h	2006-12-18 12:54:04 UTC (rev 688)
+@@ -64,7 +64,7 @@
+ extern int kspace_send_cmd_res(int host_no, int len, int result,
+ 			       int rw, uint64_t addr, uint64_t tag);
+ extern int ipc_init(void);
+-extern int tgt_device_create(int tid, uint64_t lun);
++extern int tgt_device_create(int tid, uint64_t lun, char *args);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ extern int tgt_device_show(int tid, uint64_t dev_id, char *buf, int rest);
+ extern int tgt_device_update(int tid, uint64_t dev_id, char *name);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000674.html">[Stgt-svn] r687 - trunk/patches
+</A></li>
+	<LI>Next message: <A HREF="000676.html">[Stgt-svn] r689 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#675">[ date ]</a>
+              <a href="thread.html#675">[ thread ]</a>
+              <a href="subject.html#675">[ subject ]</a>
+              <a href="author.html#675">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,592 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r448 - branches/use-scsi-ml/istgt/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r448%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605041258.k44CwoSJ024259%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000434.html">
+   <LINK REL="Next"  HREF="000436.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r448 - branches/use-scsi-ml/istgt/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r448%20-%20branches/use-scsi-ml/istgt/usr&In-Reply-To=%3C200605041258.k44CwoSJ024259%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r448 - branches/use-scsi-ml/istgt/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu May  4 14:58:50 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000434.html">[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000436.html">[Stgt-svn] r449 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#435">[ date ]</a>
+              <a href="thread.html#435">[ thread ]</a>
+              <a href="subject.html#435">[ subject ]</a>
+              <a href="author.html#435">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-04 14:58:47 +0200 (Thu, 04 May 2006)
+New Revision: 448
+
+Added:
+   branches/use-scsi-ml/istgt/usr/netlink.c
+Removed:
+   branches/use-scsi-ml/istgt/usr/ctldev.c
+Modified:
+   branches/use-scsi-ml/istgt/usr/Makefile
+Log:
+Rename ctldev.c netlink.c
+
+Modified: branches/use-scsi-ml/istgt/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 12:27:34 UTC (rev 447)
++++ branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 12:58:47 UTC (rev 448)
+@@ -4,7 +4,7 @@
+ SHAREDLIB = istgt.so
+ DAEMON = istgtd
+ 
+-$(DAEMON): log.o istgt.o conn.o param.o session.o iscsid.o target.o chap.o ctldev.o
++$(DAEMON): log.o istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o
+ 	$(CC) $^ -o $@ $(LIBS)
+ 
+ $(SHAREDLIB): $(OBJS)
+
+Deleted: branches/use-scsi-ml/istgt/usr/ctldev.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/ctldev.c	2006-05-04 12:27:34 UTC (rev 447)
++++ branches/use-scsi-ml/istgt/usr/ctldev.c	2006-05-04 12:58:47 UTC (rev 448)
+@@ -1,496 +0,0 @@
+-/*
+- * (C) 2004 - 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- *
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;ctype.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;dirent.h&gt;
+-
+-#include &lt;sys/ioctl.h&gt;
+-#include &lt;sys/types.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;sys/socket.h&gt;
+-#include &lt;sys/un.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/netlink.h&gt;
+-
+-#include &quot;iscsid.h&quot;
+-
+-#if 0
+-extern struct qelem targets_list;
+-static int typeid;
+-
+-static int ipc_cmnd_execute(struct nlmsghdr *nlm_send, int len)
+-{
+-	int err;
+-	char rbuf[8192];
+-	struct nlmsghdr *nlm_recv;
+-	struct tgt_event *ev;
+-	struct iet_msg *msg;
+-
+-	err = nl_cmd_call(nl_fd, nlm_send-&gt;nlmsg_type,
+-			  (char *) nlm_send, len, rbuf, sizeof(rbuf));
+-
+-	nlm_recv = (struct nlmsghdr *) rbuf;
+-	ev = NLMSG_DATA(nlm_recv);
+-	switch (nlm_recv-&gt;nlmsg_type) {
+-		case TGT_KEVENT_TARGET_PASSTHRU:
+-			msg = (struct iet_msg *)ev-&gt;data;
+-			memcpy(nlm_send, nlm_recv, len);
+-			err = msg-&gt;result;
+-		default:
+-			err = ev-&gt;k.event_res.err;
+-	}
+-
+-	return err;
+-}
+-
+-void async_event(char *data)
+-{
+-	struct tgt_event *ev = (struct tgt_event *) data;
+-	struct iet_msg *msg = (struct iet_msg *) ev-&gt;data;
+-	struct session *session;
+-
+-	eprintf(&quot;%u %u\n&quot;, msg-&gt;msg_type, msg-&gt;result);
+-
+-	switch (msg-&gt;k.conn_state_change.state) {
+-	case E_CONN_CLOSE:
+-		if (!(session = session_find_id(msg-&gt;k.conn_state_change.tid,
+-						msg-&gt;k.conn_state_change.sid))) {
+-			eprintf(&quot;session %#&quot; PRIx64 &quot; not found?&quot;,
+-				msg-&gt;k.conn_state_change.sid);
+-		}
+-
+-		if (!--session-&gt;conn_cnt)
+-			session_remove(session);
+-		break;
+-	default:
+-		eprintf(&quot;%u\n&quot;, msg-&gt;k.conn_state_change.state);
+-		break;
+-	}
+-}
+-
+-static void nlmsg_init(struct nlmsghdr *nlh, uint32_t pid, uint32_t seq,
+-		       uint16_t type, uint32_t len, uint16_t flags)
+-{
+-	nlh-&gt;nlmsg_pid = pid;
+-	nlh-&gt;nlmsg_len = len;
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_type = type;
+-	nlh-&gt;nlmsg_seq = seq;
+-}
+-
+-/*
+- * this will have to be redone and made generic when we move it
+- */
+-static struct nlmsghdr *get_iet_msg(int tid, struct iet_msg **msg)
+-{
+-	int len;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct iet_msg));
+-	nlh = calloc(1, len);
+-	if (!nlh)
+-		return NULL;
+-
+-	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_TARGET_PASSTHRU, len, 0);
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.tgt_passthru.tid = tid;
+-	ev-&gt;u.tgt_passthru.len = sizeof(struct iet_msg);
+-	*msg = (struct iet_msg *)ev-&gt;data;
+-
+-	return nlh;
+-}
+-
+-
+-static int iscsi_conn_destroy(int tid, uint64_t sid, uint32_t cid)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct conn_info *info;
+-	int err;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.conn_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	info-&gt;cid = cid;
+-	msg-&gt;msg_type = IET_DEL_CONN;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_param_get(int tid, uint64_t sid, struct iscsi_param *param)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct iscsi_param_info *info;
+-	int err, i;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.param_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-
+-	msg-&gt;msg_type = IET_ISCSI_PARAM_GET;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	if (err &lt; 0)
+-		log_error(&quot;Can't get session param %d %d\n&quot;, info-&gt;tid, err);
+-	else {
+-		struct tgt_event *ev;
+-
+-		ev = NLMSG_DATA(nlh);
+-		msg = (struct iet_msg *)ev-&gt;data;
+-		info = &amp;msg-&gt;u.param_info;
+-
+-		for (i = 0; i &lt; session_key_last; i++)
+-			param[i].val = info-&gt;session_param[i];
+-	}
+-
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_param_set(int tid, uint64_t sid, int type, uint32_t partial,
+-			   struct iscsi_param *param)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct iscsi_param_info *info;
+-	int err, i;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.param_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	info-&gt;param_type = type;
+-	info-&gt;partial = partial;
+-
+-	if (type == key_session)
+-		for (i = 0; i &lt; session_key_last; i++)
+-			info-&gt;session_param[i] = param[i].val;
+-	else
+-		for (i = 0; i &lt; target_key_last; i++)
+-			info-&gt;target_param[i] = param[i].val;
+-	msg-&gt;msg_type = IET_ISCSI_PARAM_SET;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	if (err)
+-		eprintf(&quot;%d %d %u %&quot; PRIx64 &quot;%d %u\n&quot;,
+-			err, errno, tid, sid, type, partial);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_param_partial_set(int tid, uint64_t sid, int type, int key,
+-				   uint32_t val)
+-{
+-	struct iscsi_param *param;
+-	struct iscsi_param s_param[session_key_last];
+-	struct iscsi_param t_param[target_key_last];
+-
+-	if (type == key_session)
+-		param = s_param;
+-	else
+-		param = t_param;
+-
+-	param[key].val = val;
+-
+-	return iscsi_param_set(tid, sid, type, 1 &lt;&lt; key, param);
+-}
+-
+-static int trgt_mgmt_params(int tid, uint64_t sid, char *params)
+-{
+-	char *p, *q;
+-	uint32_t s_partial = 0, t_partial = 0;
+-	struct iscsi_param s_param[session_key_last];
+-	struct iscsi_param t_param[target_key_last];
+-
+-	while ((p = strsep(&amp;params, &quot;,&quot;)) != NULL) {
+-		int idx;
+-		uint32_t val;
+-		if (!*p)
+-			continue;
+-		if (!(q = strchr(p, '=')))
+-			continue;
+-		*q++ = '\0';
+-		val = strtol(q, NULL, 0);
+-
+-		if (!((idx = param_index_by_name(p, target_keys)) &lt; 0)) {
+-			if (!param_check_val(target_keys, idx, &amp;val))
+-				t_partial |= (1 &lt;&lt; idx);
+-			else
+-				eprintf(&quot;invalid val %s, %u\n&quot;,
+-					target_keys[idx].name, val);
+-			t_param[idx].val = val;
+-
+-			continue;
+-		}
+-
+-		if (!((idx = param_index_by_name(p, session_keys)) &lt; 0)) {
+-			if (!param_check_val(session_keys, idx, &amp;val))
+-				s_partial |= (1 &lt;&lt; idx);
+-			else
+-				eprintf(&quot;invalid val %s, %u\n&quot;,
+-					session_keys[idx].name, val);
+-			s_param[idx].val = val;
+-		}
+-	}
+-
+-	if (t_partial &amp;&amp; s_partial) {
+-		eprintf(&quot;%s&quot;, &quot;Cannot change both at the same time\n&quot;);
+-		return -EINVAL;
+-	} else if (t_partial)
+-		return iscsi_param_set(tid, sid, key_target, t_partial, t_param);
+-	else if (s_partial)
+-		return iscsi_param_set(tid, sid, key_session, s_partial, s_param);
+-	else
+-		eprintf(&quot;%s&quot;, &quot;Nothing to do\n&quot;);
+-
+-	return 0;
+-}
+-
+-static int iscsi_session_create(int tid, uint64_t sid,
+-				uint32_t exp_cmd_sn, uint32_t max_cmd_sn)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct session_info *info;
+-	int err;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.sess_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	info-&gt;exp_cmd_sn = exp_cmd_sn;
+-	info-&gt;max_cmd_sn = max_cmd_sn;
+-	msg-&gt;msg_type = IET_ADD_SESSION;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_session_destroy(int tid, uint64_t sid)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct session_info *info;
+-	int err;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.sess_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	msg-&gt;msg_type = IET_DEL_SESSION;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_conn_create(int tid, uint64_t sid, uint32_t cid,
+-			     uint32_t stat_sn, uint32_t exp_stat_sn,
+-			     int fd, uint32_t hdigest, uint32_t ddigest)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct conn_info *info;
+-	int err;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.conn_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	info-&gt;cid = cid;
+-	info-&gt;stat_sn = stat_sn;
+-	info-&gt;exp_stat_sn = exp_stat_sn;
+-	info-&gt;fd = fd;
+-	info-&gt;header_digest = hdigest;
+-	info-&gt;data_digest = ddigest;
+-	msg-&gt;msg_type = IET_ADD_CONN;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int istgt_ktarget_destroy(int tid)
+-{
+-	int err;
+-	struct target* target;
+-
+-	if (!(target = target_find_by_id(tid)))
+-		return -ENOENT;
+-
+-	if (target-&gt;nr_sessions)
+-		return -EBUSY;
+-
+-	if (!list_empty(&amp;target-&gt;sessions_list)) {
+-		eprintf(&quot;bug still have sessions %d\n&quot;, tid);
+-		exit(-1);
+-	}
+-
+-	err = ktarget_destroy(tid);
+-	if (err &lt; 0)
+-		return err;
+-
+-	remque(&amp;target-&gt;tlist);
+-
+-	free(target);
+-
+-	return 0;
+-}
+-
+-static int istgt_ktarget_create(int typeid, char *name)
+-{
+-	struct target *target;
+-	int err;
+-
+-	if (!name)
+-		return -EINVAL;
+-
+-	if (!(target = malloc(sizeof(*target))))
+-		return -ENOMEM;
+-
+-	memset(target, 0, sizeof(*target));
+-	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+-
+-	err = ktarget_create(typeid);
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't create a target %d\n&quot;, err);
+-		goto out;
+-	}
+-
+-	INIT_LIST_HEAD(&amp;target-&gt;tlist);
+-	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
+-	target-&gt;tid = err;
+-	insque(&amp;target-&gt;tlist, &amp;targets_list);
+-
+-	return err;
+-out:
+-	free(target);
+-	return err;
+-}
+-
+-static int istgt_target_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	int err = -EINVAL, tid = req-&gt;tid;
+-
+-	switch (req-&gt;op) {
+-	case OP_NEW:
+-		err = istgt_ktarget_create(typeid, params);
+-		break;
+-	case OP_DELETE:
+-		err = istgt_ktarget_destroy(tid);
+-		break;
+-	case OP_UPDATE:
+-		err = trgt_mgmt_params(tid, req-&gt;sid, params);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	return err;
+-}
+-
+-static int user_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int conn_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int session_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-int ipc_mgmt(char *sbuf, char *rbuf)
+-{
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+-	struct tgtadm_req *req;
+-	struct tgtadm_res *res;
+-	int err = -EINVAL, rlen = 0;
+-	char *params;
+-
+-	req = NLMSG_DATA(nlh);
+-	params = (char *) req + sizeof(*req);
+-
+-	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
+-		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
+-
+-	switch (req-&gt;mode) {
+-	case MODE_DEVICE:
+-	case MODE_SYSTEM:
+-		err = tgt_mgmt(sbuf, rbuf);
+-		break;
+-	case MODE_TARGET:
+-		err = istgt_target_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_SESSION:
+-		err = session_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_CONNECTION:
+-		err = conn_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_USER:
+-		err = user_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	default:
+-		eprintf(&quot;Unknown mode %d\n&quot;, req-&gt;mode);
+-		break;
+-	}
+-
+-	nlh = (struct nlmsghdr *) rbuf;
+-	nlh-&gt;nlmsg_len = NLMSG_LENGTH(rlen);
+-	res = NLMSG_DATA(nlh);
+-	res-&gt;err = err;
+-
+-	return err;
+-}
+-
+-#endif
+-
+-struct iscsi_kernel_interface nl_ki = {
+-/* 	.param_get = iscsi_param_get, */
+-/* 	.param_set = iscsi_param_set, */
+-/* 	.session_create = iscsi_session_create, */
+-/* 	.session_destroy = iscsi_session_destroy, */
+-/* 	.conn_create = iscsi_conn_create, */
+-/* 	.conn_destroy = iscsi_conn_destroy, */
+-};
+-
+-struct iscsi_kernel_interface *ki = &amp;nl_ki;
+
+Copied: branches/use-scsi-ml/istgt/usr/netlink.c (from rev 447, branches/use-scsi-ml/istgt/usr/ctldev.c)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000434.html">[Stgt-svn] r447 - branches/use-scsi-ml/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000436.html">[Stgt-svn] r449 - branches/use-scsi-ml/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#435">[ date ]</a>
+              <a href="thread.html#435">[ thread ]</a>
+              <a href="subject.html#435">[ subject ]</a>
+              <a href="author.html#435">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

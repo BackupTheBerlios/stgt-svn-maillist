@@ -1,0 +1,2272 @@
+From tomo at mail.berlios.de  Thu Oct 19 10:00:48 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Thu, 19 Oct 2006 10:00:48 +0200
+Subject: [Stgt-svn] r595 - in trunk/usr: . iscsi
+Message-ID: <200610190800.k9J80m0t028683@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-19 10:00:48 +0200 (Thu, 19 Oct 2006)
+New Revision: 595
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/util.h
+Log:
+linux's scsi.h uses u32 and u8, which are not defined in user space.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/iscsi/iscsid.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -16,13 +16,14 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
+-#include <scsi/scsi.h>
+ #include <sys/epoll.h>
+ 
+ #include "iscsid.h"
+ #include "tgtd.h"
+ #include "util.h"
+ 
++#include <scsi/scsi.h>
++
+ #define MAX_QUEUE_CMD	32
+ 
+ static struct iscsi_key login_keys[] = {
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/scsi.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -21,13 +21,14 @@
+ #include <unistd.h>
+ #include <asm/byteorder.h>
+ #include <linux/fs.h>
+-#include <scsi/scsi.h>
+ 
+ #include "list.h"
+ #include "util.h"
+ #include "tgtd.h"
+ #include "driver.h"
+ 
++#include <scsi/scsi.h>
++
+ #define BLK_SHIFT	9
+ 
+ int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/target.c	2006-10-19 08:00:48 UTC (rev 595)
+@@ -27,7 +27,6 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <sys/socket.h>
+-#include <scsi/scsi.h>
+ 
+ #include "list.h"
+ #include "util.h"
+@@ -35,6 +34,8 @@
+ #include "driver.h"
+ #include "target.h"
+ 
++#include <scsi/scsi.h>
++
+ static struct target *hostt[MAX_NR_HOST];
+ static struct list_head target_hash_list[1 << HASH_ORDER];
+ 
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-09-19 12:32:02 UTC (rev 594)
++++ trunk/usr/util.h	2006-10-19 08:00:48 UTC (rev 595)
+@@ -1,8 +1,13 @@
+ #ifndef __UTIL_H__
+ #define __UTIL_H__
+ 
++#include <stdint.h>
+ #include <sys/user.h>
+ 
++typedef uint8_t u8;
++typedef uint16_t u16;
++typedef uint32_t u32;
++
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ #define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))
+ 
+
+
+
+From tomo at mail.berlios.de  Fri Oct 20 12:51:37 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 20 Oct 2006 12:51:37 +0200
+Subject: [Stgt-svn] r596 - trunk/doc
+Message-ID: <200610201051.k9KApbgb006994@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-20 12:51:36 +0200 (Fri, 20 Oct 2006)
+New Revision: 596
+
+Modified:
+   trunk/doc/README.iscsi
+Log:
+updated command line param description.
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-10-19 08:00:48 UTC (rev 595)
++++ trunk/doc/README.iscsi	2006-10-20 10:51:36 UTC (rev 596)
+@@ -14,7 +14,7 @@
+ Try the following commands:
+ 
+ host:~/tgt$ su
+-host:~/tgt# ./usr/tgtd -l iscsi
++host:~/tgt# ./usr/tgtd --lld iscsi
+ 
+ 
+ Configuration
+@@ -27,8 +27,8 @@
+ logical unit (backed by /dev/hdc1) with lun 0.
+ 
+ host:~/tgt$ su
+-host:~/tgt# ./usr/tgtadm -l iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-host:~/tgt# ./usr/tgtadm -l iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
+ 
+ 
+ Status
+
+
+
+From tomo at mail.berlios.de  Fri Oct 20 12:58:05 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 20 Oct 2006 12:58:05 +0200
+Subject: [Stgt-svn] r597 - trunk/usr
+Message-ID: <200610201058.k9KAw5VO014459@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-20 12:57:54 +0200 (Fri, 20 Oct 2006)
+New Revision: 597
+
+Modified:
+   trunk/usr/util.c
+Log:
+Replace wrong printf with eprintf
+
+
+Modified: trunk/usr/util.c
+===================================================================
+--- trunk/usr/util.c	2006-10-20 10:51:36 UTC (rev 596)
++++ trunk/usr/util.c	2006-10-20 10:57:54 UTC (rev 597)
+@@ -72,7 +72,7 @@
+ 
+ 	err = fstat64(fd, &st);
+ 	if (err < 0) {
+-		printf("Cannot get stat %d, %m\n", fd);
++		eprintf("Cannot get stat %d, %m\n", fd);
+ 		goto close_fd;
+ 	}
+ 
+
+
+
+From tomo at mail.berlios.de  Wed Oct 25 14:41:19 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Wed, 25 Oct 2006 14:41:19 +0200
+Subject: [Stgt-svn] r598 - trunk/usr/iscsi
+Message-ID: <200610251241.k9PCfJQh003101@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-25 14:41:18 +0200 (Wed, 25 Oct 2006)
+New Revision: 598
+
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Update ipsj san.
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-10-20 10:57:54 UTC (rev 597)
++++ trunk/usr/iscsi/conn.c	2006-10-25 12:41:18 UTC (rev 598)
+@@ -48,7 +48,7 @@
+ 		return NULL;
+ 	}
+ 
+-
++	conn->refcount = 1;
+ 	conn->state = STATE_FREE;
+ 	param_set_defaults(conn->session_param, session_keys);
+ 
+@@ -58,8 +58,9 @@
+ 	return conn;
+ }
+ 
+-void conn_free(struct connection *conn)
++static void conn_free(struct connection *conn)
+ {
++	dprintf("freeing connection\n");
+ 	list_del(&conn->clist);
+ 	free(conn->req_buffer);
+ 	free(conn->rsp_buffer);
+@@ -67,6 +68,73 @@
+ 	free(conn);
+ }
+ 
++void conn_close(struct connection *conn, int fd)
++{
++	struct iscsi_task *task, *tmp;
++
++	tgt_event_del(fd);
++	conn->tp->ep_close(fd);
++
++	dprintf("connection closed\n");
++
++	/* may not have been in FFP yet */
++	if (!conn->session)
++		goto done;
++
++	/*
++	 * We just closed the ep so we are not going to send/recv anything.
++	 * Just free these up since they are not going to complete.
++	 */
++	list_for_each_entry_safe(task, tmp, &conn->session->pending_cmd_list,
++				 c_list) {
++		if (task->conn != conn)
++			continue;
++
++		dprintf("Forcing release of pending task %" PRIx64 "\n",
++			task->tag);
++		list_del(&task->c_list);
++		iscsi_free_task(task);
++	}
++
++	list_for_each_entry_safe(task, tmp, &conn->tx_clist, c_list) {
++		dprintf("Forcing release of tx task %" PRIx64 "\n",
++			task->tag);
++		list_del(&task->c_list);
++		iscsi_free_task(task);
++	}
++
++	if (conn->rx_task) {
++		dprintf("Forcing release of rx task %" PRIx64 "\n",
++			conn->rx_task->tag);
++		iscsi_free_task(conn->rx_task);
++	}
++	conn->rx_task = NULL;
++
++	if (conn->tx_task) {
++		dprintf("Forcing release of tx task %" PRIx64 "\n",
++			conn->tx_task->tag);
++		iscsi_free_task(conn->tx_task);
++	}
++	conn->tx_task = NULL;
++
++done:
++	conn_put(conn);
++}
++
++void conn_put(struct connection *conn)
++{
++	conn->refcount--;
++	if (conn->refcount == 0)
++		conn_free(conn);
++}
++
++int conn_get(struct connection *conn)
++{
++	/* TODO: check state */
++	conn->refcount++;
++	return 0;
++}
++
+ struct connection *conn_find(struct session *session, uint32_t cid)
+ {
+ 	struct connection *conn;
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-10-20 10:57:54 UTC (rev 597)
++++ trunk/usr/iscsi/iscsid.c	2006-10-25 12:41:18 UTC (rev 598)
+@@ -824,6 +824,50 @@
+ 	return 0;
+ }
+ 
++static inline struct iscsi_task *
++iscsi_alloc_task(struct connection *conn)
++{
++	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
++	struct iscsi_task *task;
++	
++	task = zalloc(sizeof(*task));
++	if (!task)
++		return NULL;
++
++	memcpy(&task->req, req, sizeof(*req));
++	task->conn = conn;
++	INIT_LIST_HEAD(&task->c_hlist);
++	INIT_LIST_HEAD(&task->c_list);
++
++	conn_get(conn);
++	return task;
++}
++
++void iscsi_free_task(struct iscsi_task *task)
++{
++	struct connection *conn = task->conn;
++
++	if (task->c_buffer)
++		free(task->c_buffer);
++	free(task);
++
++	/* from alloc */
++	conn_put(conn);
++}
++
++static void iscsi_free_cmd_task(struct iscsi_task *task)
++{
++	struct connection *conn = task->conn;
++
++	target_cmd_done(conn->session->tsih, task->tag);
++	list_del(&task->c_hlist);
++	if (task->c_buffer) {
++		if ((unsigned long) task->c_buffer != task->addr)
++			free((void *) (unsigned long) task->addr);
++	}
++	iscsi_free_task(task);
++}
++
+ int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
+ 			uint64_t tag)
+ {
+@@ -845,6 +889,18 @@
+ 
+ found:
+ 	dprintf("found a task %" PRIx64 "\n", tag);
++
++	/*
++	 * Since the connection is closed we just free the task.
++	 * We could delay the closing of the conn in some cases and send
++	 * the response with a little extra code or we can check if this
++	 * task got reassinged to another connection.
++	 */
++	if (task->conn->state == STATE_CLOSE) {
++		iscsi_free_cmd_task(task);		
++		return 0;
++	}
++
+ 	task->addr = addr;
+ 	task->result = result;
+ 	task->len = len;
+@@ -894,7 +950,6 @@
+ 					       uaddr, req->lun,
+ 					       ntohl(req->data_length),
+ 					       cmd_attr(task), req->itt);
+-
+ 	} else
+ 		err = target_cmd_queue(conn->session->tsih, req->cdb,
+ 				       uaddr, req->lun, ntohl(req->data_length),
+@@ -1091,21 +1146,27 @@
+ 	return 0;
+ }
+ 
++static struct iscsi_task *__iscsi_task_rx_start(struct connection *conn)
++{
++	struct iscsi_task *task;
++
++	task = iscsi_alloc_task(conn);
++	if (!task)
++		return NULL;
++	conn->rx_task = task;
++	return task;
++}
++
+ static int iscsi_scsi_cmd_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &conn->req.bhs;
+ 	struct iscsi_task *task;
+ 	int len;
+ 
+-	task = zalloc(sizeof(*task));
++	task = __iscsi_task_rx_start(conn);
+ 	if (!task)
+ 		return -ENOMEM;
+-
+-	memcpy(&task->req, req, sizeof(*req));
+ 	task->tag = req->itt;
+-	task->conn = conn;
+-	INIT_LIST_HEAD(&task->c_hlist);
+-	list_add(&task->c_hlist, &conn->session->cmd_list);
+ 
+ 	dprintf("%u %x %d %d %x\n", conn->session->tsih,
+ 		req->cdb[0], ntohl(req->data_length),
+@@ -1114,8 +1175,10 @@
+ 	len = ntohl(req->data_length);
+ 	if (len) {
+ 		task->c_buffer = malloc(len);
+-		if (!task->c_buffer)
++		if (!task->c_buffer) {
++			iscsi_free_task(task);
+ 			return -ENOMEM;
++		}
+ 		dprintf("%p\n", task->c_buffer);
+ 	}
+ 
+@@ -1130,27 +1193,10 @@
+ 			task->unsol_count, task->offset);
+ 	}
+ 
+-	conn->rx_task = task;
+-
++	list_add(&task->c_hlist, &conn->session->cmd_list);
+ 	return 0;
+ }
+ 
+-static int iscsi_common_task_rx_start(struct connection *conn)
+-{
+-	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+-	struct iscsi_task *task;
+-
+-	task = zalloc(sizeof(*task));
+-	if (!task)
+-		return -ENOMEM;
+-
+-	memcpy(&task->req, req, sizeof(*req));
+-	task->conn = conn;
+-
+-	conn->rx_task = task;
+-	return 0;
+-}
+-
+ static int iscsi_noop_out_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+@@ -1178,27 +1224,22 @@
+ 
+ 	conn->exp_stat_sn = be32_to_cpu(req->exp_statsn);
+ 
+-	task = zalloc(sizeof(*task));
++	task = __iscsi_task_rx_start(conn);
+ 	if (!task)
+ 		goto out;
+ 
+-	memcpy(&task->req, req, sizeof(*req));
+-	task->conn = conn;
+-
+ 	len = ntoh24(req->dlength);
+ 	if (len) {
+ 		conn->rx_size = len;
+ 		task->len = len;
+ 		task->c_buffer = malloc(len);
+ 		if (!task->c_buffer) {
+-			free(task);
++			iscsi_free_task(task);
+ 			goto out;
+ 		}
+ 
+ 		conn->rx_buffer = task->c_buffer;
+ 	}
+-
+-	conn->rx_task = task;
+ out:
+ 	return err;
+ }
+@@ -1236,7 +1277,7 @@
+ {
+ 	struct iscsi_hdr *hdr = &conn->req.bhs;
+ 	uint8_t op;
+-	int err;
++	int err = 0;
+ 
+ 	op = hdr->opcode & ISCSI_OPCODE_MASK;
+ 	switch (op) {
+@@ -1255,7 +1296,8 @@
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		err = iscsi_common_task_rx_start(conn);
++		if (!__iscsi_task_rx_start(conn))
++			err = -ENOMEM;
+ 		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+@@ -1315,7 +1357,7 @@
+ 
+ 	if (task->req.itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		*is_rsp = 0;
+-		free(task);
++		iscsi_free_task(task);
+ 	} else {
+ 		*is_rsp = 1;
+ 
+@@ -1370,14 +1412,7 @@
+ 			return 0;
+ 		}
+ 	case ISCSI_OP_SCSI_CMD_RSP:
+-		target_cmd_done(conn->session->tsih, task->tag);
+-		list_del(&task->c_hlist);
+-		if (task->c_buffer) {
+-			if ((unsigned long) task->c_buffer != task->addr)
+-				free((void *) (unsigned long) task->addr);
+-			free(task->c_buffer);
+-		}
+-		free(task);
++		iscsi_free_cmd_task(task);
+ 		break;
+ 	default:
+ 		eprintf("target bug %x\n", hdr->opcode & ISCSI_OPCODE_MASK);
+@@ -1398,9 +1433,7 @@
+ 	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_LOGOUT:
+ 	case ISCSI_OP_SCSI_TMFUNC:
+-		if (task->c_buffer)
+-			free(task->c_buffer);
+-		free(task);
++		iscsi_free_task(task);
+ 	}
+ 
+ 	conn->tx_task = NULL;
+@@ -1618,7 +1651,6 @@
+ void iscsi_event_handler(int fd, int events, void *data)
+ {
+ 	struct connection *conn = (struct connection *) data;
+-	size_t (*ep_close) (int);
+ 
+ 	if (events & EPOLLIN)
+ 		iscsi_rx_handler(fd, conn);
+@@ -1629,13 +1661,6 @@
+ 	if (conn->state != STATE_CLOSE && events & EPOLLOUT)
+ 		iscsi_tx_handler(fd, conn);
+ 
+-	if (conn->state == STATE_CLOSE) {
+-		/* TODO: we cannot wait for ongoing tasks. */
+-
+-		dprintf("connection closed\n");
+-		ep_close = conn->tp->ep_close;
+-		conn_free(conn);
+-		tgt_event_del(fd);
+-		ep_close(fd);
+-	}
++	if (conn->state == STATE_CLOSE)
++		conn_close(conn, fd);
+ }
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-10-20 10:57:54 UTC (rev 597)
++++ trunk/usr/iscsi/iscsid.h	2006-10-25 12:41:18 UTC (rev 598)
+@@ -112,6 +112,7 @@
+ 	int rx_iostate;
+ 	int tx_iostate;
+ 	int fd;
++	int refcount;
+ 
+ 	struct list_head clist;
+ 	struct session *session;
+@@ -225,7 +226,9 @@
+ 
+ /* conn.c */
+ extern struct connection *conn_alloc(void);
+-extern void conn_free(struct connection *conn);
++extern void conn_close(struct connection *conn, int fd);
++extern void conn_put(struct connection *conn);
++extern int conn_get(struct connection *conn);
+ extern struct connection * conn_find(struct session *session, uint32_t cid);
+ extern int conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+@@ -237,6 +240,9 @@
+ extern char *text_key_find(struct connection *conn, char *searchKey);
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
++/* iscsid.c iscsi_task */
++extern void iscsi_free_task(struct iscsi_task *task);
++
+ /* session.c */
+ extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern int session_create(struct connection *conn);
+
+
+
+From tomo at mail.berlios.de  Wed Oct 25 14:48:40 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Wed, 25 Oct 2006 14:48:40 +0200
+Subject: [Stgt-svn] r599 - trunk/usr/iscsi
+Message-ID: <200610251248.k9PCmec7003998@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-25 14:48:40 +0200 (Wed, 25 Oct 2006)
+New Revision: 599
+
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Revoke the previous commit (I committed it by mistake with the ununderstandable message).
+
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-10-25 12:41:18 UTC (rev 598)
++++ trunk/usr/iscsi/conn.c	2006-10-25 12:48:40 UTC (rev 599)
+@@ -48,7 +48,7 @@
+ 		return NULL;
+ 	}
+ 
+-	conn->refcount = 1;
++
+ 	conn->state = STATE_FREE;
+ 	param_set_defaults(conn->session_param, session_keys);
+ 
+@@ -58,9 +58,8 @@
+ 	return conn;
+ }
+ 
+-static void conn_free(struct connection *conn)
++void conn_free(struct connection *conn)
+ {
+-	dprintf("freeing connection\n");
+ 	list_del(&conn->clist);
+ 	free(conn->req_buffer);
+ 	free(conn->rsp_buffer);
+@@ -68,73 +67,6 @@
+ 	free(conn);
+ }
+ 
+-void conn_close(struct connection *conn, int fd)
+-{
+-	struct iscsi_task *task, *tmp;
+-
+-	tgt_event_del(fd);
+-	conn->tp->ep_close(fd);
+-
+-	dprintf("connection closed\n");
+-
+-	/* may not have been in FFP yet */
+-	if (!conn->session)
+-		goto done;
+-
+-	/*
+-	 * We just closed the ep so we are not going to send/recv anything.
+-	 * Just free these up since they are not going to complete.
+-	 */
+-	list_for_each_entry_safe(task, tmp, &conn->session->pending_cmd_list,
+-				 c_list) {
+-		if (task->conn != conn)
+-			continue;
+-
+-		dprintf("Forcing release of pending task %" PRIx64 "\n",
+-			task->tag);
+-		list_del(&task->c_list);
+-		iscsi_free_task(task);
+-	}
+-
+-	list_for_each_entry_safe(task, tmp, &conn->tx_clist, c_list) {
+-		dprintf("Forcing release of tx task %" PRIx64 "\n",
+-			task->tag);
+-		list_del(&task->c_list);
+-		iscsi_free_task(task);
+-	}
+-
+-	if (conn->rx_task) {
+-		dprintf("Forcing release of rx task %" PRIx64 "\n",
+-			conn->rx_task->tag);
+-		iscsi_free_task(conn->rx_task);
+-	}
+-	conn->rx_task = NULL;
+-
+-	if (conn->tx_task) {
+-		dprintf("Forcing release of tx task %" PRIx64 "\n",
+-			conn->tx_task->tag);
+-		iscsi_free_task(conn->tx_task);
+-	}
+-	conn->tx_task = NULL;
+-
+-done:
+-	conn_put(conn);
+-}
+-
+-void conn_put(struct connection *conn)
+-{
+-	conn->refcount--;
+-	if (conn->refcount == 0)
+-		conn_free(conn);
+-}
+-
+-int conn_get(struct connection *conn)
+-{
+-	/* TODO: check state */
+-	conn->refcount++;
+-	return 0;
+-}
+-
+ struct connection *conn_find(struct session *session, uint32_t cid)
+ {
+ 	struct connection *conn;
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-10-25 12:41:18 UTC (rev 598)
++++ trunk/usr/iscsi/iscsid.c	2006-10-25 12:48:40 UTC (rev 599)
+@@ -824,50 +824,6 @@
+ 	return 0;
+ }
+ 
+-static inline struct iscsi_task *
+-iscsi_alloc_task(struct connection *conn)
+-{
+-	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+-	struct iscsi_task *task;
+-	
+-	task = zalloc(sizeof(*task));
+-	if (!task)
+-		return NULL;
+-
+-	memcpy(&task->req, req, sizeof(*req));
+-	task->conn = conn;
+-	INIT_LIST_HEAD(&task->c_hlist);
+-	INIT_LIST_HEAD(&task->c_list);
+-
+-	conn_get(conn);
+-	return task;
+-}
+-
+-void iscsi_free_task(struct iscsi_task *task)
+-{
+-	struct connection *conn = task->conn;
+-
+-	if (task->c_buffer)
+-		free(task->c_buffer);
+-	free(task);
+-
+-	/* from alloc */
+-	conn_put(conn);
+-}
+-
+-static void iscsi_free_cmd_task(struct iscsi_task *task)
+-{
+-	struct connection *conn = task->conn;
+-
+-	target_cmd_done(conn->session->tsih, task->tag);
+-	list_del(&task->c_hlist);
+-	if (task->c_buffer) {
+-		if ((unsigned long) task->c_buffer != task->addr)
+-			free((void *) (unsigned long) task->addr);
+-	}
+-	iscsi_free_task(task);
+-}
+-
+ int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
+ 			uint64_t tag)
+ {
+@@ -889,18 +845,6 @@
+ 
+ found:
+ 	dprintf("found a task %" PRIx64 "\n", tag);
+-
+-	/*
+-	 * Since the connection is closed we just free the task.
+-	 * We could delay the closing of the conn in some cases and send
+-	 * the response with a little extra code or we can check if this
+-	 * task got reassinged to another connection.
+-	 */
+-	if (task->conn->state == STATE_CLOSE) {
+-		iscsi_free_cmd_task(task);		
+-		return 0;
+-	}
+-
+ 	task->addr = addr;
+ 	task->result = result;
+ 	task->len = len;
+@@ -950,6 +894,7 @@
+ 					       uaddr, req->lun,
+ 					       ntohl(req->data_length),
+ 					       cmd_attr(task), req->itt);
++
+ 	} else
+ 		err = target_cmd_queue(conn->session->tsih, req->cdb,
+ 				       uaddr, req->lun, ntohl(req->data_length),
+@@ -1146,27 +1091,21 @@
+ 	return 0;
+ }
+ 
+-static struct iscsi_task *__iscsi_task_rx_start(struct connection *conn)
+-{
+-	struct iscsi_task *task;
+-
+-	task = iscsi_alloc_task(conn);
+-	if (!task)
+-		return NULL;
+-	conn->rx_task = task;
+-	return task;
+-}
+-
+ static int iscsi_scsi_cmd_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &conn->req.bhs;
+ 	struct iscsi_task *task;
+ 	int len;
+ 
+-	task = __iscsi_task_rx_start(conn);
++	task = zalloc(sizeof(*task));
+ 	if (!task)
+ 		return -ENOMEM;
++
++	memcpy(&task->req, req, sizeof(*req));
+ 	task->tag = req->itt;
++	task->conn = conn;
++	INIT_LIST_HEAD(&task->c_hlist);
++	list_add(&task->c_hlist, &conn->session->cmd_list);
+ 
+ 	dprintf("%u %x %d %d %x\n", conn->session->tsih,
+ 		req->cdb[0], ntohl(req->data_length),
+@@ -1175,10 +1114,8 @@
+ 	len = ntohl(req->data_length);
+ 	if (len) {
+ 		task->c_buffer = malloc(len);
+-		if (!task->c_buffer) {
+-			iscsi_free_task(task);
++		if (!task->c_buffer)
+ 			return -ENOMEM;
+-		}
+ 		dprintf("%p\n", task->c_buffer);
+ 	}
+ 
+@@ -1193,10 +1130,27 @@
+ 			task->unsol_count, task->offset);
+ 	}
+ 
+-	list_add(&task->c_hlist, &conn->session->cmd_list);
++	conn->rx_task = task;
++
+ 	return 0;
+ }
+ 
++static int iscsi_common_task_rx_start(struct connection *conn)
++{
++	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
++	struct iscsi_task *task;
++
++	task = zalloc(sizeof(*task));
++	if (!task)
++		return -ENOMEM;
++
++	memcpy(&task->req, req, sizeof(*req));
++	task->conn = conn;
++
++	conn->rx_task = task;
++	return 0;
++}
++
+ static int iscsi_noop_out_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+@@ -1224,22 +1178,27 @@
+ 
+ 	conn->exp_stat_sn = be32_to_cpu(req->exp_statsn);
+ 
+-	task = __iscsi_task_rx_start(conn);
++	task = zalloc(sizeof(*task));
+ 	if (!task)
+ 		goto out;
+ 
++	memcpy(&task->req, req, sizeof(*req));
++	task->conn = conn;
++
+ 	len = ntoh24(req->dlength);
+ 	if (len) {
+ 		conn->rx_size = len;
+ 		task->len = len;
+ 		task->c_buffer = malloc(len);
+ 		if (!task->c_buffer) {
+-			iscsi_free_task(task);
++			free(task);
+ 			goto out;
+ 		}
+ 
+ 		conn->rx_buffer = task->c_buffer;
+ 	}
++
++	conn->rx_task = task;
+ out:
+ 	return err;
+ }
+@@ -1277,7 +1236,7 @@
+ {
+ 	struct iscsi_hdr *hdr = &conn->req.bhs;
+ 	uint8_t op;
+-	int err = 0;
++	int err;
+ 
+ 	op = hdr->opcode & ISCSI_OPCODE_MASK;
+ 	switch (op) {
+@@ -1296,8 +1255,7 @@
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		if (!__iscsi_task_rx_start(conn))
+-			err = -ENOMEM;
++		err = iscsi_common_task_rx_start(conn);
+ 		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+@@ -1357,7 +1315,7 @@
+ 
+ 	if (task->req.itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		*is_rsp = 0;
+-		iscsi_free_task(task);
++		free(task);
+ 	} else {
+ 		*is_rsp = 1;
+ 
+@@ -1412,7 +1370,14 @@
+ 			return 0;
+ 		}
+ 	case ISCSI_OP_SCSI_CMD_RSP:
+-		iscsi_free_cmd_task(task);
++		target_cmd_done(conn->session->tsih, task->tag);
++		list_del(&task->c_hlist);
++		if (task->c_buffer) {
++			if ((unsigned long) task->c_buffer != task->addr)
++				free((void *) (unsigned long) task->addr);
++			free(task->c_buffer);
++		}
++		free(task);
+ 		break;
+ 	default:
+ 		eprintf("target bug %x\n", hdr->opcode & ISCSI_OPCODE_MASK);
+@@ -1433,7 +1398,9 @@
+ 	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_LOGOUT:
+ 	case ISCSI_OP_SCSI_TMFUNC:
+-		iscsi_free_task(task);
++		if (task->c_buffer)
++			free(task->c_buffer);
++		free(task);
+ 	}
+ 
+ 	conn->tx_task = NULL;
+@@ -1651,6 +1618,7 @@
+ void iscsi_event_handler(int fd, int events, void *data)
+ {
+ 	struct connection *conn = (struct connection *) data;
++	size_t (*ep_close) (int);
+ 
+ 	if (events & EPOLLIN)
+ 		iscsi_rx_handler(fd, conn);
+@@ -1661,6 +1629,13 @@
+ 	if (conn->state != STATE_CLOSE && events & EPOLLOUT)
+ 		iscsi_tx_handler(fd, conn);
+ 
+-	if (conn->state == STATE_CLOSE)
+-		conn_close(conn, fd);
++	if (conn->state == STATE_CLOSE) {
++		/* TODO: we cannot wait for ongoing tasks. */
++
++		dprintf("connection closed\n");
++		ep_close = conn->tp->ep_close;
++		conn_free(conn);
++		tgt_event_del(fd);
++		ep_close(fd);
++	}
+ }
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-10-25 12:41:18 UTC (rev 598)
++++ trunk/usr/iscsi/iscsid.h	2006-10-25 12:48:40 UTC (rev 599)
+@@ -112,7 +112,6 @@
+ 	int rx_iostate;
+ 	int tx_iostate;
+ 	int fd;
+-	int refcount;
+ 
+ 	struct list_head clist;
+ 	struct session *session;
+@@ -226,9 +225,7 @@
+ 
+ /* conn.c */
+ extern struct connection *conn_alloc(void);
+-extern void conn_close(struct connection *conn, int fd);
+-extern void conn_put(struct connection *conn);
+-extern int conn_get(struct connection *conn);
++extern void conn_free(struct connection *conn);
+ extern struct connection * conn_find(struct session *session, uint32_t cid);
+ extern int conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+@@ -240,9 +237,6 @@
+ extern char *text_key_find(struct connection *conn, char *searchKey);
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
+-/* iscsid.c iscsi_task */
+-extern void iscsi_free_task(struct iscsi_task *task);
+-
+ /* session.c */
+ extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern int session_create(struct connection *conn);
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 05:40:16 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 05:40:16 +0100
+Subject: [Stgt-svn] r600 - trunk/usr
+Message-ID: <200610310440.k9V4eGwU001812@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 05:40:15 +0100 (Tue, 31 Oct 2006)
+New Revision: 600
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+Log:
+Fix REPORT_LUNS bugs
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-10-25 12:48:40 UTC (rev 599)
++++ trunk/usr/scsi.c	2006-10-31 04:40:15 UTC (rev 600)
+@@ -267,7 +267,7 @@
+ {
+ 	struct tgt_device *dev;
+ 	uint64_t lun, *data = (uint64_t *) p;
+-	int idx, alen, oalen, nr_luns, rbuflen = 4096;
++	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+ 	int result = SAM_STAT_GOOD;
+ 
+ 	memset(data, 0, rbuflen);
+@@ -287,18 +287,22 @@
+ 	idx = 1;
+ 	nr_luns = 0;
+ 
++	overflow = 0;
+ 	list_for_each_entry(dev, dev_list, d_list) {
++		nr_luns++;
++
++		if (overflow)
++			continue;
++
+ 		lun = dev->lun;
+-
+ 		lun = ((lun > 0xff) ? (0x1 << 30) : 0) | ((0x3ff & lun) << 16);
+ 		data[idx++] = __cpu_to_be64(lun << 32);
+ 		if (!(alen -= 8))
+-			break;
++			overflow = 1;
+ 		if (!(rbuflen -= 8)) {
+ 			fprintf(stderr, "FIXME: too many luns\n");
+ 			exit(-1);
+ 		}
+-		nr_luns++;
+ 	}
+ 
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+@@ -502,6 +506,7 @@
+ 		result = inquiry(lid, dev, host_no, lun_buf, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
++		*len = datalen;
+ 		result = report_luns(lid, dev_list, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-10-25 12:48:40 UTC (rev 599)
++++ trunk/usr/target.c	2006-10-31 04:40:15 UTC (rev 600)
+@@ -295,8 +295,8 @@
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+-		dprintf("%" PRIx64 " %x %lx %" PRIu64 " %d %d\n",
+-			tag, scb[0], uaddr, offset, result, async);
++		dprintf("%" PRIx64 " %x %lx %" PRIu64 " %d %d %d\n",
++			tag, scb[0], uaddr, offset, len, result, async);
+ 
+ 		cmd->rw = rw;
+ 		set_cmd_processed(cmd);
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 11:00:17 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 11:00:17 +0100
+Subject: [Stgt-svn] r601 - trunk
+Message-ID: <200610311000.k9VA0H0J010436@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 11:00:16 +0100 (Tue, 31 Oct 2006)
+New Revision: 601
+
+Removed:
+   trunk/qla2xxx/
+Log:
+Remove qla2xxx since the kernel modules go to the git tree.
+
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 11:10:37 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 11:10:37 +0100
+Subject: [Stgt-svn] r602 - trunk/usr/iscsi
+Message-ID: <200610311010.k9VAAb6F013022@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 11:10:36 +0100 (Tue, 31 Oct 2006)
+New Revision: 602
+
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Merge Mike's connection refcount work.
+
+The attached patch adds a connection refcount and forces the cleanup of
+pending tasks or tasks that are not going to get completed by are not
+running in tgtd. The refcout is needed for the latter. When those
+commands have completed we then release the connection.
+
+This patch only handles the memory issues. Should we actually not close
+the connection endpoints and should we send the result of the commands
+that were executing in tgtd when they finally complete? For some like
+linux-iscsi or open-iscsi, when the connection is dropped we assume the
+command is not executed, but tgtd might actually complete it. Is either
+wrong?
+
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-10-31 10:00:16 UTC (rev 601)
++++ trunk/usr/iscsi/conn.c	2006-10-31 10:10:36 UTC (rev 602)
+@@ -48,7 +48,7 @@
+ 		return NULL;
+ 	}
+ 
+-
++	conn->refcount = 1;
+ 	conn->state = STATE_FREE;
+ 	param_set_defaults(conn->session_param, session_keys);
+ 
+@@ -58,8 +58,9 @@
+ 	return conn;
+ }
+ 
+-void conn_free(struct connection *conn)
++static void conn_free(struct connection *conn)
+ {
++	dprintf("freeing connection\n");
+ 	list_del(&conn->clist);
+ 	free(conn->req_buffer);
+ 	free(conn->rsp_buffer);
+@@ -67,6 +68,73 @@
+ 	free(conn);
+ }
+ 
++void conn_close(struct connection *conn, int fd)
++{
++	struct iscsi_task *task, *tmp;
++
++	tgt_event_del(fd);
++	conn->tp->ep_close(fd);
++
++	dprintf("connection closed\n");
++
++	/* may not have been in FFP yet */
++	if (!conn->session)
++		goto done;
++
++	/*
++	 * We just closed the ep so we are not going to send/recv anything.
++	 * Just free these up since they are not going to complete.
++	 */
++	list_for_each_entry_safe(task, tmp, &conn->session->pending_cmd_list,
++				 c_list) {
++		if (task->conn != conn)
++			continue;
++
++		dprintf("Forcing release of pending task %" PRIx64 "\n",
++			task->tag);
++		list_del(&task->c_list);
++		iscsi_free_task(task);
++	}
++
++	list_for_each_entry_safe(task, tmp, &conn->tx_clist, c_list) {
++		dprintf("Forcing release of tx task %" PRIx64 "\n",
++			task->tag);
++		list_del(&task->c_list);
++		iscsi_free_task(task);
++	}
++
++	if (conn->rx_task) {
++		dprintf("Forcing release of rx task %" PRIx64 "\n",
++			conn->rx_task->tag);
++		iscsi_free_task(conn->rx_task);
++	}
++	conn->rx_task = NULL;
++
++	if (conn->tx_task) {
++		dprintf("Forcing release of tx task %" PRIx64 "\n",
++			conn->tx_task->tag);
++		iscsi_free_task(conn->tx_task);
++	}
++	conn->tx_task = NULL;
++
++done:
++	conn_put(conn);
++}
++
++void conn_put(struct connection *conn)
++{
++	conn->refcount--;
++	if (conn->refcount == 0)
++		conn_free(conn);
++}
++
++int conn_get(struct connection *conn)
++{
++	/* TODO: check state */
++	conn->refcount++;
++	return 0;
++}
++
+ struct connection *conn_find(struct session *session, uint32_t cid)
+ {
+ 	struct connection *conn;
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-10-31 10:00:16 UTC (rev 601)
++++ trunk/usr/iscsi/iscsid.c	2006-10-31 10:10:36 UTC (rev 602)
+@@ -824,6 +824,50 @@
+ 	return 0;
+ }
+ 
++static inline struct iscsi_task *
++iscsi_alloc_task(struct connection *conn)
++{
++	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
++	struct iscsi_task *task;
++
++	task = zalloc(sizeof(*task));
++	if (!task)
++		return NULL;
++
++	memcpy(&task->req, req, sizeof(*req));
++	task->conn = conn;
++	INIT_LIST_HEAD(&task->c_hlist);
++	INIT_LIST_HEAD(&task->c_list);
++
++	conn_get(conn);
++	return task;
++}
++
++void iscsi_free_task(struct iscsi_task *task)
++{
++	struct connection *conn = task->conn;
++
++	if (task->c_buffer)
++		free(task->c_buffer);
++	free(task);
++
++	/* from alloc */
++	conn_put(conn);
++}
++
++static void iscsi_free_cmd_task(struct iscsi_task *task)
++{
++	struct connection *conn = task->conn;
++
++	target_cmd_done(conn->session->tsih, task->tag);
++	list_del(&task->c_hlist);
++	if (task->c_buffer) {
++		if ((unsigned long) task->c_buffer != task->addr)
++			free((void *) (unsigned long) task->addr);
++	}
++	iscsi_free_task(task);
++}
++
+ int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw, uint64_t addr,
+ 			uint64_t tag)
+ {
+@@ -845,6 +889,18 @@
+ 
+ found:
+ 	dprintf("found a task %" PRIx64 "\n", tag);
++
++	/*
++	 * Since the connection is closed we just free the task.
++	 * We could delay the closing of the conn in some cases and send
++	 * the response with a little extra code or we can check if this
++	 * task got reassinged to another connection.
++	 */
++	if (task->conn->state == STATE_CLOSE) {
++		iscsi_free_cmd_task(task);
++		return 0;
++	}
++
+ 	task->addr = addr;
+ 	task->result = result;
+ 	task->len = len;
+@@ -894,7 +950,6 @@
+ 					       uaddr, req->lun,
+ 					       ntohl(req->data_length),
+ 					       cmd_attr(task), req->itt);
+-
+ 	} else
+ 		err = target_cmd_queue(conn->session->tsih, req->cdb,
+ 				       uaddr, req->lun, ntohl(req->data_length),
+@@ -1091,21 +1146,27 @@
+ 	return 0;
+ }
+ 
++static struct iscsi_task *__iscsi_task_rx_start(struct connection *conn)
++{
++	struct iscsi_task *task;
++
++	task = iscsi_alloc_task(conn);
++	if (!task)
++		return NULL;
++	conn->rx_task = task;
++	return task;
++}
++
+ static int iscsi_scsi_cmd_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &conn->req.bhs;
+ 	struct iscsi_task *task;
+ 	int len;
+ 
+-	task = zalloc(sizeof(*task));
++	task = __iscsi_task_rx_start(conn);
+ 	if (!task)
+ 		return -ENOMEM;
+-
+-	memcpy(&task->req, req, sizeof(*req));
+ 	task->tag = req->itt;
+-	task->conn = conn;
+-	INIT_LIST_HEAD(&task->c_hlist);
+-	list_add(&task->c_hlist, &conn->session->cmd_list);
+ 
+ 	dprintf("%u %x %d %d %x\n", conn->session->tsih,
+ 		req->cdb[0], ntohl(req->data_length),
+@@ -1114,8 +1175,10 @@
+ 	len = ntohl(req->data_length);
+ 	if (len) {
+ 		task->c_buffer = malloc(len);
+-		if (!task->c_buffer)
++		if (!task->c_buffer) {
++			iscsi_free_task(task);
+ 			return -ENOMEM;
++		}
+ 		dprintf("%p\n", task->c_buffer);
+ 	}
+ 
+@@ -1130,27 +1193,10 @@
+ 			task->unsol_count, task->offset);
+ 	}
+ 
+-	conn->rx_task = task;
+-
++	list_add(&task->c_hlist, &conn->session->cmd_list);
+ 	return 0;
+ }
+ 
+-static int iscsi_common_task_rx_start(struct connection *conn)
+-{
+-	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+-	struct iscsi_task *task;
+-
+-	task = zalloc(sizeof(*task));
+-	if (!task)
+-		return -ENOMEM;
+-
+-	memcpy(&task->req, req, sizeof(*req));
+-	task->conn = conn;
+-
+-	conn->rx_task = task;
+-	return 0;
+-}
+-
+ static int iscsi_noop_out_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &conn->req.bhs;
+@@ -1178,27 +1224,22 @@
+ 
+ 	conn->exp_stat_sn = be32_to_cpu(req->exp_statsn);
+ 
+-	task = zalloc(sizeof(*task));
++	task = __iscsi_task_rx_start(conn);
+ 	if (!task)
+ 		goto out;
+ 
+-	memcpy(&task->req, req, sizeof(*req));
+-	task->conn = conn;
+-
+ 	len = ntoh24(req->dlength);
+ 	if (len) {
+ 		conn->rx_size = len;
+ 		task->len = len;
+ 		task->c_buffer = malloc(len);
+ 		if (!task->c_buffer) {
+-			free(task);
++			iscsi_free_task(task);
+ 			goto out;
+ 		}
+ 
+ 		conn->rx_buffer = task->c_buffer;
+ 	}
+-
+-	conn->rx_task = task;
+ out:
+ 	return err;
+ }
+@@ -1236,7 +1277,7 @@
+ {
+ 	struct iscsi_hdr *hdr = &conn->req.bhs;
+ 	uint8_t op;
+-	int err;
++	int err = 0;
+ 
+ 	op = hdr->opcode & ISCSI_OPCODE_MASK;
+ 	switch (op) {
+@@ -1255,7 +1296,8 @@
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		err = iscsi_common_task_rx_start(conn);
++		if (!__iscsi_task_rx_start(conn))
++			err = -ENOMEM;
+ 		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+@@ -1315,7 +1357,7 @@
+ 
+ 	if (task->req.itt == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		*is_rsp = 0;
+-		free(task);
++		iscsi_free_task(task);
+ 	} else {
+ 		*is_rsp = 1;
+ 
+@@ -1370,14 +1412,7 @@
+ 			return 0;
+ 		}
+ 	case ISCSI_OP_SCSI_CMD_RSP:
+-		target_cmd_done(conn->session->tsih, task->tag);
+-		list_del(&task->c_hlist);
+-		if (task->c_buffer) {
+-			if ((unsigned long) task->c_buffer != task->addr)
+-				free((void *) (unsigned long) task->addr);
+-			free(task->c_buffer);
+-		}
+-		free(task);
++		iscsi_free_cmd_task(task);
+ 		break;
+ 	default:
+ 		eprintf("target bug %x\n", hdr->opcode & ISCSI_OPCODE_MASK);
+@@ -1398,9 +1433,7 @@
+ 	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_LOGOUT:
+ 	case ISCSI_OP_SCSI_TMFUNC:
+-		if (task->c_buffer)
+-			free(task->c_buffer);
+-		free(task);
++		iscsi_free_task(task);
+ 	}
+ 
+ 	conn->tx_task = NULL;
+@@ -1618,7 +1651,6 @@
+ void iscsi_event_handler(int fd, int events, void *data)
+ {
+ 	struct connection *conn = (struct connection *) data;
+-	size_t (*ep_close) (int);
+ 
+ 	if (events & EPOLLIN)
+ 		iscsi_rx_handler(fd, conn);
+@@ -1629,13 +1661,6 @@
+ 	if (conn->state != STATE_CLOSE && events & EPOLLOUT)
+ 		iscsi_tx_handler(fd, conn);
+ 
+-	if (conn->state == STATE_CLOSE) {
+-		/* TODO: we cannot wait for ongoing tasks. */
+-
+-		dprintf("connection closed\n");
+-		ep_close = conn->tp->ep_close;
+-		conn_free(conn);
+-		tgt_event_del(fd);
+-		ep_close(fd);
+-	}
++	if (conn->state == STATE_CLOSE)
++		conn_close(conn, fd);
+ }
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-10-31 10:00:16 UTC (rev 601)
++++ trunk/usr/iscsi/iscsid.h	2006-10-31 10:10:36 UTC (rev 602)
+@@ -112,6 +112,7 @@
+ 	int rx_iostate;
+ 	int tx_iostate;
+ 	int fd;
++	int refcount;
+ 
+ 	struct list_head clist;
+ 	struct session *session;
+@@ -225,7 +226,9 @@
+ 
+ /* conn.c */
+ extern struct connection *conn_alloc(void);
+-extern void conn_free(struct connection *conn);
++extern void conn_close(struct connection *conn, int fd);
++extern void conn_put(struct connection *conn);
++extern int conn_get(struct connection *conn);
+ extern struct connection * conn_find(struct session *session, uint32_t cid);
+ extern int conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+@@ -237,6 +240,9 @@
+ extern char *text_key_find(struct connection *conn, char *searchKey);
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
++/* iscsid.c iscsi_task */
++extern void iscsi_free_task(struct iscsi_task *task);
++
+ /* session.c */
+ extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
+ extern int session_create(struct connection *conn);
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 11:11:53 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 11:11:53 +0100
+Subject: [Stgt-svn] r603 - trunk/usr/iscsi
+Message-ID: <200610311011.k9VABrrI013180@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 11:11:53 +0100 (Tue, 31 Oct 2006)
+New Revision: 603
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+Log:
+Merge Mike's tmf fix
+
+tgtd returns 0 or a -Exyz value. For the iscsi tmf response we want to
+translate those values to a iscsi value. The attached patch does this.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-10-31 10:10:36 UTC (rev 602)
++++ trunk/usr/iscsi/iscsid.c	2006-10-31 10:11:53 UTC (rev 603)
+@@ -964,7 +964,24 @@
+ {
+ 	struct iscsi_task *task = (struct iscsi_task *) (unsigned long) mid;
+ 
+-	task->result = result;
++	switch (result) {
++	case 0:
++		task->result = ISCSI_TMF_RSP_COMPLETE;
++		break;
++	case -EINVAL:
++		task->result = ISCSI_TMF_RSP_NOT_SUPPORTED;
++		break;
++	case -EEXIST:
++		/*
++		 * the command completed or we could not find it so
++		 * we retrun  no task here
++		 */
++		task->result = ISCSI_TMF_RSP_NO_TASK;
++		break;
++	default:
++		task->result = ISCSI_TMF_RSP_REJECTED;
++		break;
++	}
+ 	list_add_tail(&task->c_list, &task->conn->tx_clist);
+ 	tgt_event_modify(task->conn->fd, EPOLLIN | EPOLLOUT);
+ 	return 0;
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 11:14:03 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 11:14:03 +0100
+Subject: [Stgt-svn] r604 - trunk/usr/iscsi
+Message-ID: <200610311014.k9VAE3jt013477@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 11:14:01 +0100 (Tue, 31 Oct 2006)
+New Revision: 604
+
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+Log:
+Merge Mike's session refcount work
+
+This patch frees the session when all the connections have been freed.
+
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-10-31 10:11:53 UTC (rev 603)
++++ trunk/usr/iscsi/conn.c	2006-10-31 10:14:01 UTC (rev 604)
+@@ -24,6 +24,8 @@
+ 		exit(0);
+ 	}
+ 
++	/* release in conn_free */
++	session_get(session);
+ 	conn->session = session;
+ 	list_add(&conn->clist, &session->conn_list);
+ }
+@@ -60,12 +62,17 @@
+ 
+ static void conn_free(struct connection *conn)
+ {
++	struct session *session = conn->session;
++
+ 	dprintf("freeing connection\n");
+ 	list_del(&conn->clist);
+ 	free(conn->req_buffer);
+ 	free(conn->rsp_buffer);
+ 	free(conn->initiator);
+ 	free(conn);
++
++	if (session)
++		session_put(session);
+ }
+ 
+ void conn_close(struct connection *conn, int fd)
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-10-31 10:11:53 UTC (rev 603)
++++ trunk/usr/iscsi/iscsid.h	2006-10-31 10:14:01 UTC (rev 604)
+@@ -53,6 +53,8 @@
+ #define KEY_STATE_DONE		2
+ 
+ struct session {
++	int refcount;
++
+ 	/* linked to target->sessions_list */
+ 	struct list_head slist;
+ 
+@@ -248,6 +250,8 @@
+ extern int session_create(struct connection *conn);
+ extern void session_destroy(struct session *session);
+ extern struct session *session_lookup(uint16_t tsih);
++extern void session_get(struct session *session);
++extern void session_put(struct session *session);
+ 
+ /* target.c */
+ extern int target_find_by_name(const char *name, int *tid);
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-10-31 10:11:53 UTC (rev 603)
++++ trunk/usr/iscsi/session.c	2006-10-31 10:14:01 UTC (rev 604)
+@@ -113,3 +113,15 @@
+ 	free(session->initiator);
+ 	free(session);
+ }
++
++void session_get(struct session *session)
++{
++	session->refcount++;
++}
++
++void session_put(struct session *session)
++{
++	session->refcount--;
++	if (session->refcount == 0)
++		session_destroy(session);
++}
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 12:21:49 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 12:21:49 +0100
+Subject: [Stgt-svn] r605 - trunk/usr
+Message-ID: <200610311121.k9VBLnb1024641@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 12:21:46 +0100 (Tue, 31 Oct 2006)
+New Revision: 605
+
+Added:
+   trunk/usr/sched.c
+   trunk/usr/sched.h
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/tgtd.c
+Log:
+Add bogus schedular
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/Makefile	2006-10-31 11:21:46 UTC (rev 605)
+@@ -1,6 +1,6 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE -I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o
++TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o sched.o
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO
+
+Added: trunk/usr/sched.c
+===================================================================
+--- trunk/usr/sched.c	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/sched.c	2006-10-31 11:21:46 UTC (rev 605)
+@@ -0,0 +1,80 @@
++/*
++ * bogus scheduler
++ *
++ * Copyright (C) 2006 FUJITA Tomonori <tomof at acm.org>
++ * Copyright (C) 2006 Mike Christie <michaelc at cs.wisc.edu>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++#include <stdlib.h>
++
++#include "list.h"
++#include "util.h"
++#include "log.h"
++#include "sched.h"
++
++static unsigned int jiffies;
++static LIST_HEAD(active_work_list);
++static LIST_HEAD(inactive_work_list);
++
++void enqueue_work(struct tgt_work *work, unsigned int second)
++{
++	unsigned int when;
++	struct tgt_work *ent;
++
++	when = second * SCHED_HZ;
++
++	if (when) {
++
++		list_for_each_entry(ent, &inactive_work_list, entry) {
++			if (before(when, ent->when))
++				break;
++		}
++
++		list_add_tail(&work->entry, &ent->entry);
++	} else
++		list_add_tail(&work->entry, &active_work_list);
++}
++
++void dequeue_work(struct tgt_work *work)
++{
++	list_del(&work->entry);
++}
++
++/*
++ * this function is called only when the system is idle. So this
++ * scheduler is pretty bogus. Your job would be delayed unexpectedly.
++ */
++void schedule(void)
++{
++	struct tgt_work *work;
++
++	jiffies++;
++
++	list_for_each_entry(work, &inactive_work_list, entry) {
++		if (after(work->when, jiffies)) {
++			list_del(&work->entry);
++			enqueue_work(work, 0);
++		} else
++			break;
++	}
++
++	while (!list_empty(&active_work_list)) {
++		work = list_entry(active_work_list.next, struct tgt_work, entry);
++		work->func(work->data);
++	}
++}
+
+Added: trunk/usr/sched.h
+===================================================================
+--- trunk/usr/sched.h	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/sched.h	2006-10-31 11:21:46 UTC (rev 605)
+@@ -0,0 +1,17 @@
++#ifndef __SCHED_H
++#define __SCHED_H
++
++#define SCHED_HZ 1
++
++struct tgt_work {
++	struct list_head entry;
++	void (*func)(void *);
++	void *data;
++	unsigned int when;
++};
++
++extern void schedule(void);
++extern void enqueue_work(struct tgt_work *work, unsigned int second);
++extern void dequeue_work(struct tgt_work *work);
++
++#endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-10-31 10:14:01 UTC (rev 604)
++++ trunk/usr/tgtd.c	2006-10-31 11:21:46 UTC (rev 605)
+@@ -34,6 +34,7 @@
+ #include "list.h"
+ #include "tgtd.h"
+ #include "driver.h"
++#include "sched.h"
+ #include "util.h"
+ 
+ #define MAX_FDS	4096
+@@ -169,7 +170,8 @@
+ 
+ static void event_loop(void)
+ {
+-	int nevent, i, timeout = -1;
++	int nevent, i;
++	static int timeout = 1000 / SCHED_HZ;
+ 	struct epoll_event events[1024];
+ 	struct tgt_event *tev;
+ 
+@@ -181,18 +183,14 @@
+ 			exit(1);
+ 		}
+ 		goto retry;
+-	} else if (nevent == 0) {
+-		/*
+-		 * TODO: need kinda scheduling stuff like open-iscsi here.
+-		 */
+-		goto retry;
+-	}
++	} else if (nevent) {
++		for (i = 0; i < nevent; i++) {
++			tev = (struct tgt_event *) events[i].data.ptr;
++			tev->handler(tev->fd, events[i].events, tev->data);
++		}
++	} else
++		schedule();
+ 
+-	for (i = 0; i < nevent; i++) {
+-		tev = (struct tgt_event *) events[i].data.ptr;
+-		tev->handler(tev->fd, events[i].events, tev->data);
+-	}
+-
+ 	goto retry;
+ }
+ 
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 12:22:30 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 12:22:30 +0100
+Subject: [Stgt-svn] r606 - trunk/usr
+Message-ID: <200610311122.k9VBMUvg024737@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 12:22:29 +0100 (Tue, 31 Oct 2006)
+New Revision: 606
+
+Modified:
+   trunk/usr/sched.h
+Log:
+Fix SCHED_HZ value
+
+
+Modified: trunk/usr/sched.h
+===================================================================
+--- trunk/usr/sched.h	2006-10-31 11:21:46 UTC (rev 605)
++++ trunk/usr/sched.h	2006-10-31 11:22:29 UTC (rev 606)
+@@ -1,7 +1,7 @@
+ #ifndef __SCHED_H
+ #define __SCHED_H
+ 
+-#define SCHED_HZ 1
++#define SCHED_HZ 5
+ 
+ struct tgt_work {
+ 	struct list_head entry;
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 12:29:32 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 12:29:32 +0100
+Subject: [Stgt-svn] r607 - trunk/usr
+Message-ID: <200610311129.k9VBTW1j025273@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 12:29:32 +0100 (Tue, 31 Oct 2006)
+New Revision: 607
+
+Modified:
+   trunk/usr/sched.c
+   trunk/usr/sched.h
+   trunk/usr/tgtd.c
+Log:
+Add stop_daemon global value.
+
+
+Modified: trunk/usr/sched.c
+===================================================================
+--- trunk/usr/sched.c	2006-10-31 11:22:29 UTC (rev 606)
++++ trunk/usr/sched.c	2006-10-31 11:29:32 UTC (rev 607)
+@@ -27,6 +27,8 @@
+ #include "log.h"
+ #include "sched.h"
+ 
++int stop_daemon;
++
+ static unsigned int jiffies;
+ static LIST_HEAD(active_work_list);
+ static LIST_HEAD(inactive_work_list);
+
+Modified: trunk/usr/sched.h
+===================================================================
+--- trunk/usr/sched.h	2006-10-31 11:22:29 UTC (rev 606)
++++ trunk/usr/sched.h	2006-10-31 11:29:32 UTC (rev 607)
+@@ -14,4 +14,6 @@
+ extern void enqueue_work(struct tgt_work *work, unsigned int second);
+ extern void dequeue_work(struct tgt_work *work);
+ 
++extern int stop_daemon;
++
+ #endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-10-31 11:22:29 UTC (rev 606)
++++ trunk/usr/tgtd.c	2006-10-31 11:29:32 UTC (rev 607)
+@@ -182,7 +182,6 @@
+ 			eprintf("%m\n");
+ 			exit(1);
+ 		}
+-		goto retry;
+ 	} else if (nevent) {
+ 		for (i = 0; i < nevent; i++) {
+ 			tev = (struct tgt_event *) events[i].data.ptr;
+@@ -191,7 +190,8 @@
+ 	} else
+ 		schedule();
+ 
+-	goto retry;
++	if (!stop_daemon)
++		goto retry;
+ }
+ 
+ static int lld_init(char *data)
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 15:40:07 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 15:40:07 +0100
+Subject: [Stgt-svn] r608 - in trunk/usr: . iscsi
+Message-ID: <200610311440.k9VEe78F009165@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 15:40:07 +0100 (Tue, 31 Oct 2006)
+New Revision: 608
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/target.c
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+Log:
+Add show option to tgtadm
+
+tgtadm --lld iscsi --op show
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/driver.h	2006-10-31 14:40:07 UTC (rev 608)
+@@ -7,6 +7,7 @@
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
++	int (*target_show) (int, char *, int);
+ 
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+ 	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/iscsi/iscsi.h	2006-10-31 14:40:07 UTC (rev 608)
+@@ -1,6 +1,7 @@
+ extern int iscsi_init(void);
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
++extern int iscsi_target_show(int, char *, int);
+ extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
+ extern int iscsi_tm_done(int host_no, uint64_t mid, int result);
+@@ -10,6 +11,7 @@
+ 	.init			= iscsi_init,
+ 	.target_create		= iscsi_target_create,
+ 	.target_destroy		= iscsi_target_destroy,
++	.target_show		= iscsi_target_show,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+ 	.bdt			= &aio_bdt,
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/iscsi/target.c	2006-10-31 14:40:07 UTC (rev 608)
+@@ -105,3 +105,13 @@
+ 
+ 	return 0;
+ }
++
++int iscsi_target_show(int tid, char *buf, int rest)
++{
++	struct target* target;
++
++	if (!(target = target_find_by_id(tid)))
++		return 0;
++
++	return snprintf(buf, rest, ": %s\n", target->name);
++}
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/mgmt.c	2006-10-31 14:40:07 UTC (rev 608)
+@@ -133,6 +133,14 @@
+ 		req->len, lld_no, req->mode, req->op,
+ 		req->tid, req->sid, req->lun, params, getpid());
+ 
++	if (req->op == OP_SHOW) {
++		err = tgt_target_show((char *)res->data, len - sizeof(*res));
++		res->err = 0;
++		res->len = len - err;
++		dprintf("%d %d\n", len, err);
++		return 0;
++	}
++
+ 	switch (req->mode) {
+ 	case MODE_TARGET:
+ 		err = target_mgmt(lld_no, req, params, res, &len);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/target.c	2006-10-31 14:40:07 UTC (rev 608)
+@@ -136,6 +136,7 @@
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
++	char *p;
+ 	int dev_fd;
+ 	uint64_t size;
+ 
+@@ -151,14 +152,21 @@
+ 		return -EINVAL;
+ 	}
+ 
++	p = strdup(path);
++	if (!p)
++		return -ENOMEM;
++
+ 	device = tgt_drivers[target->lid]->bdt->bd_open(path, &dev_fd, &size);
+-	if (!device)
++	if (!device) {
++		free(p);
+ 		return -EINVAL;
++	}
+ 
+ 	device->fd = dev_fd;
+ 	device->addr = 0;
+ 	device->size = size;
+ 	device->lun = dev_id;
++	device->path = p;
+ 	snprintf(device->scsi_id, sizeof(device->scsi_id),
+ 		 "deadbeaf%d:%" PRIu64, tid, dev_id);
+ 
+@@ -192,6 +200,7 @@
+ 	if (!list_empty(&device->cmd_queue.queue))
+ 		return -EBUSY;
+ 
++	free(device->path);
+ 	close(device->fd);
+ 	device_hlist_remove(device);
+ 	device_list_remove(device);
+@@ -612,6 +621,45 @@
+ 	return 0;
+ }
+ 
++int tgt_target_show(char *buf, int rest)
++{
++	int i, len;
++	struct target *target;
++	struct tgt_device *device;
++	int (*show)(int, char *, int);
++
++	for (i = 0; i < ARRAY_SIZE(target_hash_list); i++) {
++		list_for_each_entry(target, &target_hash_list[i], t_hlist) {
++			len = snprintf(buf, rest, "tid %d: lld %s", target->tid,
++				       tgt_drivers[target->lid]->name);
++			buf += len;
++			rest -= len;
++			if (!rest)
++				goto out;
++
++			if (tgt_drivers[target->lid]->target_show) {
++				show = tgt_drivers[target->lid]->target_show;
++				len = show(target->tid, buf, rest);
++				buf += len;
++				rest -= len;
++				if (!rest)
++					goto out;
++			}
++
++			list_for_each_entry(device, &target->device_list, d_list) {
++				len = snprintf(buf, rest, "\tlun %" PRIu64 ": path %s\n",
++					       device->lun, device->path);
++				buf += len;
++				rest -= len;
++				if (!rest)
++					goto out;
++			}
++		}
++	}
++out:
++	return rest;
++}
++
+ __attribute__((constructor)) static void target_init(void)
+ {
+ 	int i;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-10-31 11:29:32 UTC (rev 607)
++++ trunk/usr/tgtd.h	2006-10-31 14:40:07 UTC (rev 608)
+@@ -17,6 +17,7 @@
+ 	uint64_t size;
+ 	uint64_t lun;
+ 	char scsi_id[SCSI_ID_LEN];
++	char *path;
+ 
+ 	struct list_head d_hlist;
+ 	struct list_head d_list;
+@@ -47,6 +48,7 @@
+ extern int tgt_target_create(int tid);
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
++extern int tgt_target_show(char *buf, int rest);
+ 
+ typedef void (event_handler_t)(int fd, int events, void *data);
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+
+
+
+From tomo at mail.berlios.de  Tue Oct 31 15:48:41 2006
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 31 Oct 2006 15:48:41 +0100
+Subject: [Stgt-svn] r609 - trunk/usr
+Message-ID: <200610311448.k9VEmfDA010134@sheep.berlios.de>
+
+Author: tomo
+Date: 2006-10-31 15:48:40 +0100 (Tue, 31 Oct 2006)
+New Revision: 609
+
+Modified:
+   trunk/usr/tgtadm.c
+Log:
+Add debug option to tgtadm
+
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-10-31 14:40:07 UTC (rev 608)
++++ trunk/usr/tgtadm.c	2006-10-31 14:48:40 UTC (rev 609)
+@@ -49,11 +49,16 @@
+ } while (0)
+ 
+ #undef dprintf
+-#define dprintf eprintf
++#define dprintf(fmt, args...)						\
++do {									\
++	if (debug)							\
++		eprintf(fmt, args);					\
++} while (0)
+ 
+ #define BUFSIZE 4096
+ 
+ static char program_name[] = "tgtadm";
++static int debug;
+ 
+ static struct option const long_options[] =
+ {
+@@ -66,6 +71,7 @@
+ 	{"params", required_argument, NULL, 'p'},
+ 	{"user", no_argument, NULL, 'u'},
+ 	{"hostno", required_argument, NULL, 'i'},
++	{"debug", no_argument, NULL, 'd'},
+ 	{"version", no_argument, NULL, 'v'},
+ 	{"help", no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+@@ -257,7 +263,7 @@
+ 	char buf[BUFSIZE];
+ 
+ 	optind = 1;
+-	while ((ch = getopt_long(argc, argv, "n:o:t:s:c:l:p:uvh",
++	while ((ch = getopt_long(argc, argv, "n:o:t:s:c:l:p:uvdh",
+ 				 long_options, &longindex)) >= 0) {
+ 		switch (ch) {
+ 		case 'n':
+@@ -293,6 +299,9 @@
+ 		case 'u':
+ 			set |= (1 << MODE_USER);
+ 			break;
++		case 'd':
++			debug = 1;
++			break;
+ 		case 'v':
+ 			printf("%s\n", program_name);
+ 			exit(0);
+
+
+

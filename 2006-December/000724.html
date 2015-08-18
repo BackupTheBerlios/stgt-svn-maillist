@@ -1,0 +1,766 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r737 - in trunk: doc usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r737%20-%20in%20trunk%3A%20doc%20usr&In-Reply-To=%3C200612301326.kBUDQYuq024800%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000723.html">
+   <LINK REL="Next"  HREF="000725.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r737 - in trunk: doc usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r737%20-%20in%20trunk%3A%20doc%20usr&In-Reply-To=%3C200612301326.kBUDQYuq024800%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r737 - in trunk: doc usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Dec 30 14:26:34 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000723.html">[Stgt-svn] r736 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000725.html">[Stgt-svn] r738 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#724">[ date ]</a>
+              <a href="thread.html#724">[ thread ]</a>
+              <a href="subject.html#724">[ subject ]</a>
+              <a href="author.html#724">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-30 14:26:34 +0100 (Sat, 30 Dec 2006)
+New Revision: 737
+
+Modified:
+   trunk/doc/README.iscsi
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+   trunk/usr/util.h
+Log:
+Cleanup (mainly tgtadm).
+
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/doc/README.iscsi	2006-12-30 13:26:34 UTC (rev 737)
+@@ -195,8 +195,7 @@
+ 
+ You can assign this account to any targets:
+ 
+-host:~/tgt# ./usr/tgtadm --lld iscsi --op bind --mode account --tid 1
+- --user fujita
++host:~/tgt# ./usr/tgtadm --lld iscsi --op bind --mode account --tid 1 --user fujita
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op show --mode target
+ Target 1: iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+     System information:
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/mgmt.c	2006-12-30 13:26:34 UTC (rev 737)
+@@ -77,7 +77,8 @@
+ 
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+-		err = tgt_target_create(lld_no, req-&gt;tid, mtask-&gt;buf);
++		err = tgt_target_create(lld_no, req-&gt;tid, mtask-&gt;buf,
++					req-&gt;target_type, req-&gt;bs_type);
+ 		if (!err &amp;&amp; tgt_drivers[lld_no]-&gt;target_create)
+ 			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, mtask-&gt;buf);
+ 		break;
+@@ -218,7 +219,7 @@
+ 				account_del(user);
+ 				err = 0;
+ 			} else
+-				err = account_ctl(req-&gt;tid, req-&gt;aid,
++				err = account_ctl(req-&gt;tid, req-&gt;ac_dir,
+ 						  user, req-&gt;op == OP_BIND);
+ 		}
+ 		break;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/target.c	2006-12-30 13:26:34 UTC (rev 737)
+@@ -857,6 +857,7 @@
+ 				if (target-&gt;account.in_aids[i] == ac-&gt;aid) {
+ 					target-&gt;account.in_aids[i] = 0;
+ 					target-&gt;account.nr_inaccount--;
++					break;
+ 				}
+ 
+ 			if (i == target-&gt;account.max_inaccount)
+@@ -1084,17 +1085,6 @@
+ #define TAB2 TAB1 TAB1
+ #define TAB3 TAB1 TAB1 TAB1
+ 
+-#define shprintf(total, buf, rest, fmt, args...)			\
+-do {									\
+-	int len;							\
+-	len = snprintf(buf, rest, fmt, ##args);				\
+-	if (len &gt; rest)							\
+-		goto overflow;						\
+-	buf += len;							\
+-	total += len;							\
+-	rest -= len;							\
+-} while (0)
+-
+ int tgt_target_show_all(char *buf, int rest)
+ {
+ 	int total = 0, max = rest;
+@@ -1169,9 +1159,9 @@
+ 
+ #define DEFAULT_NR_ACCOUNT 16
+ 
+-int tgt_target_create(int lld, int tid, char *args)
++int tgt_target_create(int lld, int tid, char *args, int t_type, int bs_type)
+ {
+-	int i, t_type = TARGET_SBC, bs_type = LU_BS_FILE;
++	int i;
+ 	struct target *target, *pos;
+ 	char *p, *q, *targetname = NULL;
+ 
+@@ -1185,10 +1175,6 @@
+ 
+ 			if (!strcmp(&quot;targetname&quot;, q))
+ 				targetname = str;
+-			else if (!strcmp(&quot;target-type&quot;, q))
+-				t_type = strtol(str, NULL, 10);
+-			else if (!strcmp(&quot;backing-store-type&quot;, q))
+-				bs_type = strtol(str, NULL, 10);
+ 			else
+ 				eprintf(&quot;Unknow option %s\n&quot;, q);
+ 		}
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/target.h	2006-12-30 13:26:34 UTC (rev 737)
+@@ -19,11 +19,6 @@
+ 	struct list_head aclent_list;
+ };
+ 
+-enum {
+-	ACCOUNT_TYPE_INCOMING,
+-	ACCOUNT_TYPE_OUTGOING,
+-};
+-
+ struct tgt_account {
+ 	int out_aid;
+ 	int nr_inaccount;
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/tgtadm.c	2006-12-30 13:26:34 UTC (rev 737)
+@@ -45,7 +45,7 @@
+ #undef eprintf
+ #define eprintf(fmt, args...)						\
+ do {									\
+-	fprintf(stderr, &quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
++	fprintf(stderr, &quot;%s: &quot; fmt, program_name, ##args);		\
+ } while (0)
+ 
+ #undef dprintf
+@@ -83,33 +83,32 @@
+ 	&quot;unknown parameter&quot;,
+ };
+ 
+-static struct option const long_options[] =
+-{
+-	{&quot;lld&quot;, required_argument, NULL, 'l'},
++struct option const long_options[] = {
++	{&quot;debug&quot;, no_argument, NULL, 'd'},
++	{&quot;help&quot;, no_argument, NULL, 'h'},
++	{&quot;lld&quot;, required_argument, NULL, 'L'},
+ 	{&quot;op&quot;, required_argument, NULL, 'o'},
+ 	{&quot;mode&quot;, required_argument, NULL, 'm'},
+ 	{&quot;tid&quot;, required_argument, NULL, 't'},
+ 	{&quot;sid&quot;, required_argument, NULL, 's'},
+ 	{&quot;cid&quot;, required_argument, NULL, 'c'},
+-	{&quot;lun&quot;, required_argument, NULL, 'u'},
+-	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+-	{&quot;bus&quot;, required_argument, NULL, 'B'},
++	{&quot;lun&quot;, required_argument, NULL, 'l'},
+ 	{&quot;name&quot;, required_argument, NULL, 'n'},
+ 	{&quot;value&quot;, required_argument, NULL, 'v'},
++	{&quot;backing-store&quot;, required_argument, NULL, 'b'},
+ 	{&quot;targetname&quot;, required_argument, NULL, 'T'},
+ 	{&quot;initiator-address&quot;, required_argument, NULL, 'I'},
+-	{&quot;target-type&quot;, required_argument, NULL, 'p'},
+-	{&quot;backing-store&quot;, required_argument, NULL, 'b'},
++	{&quot;user&quot;, required_argument, NULL, 'u'},
++	{&quot;password&quot;, required_argument, NULL, 'p'},
++
++	{&quot;bus&quot;, required_argument, NULL, 'B'},
++	{&quot;target-type&quot;, required_argument, NULL, 'Y'},
+ 	{&quot;backing-store-type&quot;, required_argument, NULL, 'S'},
+-	{&quot;user&quot;, required_argument, NULL, 'y'},
+-	{&quot;password&quot;, required_argument, NULL, 'Y'},
+ 	{&quot;outgoing&quot;, no_argument, NULL, 'O'},
+-	{&quot;debug&quot;, no_argument, NULL, 'd'},
+-	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+ };
+ 
+-static char *short_options = &quot;l:o:m:t:s:c:u:i:B:T:I:p:b:S:n:v:y:Y:dh&quot;;
++static char *short_options = &quot;dhL:o:m:t:s:c:l:n:v:b:T:I:u:p:&quot;;
+ 
+ static void usage(int status)
+ {
+@@ -159,7 +158,7 @@
+ \n\
+ Report bugs to &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">stgt-devel at lists.berlios.de</A>&gt;.\n&quot;);
+ 	}
+-	exit(status == 0 ? 0 : -1);
++	exit(status == 0 ? 0 : EINVAL);
+ }
+ 
+ static int ipc_mgmt_connect(int *fd)
+@@ -170,7 +169,7 @@
+ 	*fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+ 	if (*fd &lt; 0) {
+ 		eprintf(&quot;can't create a socket, %m\n&quot;);
+-		return -1;
++		return errno;
+ 	}
+ 
+ 	memset(&amp;addr, 0, sizeof(addr));
+@@ -180,8 +179,8 @@
+ 
+ 	err = connect(*fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+ 	if (err &lt; 0) {
+-		eprintf(&quot;can't connect to tgtd, %m\n&quot;);
+-		return -1;
++		eprintf(&quot;can't connect to the tgt daemon, %m\n&quot;);
++		return errno;
+ 	}
+ 
+ 	return 0;
+@@ -195,12 +194,12 @@
+ 	err = read(fd, &amp;rsp, sizeof(rsp));
+ 	if (err &lt; 0) {
+ 		eprintf(&quot;can't get the response, %m\n&quot;);
+-		return -1;
++		return errno;
+ 	}
+ 
+ 	if (rsp.err != TGTADM_SUCCESS) {
+-		fprintf(stderr, &quot;%s: %s\n&quot;, program_name, tgtadm_emsg[rsp.err]);
+-		return -1;
++		eprintf(&quot;%s\n&quot;, tgtadm_emsg[rsp.err]);
++		return EINVAL;
+ 	}
+ 
+ 	rest = rsp.len - sizeof(rsp);
+@@ -213,8 +212,8 @@
+ 		len = min_t(int, sizeof(buf) - 1, rest);
+ 		err = read(fd, buf, len);
+ 		if (err &lt;= 0) {
+-			eprintf(&quot;can't get the full response, %m\n&quot;);
+-			return -1;
++			eprintf(&quot;\ncan't get the full response, %m\n&quot;);
++			return errno;
+ 		}
+ 		fputs(buf, stdout);
+ 		rest -= len;
+@@ -233,7 +232,8 @@
+ 
+ 	err = write(fd, (char *) req, req-&gt;len);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;can't send to tgtd, %m\n&quot;);
++		eprintf(&quot;can't send the request to the tgt daemon, %m\n&quot;);
++		err = errno;
+ 		goto out;
+ 	}
+ 
+@@ -279,6 +279,10 @@
+ 		free(namelist[i]);
+ 	free(namelist);
+ 
++	if (host == -1) {
++		eprintf(&quot;can't find bus: %s\n&quot;, bus);
++		exit(EINVAL);
++	}
+ 	return host;
+ }
+ 
+@@ -288,91 +292,98 @@
+ 		return LU_BS_FILE;
+ 	else if (!strcmp(str, &quot;raw&quot;))
+ 		return LU_BS_RAW;
+-	else
+-		return -1;
++	else {
++		eprintf(&quot;unknown backing store type: %s\n&quot;, str);
++		exit(EINVAL);
++	}
+ }
+ 
+ static int target_type(char *str)
+ {
+ 	if (!strcmp(str, &quot;disk&quot;))
+ 		return TARGET_SBC;
+-	else if (!strcmp(str, &quot;tape&quot;))
+-		return TARGET_SSC;
+-	else if (!strcmp(str, &quot;cd&quot;))
+-		return TARGET_MMC;
+-	else if (!strcmp(str, &quot;osd&quot;))
+-		return TARGET_OSD;
+-	else
+-		return -1;
++	else if (!strcmp(str, &quot;tape&quot;)) {
++		eprintf(&quot;type emulation isn't supported yet\n&quot;);
++		exit(EINVAL);
++	} else if (!strcmp(str, &quot;cd&quot;)) {
++		eprintf(&quot;cdrom emulation isn't supported yet\n&quot;);
++		exit(EINVAL);
++	} else if (!strcmp(str, &quot;osd&quot;)) {
++		eprintf(&quot;osd isn't supported yet\n&quot;);
++		exit(EINVAL);
++	} else {
++		eprintf(&quot;unknown target type: %s\n&quot;, str);
++		exit(EINVAL);
++	}
+ }
+ 
+ static int str_to_mode(char *str)
+ {
+-	int mode;
+-
+ 	if (!strcmp(&quot;target&quot;, str) || !strcmp(&quot;tgt&quot;, str))
+-		mode = MODE_TARGET;
++		return MODE_TARGET;
+ 	else if (!strcmp(&quot;logicalunit&quot;, str) || !strcmp(&quot;lu&quot;, str))
+-		mode = MODE_DEVICE;
++		return MODE_DEVICE;
+ 	else if (!strcmp(&quot;session&quot;, str) || !strcmp(&quot;sess&quot;, str))
+-		mode = MODE_SESSION;
++		return MODE_SESSION;
+ 	else if (!strcmp(&quot;connection&quot;, str) || !strcmp(&quot;conn&quot;, str))
+-		mode = MODE_CONNECTION;
++		return MODE_CONNECTION;
+ 	else if (!strcmp(&quot;account&quot;, str))
+-		mode = MODE_ACCOUNT;
+-	else
+-		mode = -1;
+-
+-	return mode;
++		return MODE_ACCOUNT;
++	else {
++		eprintf(&quot;unknown mode: %s\n&quot;, str);
++		exit(1);
++	}
+ }
+ 
+ static int str_to_op(char *str)
+ {
+-	int op;
+-
+ 	if (!strcmp(&quot;new&quot;, str))
+-		op = OP_NEW;
++		return OP_NEW;
+ 	else if (!strcmp(&quot;delete&quot;, str))
+-		op = OP_DELETE;
++		return OP_DELETE;
+ 	else if (!strcmp(&quot;bind&quot;, str))
+-		op = OP_BIND;
++		return OP_BIND;
+ 	else if (!strcmp(&quot;unbind&quot;, str))
+-		op = OP_UNBIND;
++		return OP_UNBIND;
+ 	else if (!strcmp(&quot;show&quot;, str))
+-		op = OP_SHOW;
++		return OP_SHOW;
+ 	else if (!strcmp(&quot;update&quot;, str))
+-		op = OP_UPDATE;
+-	else
+-		op = -1;
+-
+-	return op;
++		return OP_UPDATE;
++	else {
++		eprintf(&quot;unknown operation: %s\n&quot;, str);
++		exit(1);
++	}
+ }
+ 
+ int main(int argc, char **argv)
+ {
+ 	int ch, longindex;
+-	int err = -EINVAL, op = -1, len = 0;
+-	int tid = -1, rest = BUFSIZE;
+-	int t_type = TARGET_SBC, bs_type = LU_BS_FILE;
+-	uint32_t cid, hostno, aid;
++	int op, total, tid, rest, mode, t_type, bs_type, ac_dir;
++	uint32_t cid, hostno;
+ 	uint64_t sid, lun;
+-	char *lldname;
+-	struct tgtadm_req *req;
+-	char buf[BUFSIZE + sizeof(*req)];
+ 	char *name, *value, *path, *targetname, *params, *address;
+ 	char *user, *password;
+-	int mode = MODE_SYSTEM;
++	char buf[BUFSIZE + sizeof(struct tgtadm_req)];
++	struct tgtadm_req *req;
+ 
+-	cid = hostno = aid = sid = lun = 0;
+-	lldname = name = value = path = targetname = address = NULL;
++	op = tid = mode = -1;
++	total = cid = hostno = sid = lun = 0;
++	t_type = TARGET_SBC;
++	bs_type = LU_BS_FILE;
++	ac_dir = ACCOUNT_TYPE_INCOMING;
++	rest = BUFSIZE;
++	name = value = path = targetname = address = NULL;
+ 	user = password = NULL;
+ 
++	memset(buf, 0, sizeof(buf));
++	req = (struct tgtadm_req *) buf;
++
+ 	optind = 1;
+ 	while ((ch = getopt_long(argc, argv, short_options,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+-		case 'l':
+-			lldname = optarg;
++		case 'L':
++			strncpy(req-&gt;lld, optarg, sizeof(req-&gt;lld));
+ 			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+@@ -389,17 +400,17 @@
+ 		case 'c':
+ 			cid = strtoul(optarg, NULL, 10);
+ 			break;
+-		case 'u':
++		case 'l':
+ 			lun = strtoull(optarg, NULL, 10);
+ 			break;
+-		case 'O':
+-			aid = 1;
++		case 'n':
++			name = optarg;
+ 			break;
+-		case 'i':
+-			hostno = strtol(optarg, NULL, 10);
++		case 'v':
++			value = optarg;
+ 			break;
+-		case 'B':
+-			hostno = bus_to_host(optarg);
++		case 'b':
++			path = optarg;
+ 			break;
+ 		case 'T':
+ 			targetname = optarg;
+@@ -407,27 +418,24 @@
+ 		case 'I':
+ 			address = optarg;
+ 			break;
++		case 'u':
++			user = optarg;
++			break;
+ 		case 'p':
++			password = optarg;
++			break;
++		case 'B':
++			hostno = bus_to_host(optarg);
++			break;
++		case 'Y':
+ 			t_type = target_type(optarg);
+ 			break;
+-		case 'b':
+-			path = optarg;
+-			break;
+ 		case 'S':
+ 			bs_type = backing_store_type(optarg);
+ 			break;
+-		case 'n':
+-			name = optarg;
++		case 'O':
++			ac_dir = ACCOUNT_TYPE_OUTGOING;
+ 			break;
+-		case 'v':
+-			value = optarg;
+-			break;
+-		case 'y':
+-			user = optarg;
+-			break;
+-		case 'Y':
+-			password = optarg;
+-			break;
+ 		case 'd':
+ 			debug = 1;
+ 			break;
+@@ -438,76 +446,114 @@
+ 			usage(1);
+ 		}
+ 	}
+-	if (op &lt; 0) {
+-		eprintf(&quot;You must specify the operation type\n&quot;);
+-		goto out;
+-	}
+ 
+ 	if (optind &lt; argc) {
+-		fprintf(stderr, &quot;unrecognized options: &quot;);
++		eprintf(&quot;unrecognized options: &quot;);
+ 		while (optind &lt; argc)
+-			fprintf(stderr, &quot;%s&quot;, argv[optind++]);
+-		fprintf(stderr, &quot;\n&quot;);
++			eprintf(&quot;%s&quot;, argv[optind++]);
++		eprintf(&quot;\n&quot;);
+ 		usage(1);
+ 	}
+ 
++	if (op &lt; 0) {
++		eprintf(&quot;specify the operation type\n&quot;);
++		exit(EINVAL);
++	}
++
+ 	if (mode &lt; 0) {
+-		fprintf(stderr, &quot;unknown mode\n&quot;);
+-		usage(1);
++		eprintf(&quot;specify the mode\n&quot;);
++		exit(EINVAL);
+ 	}
+ 
+-	memset(buf, 0, sizeof(buf));
++	if (!*req-&gt;lld) {
++		eprintf(&quot;specify the low level driver name\n&quot;);
++		exit(EINVAL);
++	}
+ 
+-	req = (struct tgtadm_req *) buf;
+-	if (lldname)
+-		strncpy(req-&gt;lld, lldname, sizeof(req-&gt;lld));
+-	req-&gt;mode = mode;
+-	req-&gt;op = op;
+-	req-&gt;tid = tid;
+-	req-&gt;sid = sid;
+-	req-&gt;lun = lun;
+-	req-&gt;aid = aid;
+-	req-&gt;host_no = hostno;
++	if ((name || value) &amp;&amp; op != OP_UPDATE) {
++		eprintf(&quot;only 'update' operation takes&quot;
++			&quot; 'name' and 'value' options\n&quot;);
++		exit(EINVAL);
++	}
+ 
+-	params = buf + sizeof(*req);
++	if ((!name &amp;&amp; value) || (name &amp;&amp; !value)) {
++		eprintf(&quot;both 'name' and 'value' options must be set\n&quot;);
++		exit(EINVAL);
++	}
+ 
+-	/* FIXME */
+-	if ((name &amp;&amp; value) || path || targetname || address) {
+-		if (path) {
+-			name = &quot;path&quot;;
+-			value = path;
+-		}
++	if ((mode == MODE_TARGET &amp;&amp; op == OP_NEW) &amp;&amp; !targetname) {
++		eprintf(&quot;creating a new target needs the name\n&quot;);
++		exit(EINVAL);
++	}
+ 
+-		if (targetname) {
+-			name = &quot;targetname&quot;;
+-			value = targetname;
+-		}
++	if ((mode == MODE_DEVICE &amp;&amp; op == OP_NEW) &amp;&amp; !path) {
++		eprintf(&quot;creating a new logical unit needs&quot;
++			&quot; the backing store path\n&quot;);
++		exit(EINVAL);
++	}
+ 
+-		if (address) {
+-			name = &quot;initiator-address&quot;;
+-			value = address;
++	if (mode == MODE_ACCOUNT) {
++		switch (op) {
++		case OP_NEW:
++			if (!user || !password) {
++				eprintf(&quot;creating a new account needs&quot;
++					&quot; user and password options\n&quot;);
++				exit(EINVAL);
++			}
++			break;
++		case OP_SHOW:
++			break;
++		case OP_DELETE:
++		case OP_BIND:
++		case OP_UNBIND:
++			if (!user) {
++				eprintf(&quot;delete/bind/unbind the account&quot;
++					&quot; needs user option\n&quot;);
++				exit(EINVAL);
++			}
++			break;
++		default:
++			eprintf(&quot;the update operation can't&quot;
++				&quot; handle accounts\n&quot;);
++			exit(EINVAL);
++			break;
+ 		}
+-
+-		len = snprintf(params, rest, &quot;%s=%s&quot;, name, value);
+ 	}
+ 
+-	if (t_type != TARGET_SBC)
+-		len += snprintf(params + len, rest - len,
+-				&quot;%starget-type=%d&quot;, len ? &quot;,&quot; : &quot;&quot;, t_type);
++	req-&gt;op = op;
++	req-&gt;tid = tid;
++	req-&gt;sid = sid;
++	req-&gt;lun = lun;
++	req-&gt;mode = mode;
++	req-&gt;host_no = hostno;
++	req-&gt;target_type = t_type;
++	req-&gt;bs_type = bs_type;
++	req-&gt;ac_dir = ac_dir;
+ 
+-	if (bs_type != LU_BS_FILE)
+-		len += snprintf(params + len, rest - len,
+-				&quot;%sbacking-store-type=%d&quot;, len ? &quot;,&quot; : &quot;&quot;, bs_type);
++	params = buf + sizeof(*req);
+ 
++	if (name)
++		shprintf(total, params, rest, &quot;%s=%s&quot;, name, value);
++	if (path)
++		shprintf(total, params, rest, &quot;%spath=%s&quot;,
++			 rest == BUFSIZE ? &quot;&quot; : &quot;,&quot;, path);
++	if (targetname)
++		shprintf(total, params, rest, &quot;%stargetname=%s&quot;,
++			 rest == BUFSIZE ? &quot;&quot; : &quot;,&quot;, targetname);
++	if (address)
++		shprintf(total, params, rest, &quot;%sinitiator-address=%s&quot;,
++			 rest == BUFSIZE ? &quot;&quot; : &quot;,&quot;, address);
+ 	if (user)
+-		len += snprintf(params + len, rest - len, &quot;user=%s&quot;, user);
+-
++		shprintf(total, params, rest, &quot;%suser=%s&quot;,
++			 rest == BUFSIZE ? &quot;&quot; : &quot;,&quot;, user);
+ 	if (password)
+-		len += snprintf(params + len, rest - len, &quot;,password=%s&quot;, password);
++		shprintf(total, params, rest, &quot;%spassword=%s&quot;,
++			 rest == BUFSIZE ? &quot;&quot; : &quot;,&quot;, password);
+ 
+-	req-&gt;len = sizeof(*req) + len;
++	req-&gt;len = sizeof(*req) + total;
+ 
+-	err = ipc_mgmt_req(req);
+-out:
+-	return err;
++	return ipc_mgmt_req(req);
++overflow:
++	eprintf(&quot;BUFSIZE (%d bytes) isn't long enough\n&quot;, BUFSIZE);
++	return EINVAL;
+ }
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/tgtadm.h	2006-12-30 13:26:34 UTC (rev 737)
+@@ -59,18 +59,24 @@
+ 	LU_BS_RAW, /* pass through */
+ };
+ 
++enum tgtadm_account_dir {
++	ACCOUNT_TYPE_INCOMING,
++	ACCOUNT_TYPE_OUTGOING,
++};
++
+ struct tgtadm_req {
+ 	enum tgtadm_mode mode;
+ 	enum tgtadm_op op;
++	char lld[TGT_LLD_NAME_LEN];
+ 	uint32_t len;
+-
+ 	int32_t tid;
+ 	uint64_t sid;
++	uint64_t lun;
+ 	uint32_t cid;
+-	uint32_t aid;
+-	uint64_t lun;
+-	char lld[TGT_LLD_NAME_LEN];
+ 	uint32_t host_no;
++	uint32_t target_type;
++	uint32_t bs_type;
++	uint32_t ac_dir;
+ 	uint32_t pack;
+ };
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/tgtd.h	2006-12-30 13:26:34 UTC (rev 737)
+@@ -75,7 +75,7 @@
+ extern int device_release(int tid, uint64_t lun, uint64_t reserve_id, int force);
+ extern int device_reserved(int tid, uint64_t lun, uint64_t reserve_id);
+ 
+-extern int tgt_target_create(int lld, int tid, char *targetname);
++extern int tgt_target_create(int lld, int tid, char *args, int t_type, int bs_type);
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lld);
+ extern char *tgt_targetname(int tid);
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-12-30 07:30:07 UTC (rev 736)
++++ trunk/usr/util.h	2006-12-30 13:26:34 UTC (rev 737)
+@@ -64,4 +64,15 @@
+ 	return seq3 - seq2 &gt;= seq1 - seq2;
+ }
+ 
++#define shprintf(total, buf, rest, fmt, args...)			\
++do {									\
++	int len;							\
++	len = snprintf(buf, rest, fmt, ##args);				\
++	if (len &gt; rest)							\
++		goto overflow;						\
++	buf += len;							\
++	total += len;							\
++	rest -= len;							\
++} while (0)
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000723.html">[Stgt-svn] r736 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000725.html">[Stgt-svn] r738 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#724">[ date ]</a>
+              <a href="thread.html#724">[ thread ]</a>
+              <a href="subject.html#724">[ subject ]</a>
+              <a href="author.html#724">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

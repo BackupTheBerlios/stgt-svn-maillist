@@ -1,0 +1,118 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r299%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602141344.k1EDiMFq031402%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000285.html">
+   <LINK REL="Next"  HREF="000287.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r299%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602141344.k1EDiMFq031402%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r299 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 14 14:44:22 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000285.html">[Stgt-svn] r298 - in branches/use-scsi-ml: . patchset
+</A></li>
+        <LI>Next message: <A HREF="000287.html">[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#286">[ date ]</a>
+              <a href="thread.html#286">[ thread ]</a>
+              <a href="subject.html#286">[ subject ]</a>
+              <a href="author.html#286">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-14 14:44:19 +0100 (Tue, 14 Feb 2006)
+New Revision: 299
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Kill adapter-&gt;max_sector.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-14 09:13:11 UTC (rev 298)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-14 13:44:19 UTC (rev 299)
+@@ -101,7 +101,6 @@
+ 	unsigned long liobn;
+ 	unsigned long riobn;
+ 
+-	int max_sectors;
+ 	struct Scsi_Host *shost;
+ };
+ 
+@@ -363,9 +362,6 @@
+ 	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+ 	BUG_ON(!scmd);
+ 
+-	dprintk(&quot;%p %x %lx %d %d %d\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
+-
+ 	scmd-&gt;SCp.ptr = (char *) iue;
+ 	memcpy(scmd-&gt;data_cmnd, iu-&gt;srp.cmd.cdb, MAX_COMMAND_SIZE);
+ 	scmd-&gt;request_bufflen = len;
+@@ -668,6 +664,7 @@
+ 		      dma_addr_t remote_buffer, uint16_t length)
+ {
+ 	struct server_adapter *adapter = iue-&gt;adapter;
++	struct Scsi_Host *shost = adapter-&gt;shost;
+ 	dma_addr_t data_token;
+ 	struct mad_adapter_info_data *info;
+ 	int err;
+@@ -696,7 +693,7 @@
+ 	info-&gt;partition_number = partition_number;
+ 	info-&gt;mad_version = 1;
+ 	info-&gt;os_type = 2;
+-	info-&gt;port_max_txu[0] = adapter-&gt;max_sectors &lt;&lt; 9;
++	info-&gt;port_max_txu[0] = shost-&gt;hostt-&gt;max_sectors &lt;&lt; 9;
+ 
+ 	/* Send our info to remote */
+ 	err = h_copy_rdma(sizeof(*info), adapter-&gt;liobn, data_token,
+@@ -1102,7 +1099,6 @@
+ 	adapter-&gt;dev = &amp;dev-&gt;dev;
+ 	adapter-&gt;dev-&gt;driver_data = adapter;
+ 	adapter-&gt;next_rsp_delta = 0;
+-	adapter-&gt;max_sectors = DEFAULT_MAX_SECTORS;
+ 	spin_lock_init(&amp;adapter-&gt;lock);
+ 
+ 	dma = (unsigned int *)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000285.html">[Stgt-svn] r298 - in branches/use-scsi-ml: . patchset
+</A></li>
+	<LI>Next message: <A HREF="000287.html">[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#286">[ date ]</a>
+              <a href="thread.html#286">[ thread ]</a>
+              <a href="subject.html#286">[ subject ]</a>
+              <a href="author.html#286">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

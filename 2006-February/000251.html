@@ -1,0 +1,584 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r264 - in trunk: . include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r264%20-%20in%20trunk%3A%20.%20include%20kernel%20usr&In-Reply-To=%3C200602051205.k15C5X01028470%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000250.html">
+   <LINK REL="Next"  HREF="000252.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r264 - in trunk: . include kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r264%20-%20in%20trunk%3A%20.%20include%20kernel%20usr&In-Reply-To=%3C200602051205.k15C5X01028470%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r264 - in trunk: . include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Feb  5 13:05:33 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000250.html">[Stgt-svn] r263 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000252.html">[Stgt-svn] r265 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#251">[ date ]</a>
+              <a href="thread.html#251">[ thread ]</a>
+              <a href="subject.html#251">[ subject ]</a>
+              <a href="author.html#251">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-05 13:05:13 +0100 (Sun, 05 Feb 2006)
+New Revision: 264
+
+Added:
+   trunk/kernel/tgt_packet.c
+Modified:
+   trunk/include/tgt_if.h
+   trunk/initd
+   trunk/kernel/Makefile
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_target.h
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.h
+Log:
+Replace TGT_KEVENT_CMD_REQ netlink with packet socket.
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/include/tgt_if.h	2006-02-05 12:05:13 UTC (rev 264)
+@@ -29,6 +29,7 @@
+ 			char type[32];
+ 			int nr_cmds;
+ 			int pid;
++			int fd;
+ 		} c_target;
+ 		struct {
+ 			int tid;
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/initd	2006-02-05 12:05:13 UTC (rev 264)
+@@ -28,7 +28,7 @@
+ 	sleep 1
+ 
+ 	${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-	${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --lun 0 --params Path=/dev/sdb1
++	${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --lun 0 --params Path=/dev/hdc1
+ }
+ 	
+ stop_server()
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/kernel/Makefile	2006-02-05 12:05:13 UTC (rev 264)
+@@ -6,7 +6,7 @@
+ 
+ ifneq ($(KERNELRELEASE),)
+ obj-m		+= tgt_core.o
+-tgt_core-objs	:= tgt.o tgt_nl.o tgt_sysfs.o tgt_protocol.o
++tgt_core-objs	:= tgt.o tgt_nl.o tgt_sysfs.o tgt_protocol.o tgt_packet.o
+ 
+ obj-m		+= tgt_scsi.o
+ else
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/kernel/tgt.c	2006-02-05 12:05:13 UTC (rev 264)
+@@ -15,6 +15,7 @@
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/file.h&gt;
+ #include &lt;linux/hash.h&gt;
++#include &lt;linux/net.h&gt;
+ #include &lt;asm/scatterlist.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+@@ -197,19 +198,26 @@
+ 	return target;
+ }
+ 
+-struct tgt_target *tgt_target_create(char *target_type, int queued_cmds, int pid)
++struct tgt_target *tgt_target_create(char *target_type, int queued_cmds, int pid, int fd)
+ {
+ 	char name[16];
+-	static int i, target_id;
++	static int target_id;
++	static int i, err;
+ 	struct tgt_target *target;
+ 	struct target_type_internal *ti;
++	struct socket *sock;
+ 
+-	dprintk(&quot;%s %d %d\n&quot;, target_type, queued_cmds, pid);
++	dprintk(&quot;%s %d %d %d\n&quot;, target_type, queued_cmds, pid, fd);
+ 
+ 	target = kzalloc(sizeof(*target), GFP_KERNEL);
+ 	if (!target)
+ 		return NULL;
+ 
++	sock = sockfd_lookup(fd, &amp;err);
++	eprintk(&quot;%d\n&quot;, err);
++	target-&gt;sock = sock;
++	fget(fd);
++
+ 	target-&gt;tsk = find_task_by_pid(pid);
+ 	if (!target-&gt;tsk)
+ 		goto free_target;
+@@ -276,6 +284,9 @@
+ 
+ 	dprintk(&quot;%p\n&quot;, target);
+ 
++	if (target-&gt;sock)
++		fput(target-&gt;sock-&gt;file);
++
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	/* userspace and maybe a hotunplug are racing (TODO refcounts) */
+ 	if (target-&gt;state == TGT_DESTROYED)
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/kernel/tgt_nl.c	2006-02-05 12:05:13 UTC (rev 264)
+@@ -19,43 +19,6 @@
+ static struct sock *nls;
+ static void *zero_page;
+ 
+-int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
+-{
+-	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+-	struct sk_buff *skb;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-	pid_t pid = cmd-&gt;session-&gt;target-&gt;tsk-&gt;pid;
+-	char *pdu;
+-	int err, len, proto_pdu_size = proto-&gt;uspace_pdu_size;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + proto_pdu_size);
+-	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), proto_pdu_size);
+-	nlh = __nlmsg_put(skb, pid, 0, TGT_KEVENT_CMD_REQ,
+-			  len - sizeof(*nlh), 0);
+-	ev = NLMSG_DATA(nlh);
+-	memset(ev, 0, sizeof(*ev));
+-
+-	pdu = (char *) ev-&gt;data;
+-	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+-	ev-&gt;k.cmd_req.cid = cmd_tag(cmd);
+-	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+-	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
+-
+-	proto-&gt;uspace_pdu_build(cmd, pdu);
+-	err = netlink_unicast(nls, skb, pid, 0);
+-	if (err &lt; 0) {
+-		eprintk(&quot;%d %d\n&quot;, pid, err);
+-		BUG();
+-	}
+-	return err;
+-}
+-EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+-
+ static int send_event_res(uint16_t type, struct tgt_event *p,
+ 			  void *data, int dlen, gfp_t flags, uint32_t pid)
+ {
+@@ -136,7 +99,8 @@
+ 	case TGT_UEVENT_TARGET_CREATE:
+ 		target = tgt_target_create(ev-&gt;u.c_target.type,
+ 					   ev-&gt;u.c_target.nr_cmds,
+-					   ev-&gt;u.c_target.pid);
++					   ev-&gt;u.c_target.pid,
++					   ev-&gt;u.c_target.fd);
+ 		if (target) {
+ 			err = target-&gt;tid;
+ 			dprintk(&quot;%d %d %d\n&quot;, target-&gt;tid,
+
+Added: trunk/kernel/tgt_packet.c
+===================================================================
+--- trunk/kernel/tgt_packet.c	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/kernel/tgt_packet.c	2006-02-05 12:05:13 UTC (rev 264)
+@@ -0,0 +1,65 @@
++/*
++ * Target packet socket code
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;net/sock.h&gt;
++#include &lt;net/af_packet.h&gt;
++#include &lt;linux/if_packet.h&gt;
++
++#include &lt;tgt.h&gt;
++#include &lt;tgt_target.h&gt;
++#include &lt;tgt_if.h&gt;
++#include &lt;tgt_protocol.h&gt;
++#include &quot;tgt_priv.h&quot;
++
++int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
++{
++	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
++	int proto_pdu_size = proto-&gt;uspace_pdu_size;
++	struct sock *sk = cmd-&gt;session-&gt;target-&gt;sock-&gt;sk;
++	struct tpacket_hdr *h;
++	struct tgt_event *ev;
++	char *pdu;
++
++	h = packet_frame(sk);
++	if (IS_ERR(h)) {
++		eprintk(&quot;Queue is full\n&quot;);
++		return PTR_ERR(h);
++	}
++
++	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
++	pdu = (char *) ev-&gt;data;
++
++	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
++	ev-&gt;k.cmd_req.cid = cmd_tag(cmd);
++	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
++	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
++
++	proto-&gt;uspace_pdu_build(cmd, pdu);
++
++	dprintk(&quot;%d %llu %d %d\n&quot;, ev-&gt;k.cmd_req.tid, ev-&gt;k.cmd_req.cid,
++		ev-&gt;k.cmd_req.typeid, ev-&gt;k.cmd_req.data_len);
++
++	h-&gt;tp_status = TP_STATUS_USER;
++	mb();
++	{
++		struct page *p_start, *p_end;
++		char *h_end = pdu + TPACKET_HDRLEN + proto_pdu_size - 1;
++
++		p_start = virt_to_page(h);
++		p_end = virt_to_page(h_end);
++		while (p_start &lt;= p_end) {
++			flush_dcache_page(p_start);
++			p_start++;
++		}
++	}
++
++	sk-&gt;sk_data_ready(sk, 0);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/kernel/tgt_target.h	2006-02-05 12:05:13 UTC (rev 264)
+@@ -124,12 +124,14 @@
+ 
+ 	struct workqueue_struct *twq;
+ 	struct task_struct *tsk;
++	struct socket *sock;
+ };
+ 
+ #define cdev_to_tgt_target(cdev) \
+ 	container_of(cdev, struct tgt_target, cdev)
+ 
+-extern struct tgt_target *tgt_target_create(char *target_type, int nr_cmds, int pid);
++extern struct tgt_target *tgt_target_create(char *target_type,
++					    int nr_cmds, int pid, int fd);
+ extern int tgt_target_destroy(struct tgt_target *target);
+ 
+ extern int tgt_target_template_register(struct tgt_target_template *tt);
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/usr/mgmt.c	2006-02-05 12:05:13 UTC (rev 264)
+@@ -18,8 +18,8 @@
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;linux/netlink.h&gt;
+ #include &lt;linux/types.h&gt;
+-#include &lt;linux/netlink.h&gt;
+ 
+ #include &lt;tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+@@ -75,25 +75,27 @@
+ {
+ 	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, typeid_to_name(dlinfo, req-&gt;typeid));
+ 	ev-&gt;u.c_target.pid = req-&gt;pid;
++	ev-&gt;u.c_target.fd = req-&gt;fd;
+ }
+ 
+ int ktarget_create(int typeid)
+ {
+ 	struct tgtadm_req req;
+-	int fd, err;
++	int fd[2], err;
+ 
+ 	req.typeid = typeid;
+-	req.pid = target_thread_create(&amp;fd);
++	req.pid = target_thread_create(fd);
++	req.fd = fd[1];
+ 	err = tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_CREATE,
+ 				__ktarget_create);
+ 	if (err &gt;= 0) {
+-		dprintf(&quot;%d %d\n&quot;, err, fd);
++		dprintf(&quot;%d %d\n&quot;, err, fd[0]);
+ 
+ 		/* FIXME */
+ 		if (err &gt; POLLS_PER_DRV)
+ 			eprintf(&quot;too large tid %d\n&quot;, err);
+ 		else {
+-			poll_array[POLLS_PER_DRV + err].fd = fd;
++			poll_array[POLLS_PER_DRV + err].fd = fd[0];
+ 			poll_array[POLLS_PER_DRV + err].events = POLLIN;
+ 		}
+ 	}
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/usr/target.c	2006-02-05 12:05:13 UTC (rev 264)
+@@ -14,15 +14,20 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;netinet/in.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;sys/user.h&gt;
+ #include &lt;linux/fs.h&gt;
++#include &lt;linux/if_ether.h&gt;
++#include &lt;linux/if_packet.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &lt;tgt_if.h&gt;
++#include &lt;tgt_scsi_if.h&gt;
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+ #include &quot;dl.h&quot;
+@@ -34,6 +39,7 @@
+ enum {
+ 	POLL_IPC_CTRL,
+ 	POLL_NL_CMD,
++	POLL_PACKET,
+ };
+ 
+ struct device {
+@@ -46,10 +52,15 @@
+ };
+ 
+ struct target {
+-	struct pollfd pfd[2];
++	struct pollfd pfd[3];
+ 
+ 	struct device **devt;
+ 	uint64_t max_device;
++
++	char *ringbuf;
++	uint32_t frame_size;
++	uint32_t frame_nr;
++	uint32_t idx;
+ };
+ 
+ static struct target *target;
+@@ -296,7 +307,7 @@
+ 
+ 	memset(resbuf, 0, sizeof(resbuf));
+ 	pdu = (uint8_t *) ev_req-&gt;data;
+-	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, pdu[0]);
++	dprintf(&quot;%d %&quot; PRIu64 &quot; %x\n&quot;, tid, cid, pdu[0]);
+ 
+ 	if (!get_devid)
+ 		get_devid = dl_proto_get_devid(dinfo, tid, typeid);
+@@ -425,12 +436,64 @@
+ 	return bind(fd, (struct sockaddr *)&amp;addr, sizeof(addr));
+ }
+ 
+-static void tthread_event_loop(struct target *target)
++static void packet_cmd(struct driver_info *dinfo, int fd)
+ {
++	struct tpacket_hdr *h;
++
++retry:
++	h = (struct tpacket_hdr *) (target-&gt;ringbuf + target-&gt;idx * target-&gt;frame_size);
++
++	dprintf(&quot;%lx %u\n&quot;, h-&gt;tp_status, target-&gt;idx);
++	if (!(h-&gt;tp_status &amp; TP_STATUS_USER))
++		return;
++
++	cmd_queue(dinfo, fd, (char *) h + TPACKET_HDRLEN);
++	target-&gt;idx = target-&gt;idx == target-&gt;frame_nr - 1 ? 0: target-&gt;idx + 1;
++	h-&gt;tp_status &amp;= ~TP_STATUS_USER;
++
++	goto retry;
++}
++
++static void *ringbuf_init(int fd)
++{
++	struct tpacket_req req;
++	int err;
++	socklen_t len = sizeof(req);
++	unsigned int size = PAGE_SIZE * 8;
++	void *ptr;
++
++	req.tp_frame_size = TPACKET_ALIGN(TPACKET_HDRLEN +
++					  sizeof(struct tgt_event) +
++					  sizeof(struct tgt_scsi_cmd));
++	req.tp_block_size = size;
++	req.tp_frame_nr = req.tp_block_size / req.tp_frame_size;
++	req.tp_block_nr = 1;
++
++	err = setsockopt(fd, SOL_PACKET, PACKET_RX_RING, &amp;req, len);
++	dprintf(&quot;%d %u %u\n&quot;, err, req.tp_frame_size, req.tp_frame_nr);
++	if (err &lt; 0)
++		return NULL;
++
++	ptr = mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
++	if (ptr == MAP_FAILED) {
++		eprintf(&quot;fail to mmap\n&quot;);
++		ptr = NULL;
++	}
++
++	target-&gt;frame_size = req.tp_frame_size;
++	target-&gt;frame_nr = req.tp_frame_nr;
++
++	return ptr;
++}
++
++static void tthread_event_loop(struct target *target, int packetfd)
++{
+ 	struct driver_info d[MAX_DL_HANDLES];
+ 	struct pollfd *pfd = target-&gt;pfd;
+ 	int fd, err;
+ 
++	target-&gt;ringbuf = ringbuf_init(packetfd);
++	dprintf(&quot;%p %d\n&quot;, target-&gt;ringbuf, packetfd);
+ 	fd = nl_init();
+ 	dprintf(&quot;%d\n&quot;, fd);
+ 	err = bind_nls(fd);
+@@ -439,13 +502,16 @@
+ 	target-&gt;pfd[POLL_NL_CMD].fd = fd;
+ 	target-&gt;pfd[POLL_NL_CMD].events = POLLIN;
+ 
++	target-&gt;pfd[POLL_PACKET].fd = packetfd;
++	target-&gt;pfd[POLL_PACKET].events = POLLIN;
++
+ 	err = dl_init(d);
+ 	dprintf(&quot;%d\n&quot;, err);
+ 
+ 	dprintf(&quot;Target thread started %u %d\n&quot;, getpid(), fd);
+ 
+ 	while (1) {
+-		err = poll(pfd, 2, -1);
++		err = poll(pfd, 3, -1);
+ 		dprintf(&quot;target thread event %d\n&quot;, err);
+ 
+ 		if (err &lt; 0) {
+@@ -460,6 +526,9 @@
+ 
+ 		if (pfd[POLL_NL_CMD].revents)
+ 			nl_cmd(d, pfd[POLL_NL_CMD].fd);
++
++		if (pfd[POLL_PACKET].revents)
++			packet_cmd(d, pfd[POLL_NL_CMD].fd);
+ 	}
+ 
+ 	free(target);
+@@ -467,7 +536,7 @@
+ 
+ int target_thread_create(int *sfd)
+ {
+-	pid_t pid;
++	pid_t pid, pfd;
+ 	int fd[2];
+ 
+ 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, fd) &lt; 0) {
+@@ -475,11 +544,17 @@
+ 		return -1;
+ 	}
+ 
++	pfd = socket(PF_PACKET, SOCK_RAW, 0);
++	dprintf(&quot;%d\n&quot;, pfd);
++
+ 	pid = fork();
+ 	if (pid &lt; 0)
+ 		return -ENOMEM;
+ 	else if (pid) {
+-		*sfd = fd[0];
++		sfd[0] = fd[0];
++		sfd[1] = pfd;
++
++/* 		close(pfd); */
+ 		close(fd[1]);
+ 		return pid;
+ 	}
+@@ -489,6 +564,7 @@
+ 		eprintf(&quot;Out of memoryn\n&quot;);
+ 		exit(1);
+ 	}
++	memset(target, 0, sizeof(*target));
+ 
+ 	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct device *));
+ 	target-&gt;max_device = DEFAULT_NR_DEVICE;
+@@ -497,7 +573,7 @@
+ 	target-&gt;pfd[POLL_IPC_CTRL].fd = fd[1];
+ 	target-&gt;pfd[POLL_IPC_CTRL].events = POLLIN;
+ 
+-	tthread_event_loop(target);
++	tthread_event_loop(target, pfd);
+ 
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-02-05 03:45:22 UTC (rev 263)
++++ trunk/usr/tgtadm.h	2006-02-05 12:05:13 UTC (rev 264)
+@@ -31,6 +31,7 @@
+ 	int cid;
+ 	uint64_t lun;
+ 	int pid;
++	int fd;
+ 
+ 	unsigned long addr;
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000250.html">[Stgt-svn] r263 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000252.html">[Stgt-svn] r265 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#251">[ date ]</a>
+              <a href="thread.html#251">[ thread ]</a>
+              <a href="subject.html#251">[ subject ]</a>
+              <a href="author.html#251">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

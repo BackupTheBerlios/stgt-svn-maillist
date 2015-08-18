@@ -1,0 +1,260 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r269 - in trunk: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r269%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200602051630.k15GUEJi011624%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000255.html">
+   <LINK REL="Next"  HREF="000257.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r269 - in trunk: include kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r269%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200602051630.k15GUEJi011624%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r269 - in trunk: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Feb  5 17:30:14 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000255.html">[Stgt-svn] r268 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000257.html">[Stgt-svn] r270 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#256">[ date ]</a>
+              <a href="thread.html#256">[ thread ]</a>
+              <a href="subject.html#256">[ subject ]</a>
+              <a href="author.html#256">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-05 17:30:14 +0100 (Sun, 05 Feb 2006)
+New Revision: 269
+
+Modified:
+   trunk/include/tgt_if.h
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_packet.c
+   trunk/usr/target.c
+Log:
+Replace TGT_KEVENT_CMD_DONE with packet socket.
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2006-02-05 14:57:30 UTC (rev 268)
++++ trunk/include/tgt_if.h	2006-02-05 16:30:14 UTC (rev 269)
+@@ -23,6 +23,7 @@
+ };
+ 
+ struct tgt_event {
++	int type;
+ 	/* user-&gt; kernel */
+ 	union {
+ 		struct {
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2006-02-05 14:57:30 UTC (rev 268)
++++ trunk/kernel/tgt_nl.c	2006-02-05 16:30:14 UTC (rev 269)
+@@ -56,27 +56,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
+-int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags)
+-{
+-	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+-	struct tgt_event ev;
+-	pid_t pid = cmd-&gt;session-&gt;target-&gt;tsk-&gt;pid;
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.cmd_done.tid = cmd-&gt;session-&gt;target-&gt;tid;
+-	ev.k.cmd_done.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+-	ev.k.cmd_done.devid = cmd-&gt;devid;
+-	ev.k.cmd_done.uaddr = cmd-&gt;uaddr;
+-	ev.k.cmd_done.len = cmd-&gt;bufflen;
+-	if (test_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags))
+-		ev.k.cmd_done.mmapped = 1;
+-
+-	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev,
+-			      zero_page,
+-			      proto-&gt;uspace_pdu_size, flags, pid);
+-}
+-EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
+-
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	int err = 0;
+
+Modified: trunk/kernel/tgt_packet.c
+===================================================================
+--- trunk/kernel/tgt_packet.c	2006-02-05 14:57:30 UTC (rev 268)
++++ trunk/kernel/tgt_packet.c	2006-02-05 16:30:14 UTC (rev 269)
+@@ -16,6 +16,56 @@
+ #include &lt;tgt_protocol.h&gt;
+ #include &quot;tgt_priv.h&quot;
+ 
++static struct tpacket_hdr *tp_hdr_get(struct sock *sk)
++{
++	struct tpacket_hdr *h;
++	h = packet_frame(sk);
++	return IS_ERR(h) ? NULL : h;
++}
++
++static void tp_send(struct sock *sk, struct tpacket_hdr *h, int len)
++{
++	h-&gt;tp_status = TP_STATUS_USER;
++	mb();
++	{
++		struct page *p_start, *p_end;
++		char *h_end = (char *) h + TPACKET_HDRLEN + len - 1;
++
++		p_start = virt_to_page(h);
++		p_end = virt_to_page(h_end);
++		while (p_start &lt;= p_end) {
++			flush_dcache_page(p_start);
++			p_start++;
++		}
++	}
++	sk-&gt;sk_data_ready(sk, 0);
++}
++
++int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
++{
++	struct sock *sk = cmd-&gt;session-&gt;target-&gt;sock-&gt;sk;
++	struct tpacket_hdr *h;
++	struct tgt_event *ev;
++
++	h = tp_hdr_get(sk);
++	if (!h)
++		return -ENOMEM;
++	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
++
++	ev-&gt;type = TGT_KEVENT_CMD_DONE;
++	ev-&gt;k.cmd_done.tid = cmd-&gt;session-&gt;target-&gt;tid;
++	ev-&gt;k.cmd_done.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
++	ev-&gt;k.cmd_done.devid = cmd-&gt;devid;
++	ev-&gt;k.cmd_done.uaddr = cmd-&gt;uaddr;
++	ev-&gt;k.cmd_done.len = cmd-&gt;bufflen;
++	if (test_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags))
++		ev-&gt;k.cmd_done.mmapped = 1;
++
++	tp_send(sk, h, sizeof(struct tgt_event));
++	return 0;
++}
++EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
++
+ int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask)
+ {
+ 	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+@@ -25,15 +75,13 @@
+ 	struct tgt_event *ev;
+ 	char *pdu;
+ 
+-	h = packet_frame(sk);
+-	if (IS_ERR(h)) {
+-		eprintk(&quot;Queue is full\n&quot;);
+-		return PTR_ERR(h);
+-	}
+-
++	h = tp_hdr_get(sk);
++	if (!h)
++		return -ENOMEM;
+ 	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+ 	pdu = (char *) ev-&gt;data;
+ 
++	ev-&gt;type = TGT_KEVENT_CMD_REQ;
+ 	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+ 	ev-&gt;k.cmd_req.cid = cmd_tag(cmd);
+ 	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+@@ -44,22 +92,7 @@
+ 	dprintk(&quot;%d %llu %d %d\n&quot;, ev-&gt;k.cmd_req.tid, ev-&gt;k.cmd_req.cid,
+ 		ev-&gt;k.cmd_req.typeid, ev-&gt;k.cmd_req.data_len);
+ 
+-	h-&gt;tp_status = TP_STATUS_USER;
+-	mb();
+-	{
+-		struct page *p_start, *p_end;
+-		char *h_end = pdu + TPACKET_HDRLEN + proto_pdu_size - 1;
+-
+-		p_start = virt_to_page(h);
+-		p_end = virt_to_page(h_end);
+-		while (p_start &lt;= p_end) {
+-			flush_dcache_page(p_start);
+-			p_start++;
+-		}
+-	}
+-
+-	sk-&gt;sk_data_ready(sk, 0);
+-
++	tp_send(sk, h, sizeof(struct tgt_event) + proto_pdu_size);
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-02-05 14:57:30 UTC (rev 268)
++++ trunk/usr/target.c	2006-02-05 16:30:14 UTC (rev 269)
+@@ -439,7 +439,7 @@
+ static void packet_cmd(struct driver_info *dinfo, int fd)
+ {
+ 	struct tpacket_hdr *h;
+-
++	struct tgt_event *ev;
+ retry:
+ 	h = (struct tpacket_hdr *) (target-&gt;ringbuf + target-&gt;idx * target-&gt;frame_size);
+ 
+@@ -447,7 +447,19 @@
+ 	if (!(h-&gt;tp_status &amp; TP_STATUS_USER))
+ 		return;
+ 
+-	cmd_queue(dinfo, fd, (char *) h + TPACKET_HDRLEN);
++	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
++	switch (ev-&gt;type) {
++	case TGT_KEVENT_CMD_REQ:
++		cmd_queue(dinfo, fd, (char *) ev);
++		break;
++	case TGT_KEVENT_CMD_DONE:
++		cmd_done(dinfo, (char *) ev);
++		break;
++	default:
++		eprintf(&quot;unknown event %u\n&quot;, ev-&gt;type);
++		exit(1);
++	}
++
+ 	target-&gt;idx = target-&gt;idx == target-&gt;frame_nr - 1 ? 0: target-&gt;idx + 1;
+ 	h-&gt;tp_status &amp;= ~TP_STATUS_USER;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000255.html">[Stgt-svn] r268 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000257.html">[Stgt-svn] r270 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#256">[ date ]</a>
+              <a href="thread.html#256">[ thread ]</a>
+              <a href="subject.html#256">[ subject ]</a>
+              <a href="author.html#256">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,89 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r639 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r639%20-%20trunk/doc&In-Reply-To=%3C200611120940.kAC9eiMG007343%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000625.html">
+   <LINK REL="Next"  HREF="000627.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r639 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r639%20-%20trunk/doc&In-Reply-To=%3C200611120940.kAC9eiMG007343%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r639 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 12 10:40:44 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000625.html">[Stgt-svn] r638 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000627.html">[Stgt-svn] r640 - in trunk: doc usr usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#626">[ date ]</a>
+              <a href="thread.html#626">[ thread ]</a>
+              <a href="subject.html#626">[ subject ]</a>
+              <a href="author.html#626">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-12 10:40:44 +0100 (Sun, 12 Nov 2006)
+New Revision: 639
+
+Modified:
+   trunk/doc/README.ibmvstgt
+Log:
+Update README.ibmvstgt
+
+
+Modified: trunk/doc/README.ibmvstgt
+===================================================================
+--- trunk/doc/README.ibmvstgt	2006-11-12 09:39:29 UTC (rev 638)
++++ trunk/doc/README.ibmvstgt	2006-11-12 09:40:44 UTC (rev 639)
+@@ -27,9 +27,9 @@
+ The following example creates a target with id 1, adds a logical unit
+ (backed by /dev/sdb1) with lun 0, and then bind the target with #1 scsi host.
+ 
+-host:~/tgt# ./usr/tgtadm --lld ibmvio --op new --tid 1
+-host:~/tgt# ./usr/tgtadm --lld ibmvio --op new --tid 1 --lun 0 --params Path=/dev/sdb1
+-host:~/tgt# ./usr/tgtadm --lld ibmvio --op bind --tid 1 --host 1
++host:~/tgt# ./usr/tgtadm --lld ibmvio --mode target --op new --tid 1
++host:~/tgt# ./usr/tgtadm --lld ibmvio --mode logicalunit --op new --tid 1 --lun 0 --params Path=/dev/sdb1
++host:~/tgt# ./usr/tgtadm --lld ibmvio --mode target --op bind --tid 1 --host 1
+ 
+ Please see /var/log/daemon.log (your Linux distributions may use the
+ different log file name again) to make sure that everything is
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000625.html">[Stgt-svn] r638 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000627.html">[Stgt-svn] r640 - in trunk: doc usr usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#626">[ date ]</a>
+              <a href="thread.html#626">[ thread ]</a>
+              <a href="subject.html#626">[ subject ]</a>
+              <a href="author.html#626">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

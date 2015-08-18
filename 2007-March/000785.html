@@ -1,0 +1,340 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r798 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r798%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703040434.l244YdKI024071%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000784.html">
+   <LINK REL="Next"  HREF="000786.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r798 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r798%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703040434.l244YdKI024071%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r798 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 05:34:39 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000784.html">[Stgt-svn] r797 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000786.html">[Stgt-svn] r799 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#785">[ date ]</a>
+              <a href="thread.html#785">[ thread ]</a>
+              <a href="subject.html#785">[ subject ]</a>
+              <a href="author.html#785">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 05:34:38 +0100 (Sun, 04 Mar 2007)
+New Revision: 798
+
+Added:
+   trunk/usr/spt_sgv3.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/spt.c
+   trunk/usr/spt_sgv4.c
+   trunk/usr/target.c
+Log:
+Add sgv3 pass through support. I can see disk drives, but it can't work fully yet.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/Makefile	2007-03-04 04:34:38 UTC (rev 798)
+@@ -21,7 +21,8 @@
+ endif
+ 
+ ifneq ($(RAW),)
+-TGTD_OBJS += spt.o spt_sgv4.o
++#TGTD_OBJS += spt.o spt_sgv4.o
++TGTD_OBJS += spt.o spt_sgv3.o
+ CFLAGS += -DUSE_RAW
+ endif
+ 
+@@ -42,7 +43,7 @@
+ endif
+ 
+ INCLUDES += -I.
+-CFLAGS += -Wall -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
++CFLAGS += -Wall -g -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
+ 
+ PROGRAMS += tgtd tgtadm
+ TGTD_OBJS += tgtd.o mgmt.o target.o spc.o sbc.o scsi.o log.o driver.o util.o work.o
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/iscsi/iscsid.c	2007-03-04 04:34:38 UTC (rev 798)
+@@ -743,6 +743,8 @@
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
+ 
++	dprintf(&quot;%p %x\n&quot;, task, task-&gt;scmd-&gt;scb[0]);
++
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
+ 	rsp-&gt;itt = task-&gt;tag;
+
+Modified: trunk/usr/spt.c
+===================================================================
+--- trunk/usr/spt.c	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/spt.c	2007-03-04 04:34:38 UTC (rev 798)
+@@ -33,7 +33,6 @@
+ #include &lt;sys/time.h&gt;
+ #include &lt;linux/types.h&gt;
+ #include &lt;scsi/sg.h&gt;
+-#include &lt;linux/bsg.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+@@ -62,9 +61,16 @@
+ 	.bd_cmd_done		= spt_sg_cmd_done,
+ };
+ 
++extern struct device_command_operations sbc_ops[];
++
+ static int spt_cmd_perform(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
++
++	/* FIXME */
++	if (!cmd-&gt;dev)
++		return sbc_ops[cmd-&gt;scb[0]].cmd_perform(host_no, cmd);
++
+ 	ret = spt_sg_perform(cmd);
+ 	if (ret) {
+ 		cmd-&gt;len = 0;
+@@ -75,8 +81,9 @@
+ }
+ 
+ struct device_command_operations spt_ops[] = {
+-	[0x40 ... 0x7f] = {spt_cmd_perform,},
++	[0x00 ... 0x9f] = {spt_cmd_perform,},
+ 
++	/* 0xA0 */
+ 	{spc_report_luns,},
+ 	{spt_cmd_perform,},
+ 	{spt_cmd_perform,},
+
+Added: trunk/usr/spt_sgv3.c
+===================================================================
+--- trunk/usr/spt_sgv3.c	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/spt_sgv3.c	2007-03-04 04:34:38 UTC (rev 798)
+@@ -0,0 +1,131 @@
++/*
++ * SCSI pass through sg3v functions
++ *
++ * Copyright (C) 2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;sys/epoll.h&gt;
++#include &lt;limits.h&gt;
++#include &lt;sys/ioctl.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/time.h&gt;
++#include &lt;linux/types.h&gt;
++#include &lt;scsi/sg.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++#include &quot;scsi.h&quot;
++
++/*
++ * until sgv4 is merged into mainline, we support sgv3 too.
++ */
++static void sgv3_handler(int fd, int events, void *data)
++{
++	int i, err;
++	struct sg_io_hdr hdrs[64];
++	struct tgt_device *dev = data;
++
++	err = read(dev-&gt;fd, hdrs, sizeof(struct sg_io_hdr));
++	if (err &lt;= 0)
++		return;
++
++	for (i = 0; i &lt; 1; i++) {
++		struct scsi_cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
++
++		dprintf(&quot;%p %u %u %u %u %u\n&quot;, cmd,
++			hdrs[i].status, hdrs[i].host_status, hdrs[i].driver_status,
++			cmd-&gt;len, hdrs[i].resid);
++
++		if (hdrs[i].status) {
++			cmd-&gt;sense_len = hdrs[i].sb_len_wr;
++			cmd-&gt;len = 0;
++		} else
++			cmd-&gt;len += hdrs[i].resid;
++
++		target_cmd_io_done(cmd, hdrs[i].status);
++	}
++}
++
++int spt_sg_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++{
++	int err;
++	int nr_queue_cmd;
++
++	*size = 0;
++	*fd = open(path, O_RDWR | O_NONBLOCK);
++	if (*fd &lt; 0)
++		return *fd;
++
++	/* workaround */
++	nr_queue_cmd = 128;
++	err = ioctl(*fd, SG_SET_COMMAND_Q, &amp;nr_queue_cmd);
++	if (err) {
++		eprintf(&quot;can't set the queue depth %d, %m\n&quot;, nr_queue_cmd);
++		goto close_fd;
++	}
++
++	err = tgt_event_add(*fd, EPOLLIN, sgv3_handler, dev);
++	if (err) {
++		free(dev);
++		goto close_fd;
++	}
++
++	return 0;
++close_fd:
++	close(*fd);
++	return err;
++}
++
++int spt_sg_perform(struct scsi_cmd *cmd)
++{
++	int ret;
++	struct sg_io_hdr hdr;
++
++	dprintf(&quot;%x %d %u %&quot; PRIx64&quot;\n&quot;, cmd-&gt;scb[0], cmd-&gt;rw, cmd-&gt;len, cmd-&gt;uaddr);
++	memset(&amp;hdr, 0, sizeof(hdr));
++	hdr.interface_id = 'S';
++	hdr.cmd_len = 16;
++	hdr.cmdp = cmd-&gt;scb;
++	hdr.dxfer_direction = cmd-&gt;rw ? SG_DXFER_TO_DEV : SG_DXFER_FROM_DEV;
++	hdr.dxfer_len = cmd-&gt;len;
++	hdr.dxferp = (void *)(unsigned long)cmd-&gt;uaddr;
++	hdr.mx_sb_len = sizeof(cmd-&gt;sense_buffer);
++	hdr.sbp = cmd-&gt;sense_buffer;
++	hdr.flags = SG_FLAG_DIRECT_IO;
++
++	hdr.usr_ptr = (void *)(unsigned long)cmd;
++
++	ret = write(cmd-&gt;dev-&gt;fd, &amp;hdr, sizeof(hdr));
++	if (ret == sizeof(hdr)) {
++		cmd-&gt;async = 1;
++		return 0;
++	} else {
++		eprintf(&quot;%d %m\n&quot;, ret);
++		return -1;
++	}
++}
+
+Modified: trunk/usr/spt_sgv4.c
+===================================================================
+--- trunk/usr/spt_sgv4.c	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/spt_sgv4.c	2007-03-04 04:34:38 UTC (rev 798)
+@@ -65,6 +65,9 @@
+ 		if (hdrs[i].device_status) {
+ 			cmd-&gt;sense_len = hdrs[i].response_len;
+ 			cmd-&gt;len = 0;
++		} else {
++			if (hdrs[i].din_resid)
++				cmd-&gt;len = hdrs[i].din_resid;
+ 		}
+ 
+ 		target_cmd_io_done(cmd, hdrs[i].device_status);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-03 13:41:55 UTC (rev 797)
++++ trunk/usr/target.c	2007-03-04 04:34:38 UTC (rev 798)
+@@ -421,13 +421,14 @@
+ 	cmd-&gt;tag = tag;
+ 	cmd-&gt;uaddr = uaddr;
+ 	cmd-&gt;len = data_len;
++	cmd-&gt;rw = rw;
+ 	memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
+ 	memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
+ 
+ 	cmd_hlist_insert(target, cmd);
+ 
+ 	dev_id = scsi_get_devid(target-&gt;lid, lun);
+-	dprintf(&quot;%x %&quot; PRIx64 &quot;\n&quot;, scb[0], dev_id);
++	dprintf(&quot;%p %x %&quot; PRIx64 &quot;\n&quot;, cmd, scb[0], dev_id);
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
+ 
+@@ -436,8 +437,8 @@
+ 	else
+ 		q = &amp;target-&gt;cmd_queue;
+ 
+-	if (!enabled)
+-		enabled = cmd_enabled(q, cmd);
++	enabled = cmd_enabled(q, cmd);
++	dprintf(&quot;%p %x %&quot; PRIx64 &quot; %d\n&quot;, cmd, scb[0], dev_id, enabled);
+ 
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(nexus-&gt;host_no, cmd, (void *)cmd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000784.html">[Stgt-svn] r797 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000786.html">[Stgt-svn] r799 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#785">[ date ]</a>
+              <a href="thread.html#785">[ thread ]</a>
+              <a href="subject.html#785">[ subject ]</a>
+              <a href="author.html#785">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,135 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r146%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200511030632.jA36W8kC005412%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000139.html">
+   <LINK REL="Next"  HREF="000141.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r146%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200511030632.jA36W8kC005412%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Nov  3 07:32:08 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000139.html">[Stgt-svn] r145 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000141.html">[Stgt-svn] r147 - in trunk: istgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#140">[ date ]</a>
+              <a href="thread.html#140">[ thread ]</a>
+              <a href="subject.html#140">[ subject ]</a>
+              <a href="author.html#140">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-03 07:31:56 +0100 (Thu, 03 Nov 2005)
+New Revision: 146
+
+Modified:
+   trunk/ibmvstgt/kernel/ibmvstgt.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt_sysfs.c
+   trunk/kernel/tgt_target.h
+Log:
+Add subprotocol entry to struct tgt_target_template.
+
+
+Modified: trunk/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- trunk/ibmvstgt/kernel/ibmvstgt.c	2005-11-03 06:30:24 UTC (rev 145)
++++ trunk/ibmvstgt/kernel/ibmvstgt.c	2005-11-03 06:31:56 UTC (rev 146)
+@@ -1160,6 +1160,7 @@
+ 	.name = TGT_NAME,
+ 	.module = THIS_MODULE,
+ 	.protocol = &quot;scsi&quot;,
++	.subprotocol = &quot;rdma&quot;,
+ 	.transfer_response = ibmvstgt_cmd_done,
+ 	.transfer_write_data = recv_cmd_data,
+ 	.priv_data_size = sizeof(struct server_adapter),
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-03 06:30:24 UTC (rev 145)
++++ trunk/istgt/kernel/iscsi.c	2005-11-03 06:31:56 UTC (rev 146)
+@@ -1633,6 +1633,7 @@
+ 	.name = THIS_NAME,
+ 	.module = THIS_MODULE,
+ 	.protocol = &quot;scsi&quot;,
++	.subprotocol = &quot;iscsi&quot;,
+ 	.target_create = target_add,
+ 	.target_destroy = target_del,
+ 	.msg_recv = iet_msg_recv,
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-11-03 06:30:24 UTC (rev 145)
++++ trunk/kernel/tgt_sysfs.c	2005-11-03 06:31:56 UTC (rev 146)
+@@ -65,10 +65,12 @@
+ 
+ tgt_target_template_rd_attr(name, &quot;%s\n&quot;);
+ tgt_target_template_rd_attr(protocol, &quot;%s\n&quot;);
++tgt_target_template_rd_attr(subprotocol, &quot;%s\n&quot;);
+ 
+ static struct class_device_attribute *tgt_type_attrs[] = {
+ 	&amp;class_device_attr_name,
+ 	&amp;class_device_attr_protocol,
++	&amp;class_device_attr_subprotocol,
+ 	NULL,
+ };
+ 
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-11-03 06:30:24 UTC (rev 145)
++++ trunk/kernel/tgt_target.h	2005-11-03 06:31:56 UTC (rev 146)
+@@ -71,6 +71,11 @@
+ 	const char *protocol;
+ 
+ 	/*
++	 * name of sub-protocol to use
++	 */
++	const char *subprotocol;
++
++	/*
+ 	 * Pointer to the sysfs class properties for this host, NULL terminated.
+ 	 */
+ 	struct class_device_attribute **target_attrs;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000139.html">[Stgt-svn] r145 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000141.html">[Stgt-svn] r147 - in trunk: istgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#140">[ date ]</a>
+              <a href="thread.html#140">[ thread ]</a>
+              <a href="subject.html#140">[ subject ]</a>
+              <a href="author.html#140">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,169 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r471 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r471%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605071228.k47CSU1C017034%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000457.html">
+   <LINK REL="Next"  HREF="000459.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r471 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r471%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605071228.k47CSU1C017034%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r471 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun May  7 14:28:30 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000457.html">[Stgt-svn] r470 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000459.html">[Stgt-svn] r472 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#458">[ date ]</a>
+              <a href="thread.html#458">[ thread ]</a>
+              <a href="subject.html#458">[ subject ]</a>
+              <a href="author.html#458">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-07 14:28:06 +0200 (Sun, 07 May 2006)
+New Revision: 471
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Use session-&gt;lock instead of own lock.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-07 11:36:05 UTC (rev 470)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-07 12:28:06 UTC (rev 471)
+@@ -46,7 +46,6 @@
+ 	struct list_head recvlist;
+ 	/* replace with array later on */
+ 	struct list_head cmd_hash;
+-	spinlock_t slock;
+ 	struct work_struct recvwork;
+ };
+ 
+@@ -199,7 +198,7 @@
+ 
+ 	dprintk(&quot;%x\n&quot;, session-&gt;exp_cmdsn);
+ retry:
+-	spin_lock_bh(&amp;istgt_session-&gt;slock);
++	spin_lock_bh(&amp;session-&gt;lock);
+ 
+ 	while (!list_empty(&amp;istgt_session-&gt;recvlist)) {
+ 		ctask = list_entry(istgt_session-&gt;recvlist.next,
+@@ -213,12 +212,12 @@
+ 		list_del(&amp;ctask-&gt;tgtlist);
+ 		session-&gt;exp_cmdsn++;
+ 
+-		spin_unlock_bh(&amp;istgt_session-&gt;slock);
++		spin_unlock_bh(&amp;session-&gt;lock);
+ 		istgt_cmd_exec(ctask);
+ 		goto retry;
+ 	}
+ 
+-	spin_unlock_bh(&amp;istgt_session-&gt;slock);
++	spin_unlock_bh(&amp;session-&gt;lock);
+ }
+ 
+ static void istgt_ctask_add(struct iscsi_cmd_task *ctask)
+@@ -231,7 +230,7 @@
+ 	dprintk(&quot;%p %x %x %x\n&quot;, ctask, ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK,
+ 		ctask-&gt;hdr-&gt;cdb[0], ctask-&gt;hdr-&gt;cmdsn);
+ 
+-	spin_lock_bh(&amp;istgt_session-&gt;slock);
++	spin_lock_bh(&amp;session-&gt;lock);
+ 
+ 	if (ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OP_IMMEDIATE) {
+ 		list_add(&amp;ctask-&gt;tgtlist, &amp;istgt_session-&gt;recvlist);
+@@ -244,7 +243,7 @@
+ 
+ 	list_add_tail(&amp;ctask-&gt;tgtlist, &amp;pos-&gt;tgtlist);
+ out:
+-	spin_unlock_bh(&amp;istgt_session-&gt;slock);
++	spin_unlock_bh(&amp;session-&gt;lock);
+ }
+ 
+ #if 0
+@@ -287,13 +286,11 @@
+ 	}
+ 
+ 	switch (opcode) {
+-	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_SCSI_CMD:
+-	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		spin_lock(&amp;session-&gt;lock);
++		spin_lock_bh(&amp;session-&gt;lock);
+ 		__kfifo_get(session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
+-		spin_unlock(&amp;session-&gt;lock);
++		spin_unlock_bh(&amp;session-&gt;lock);
+ 		BUG_ON(!ctask);
+ 
+ 		ctask-&gt;conn = conn;
+@@ -325,7 +322,9 @@
+ /* 			} */
+ 
+ 		break;
++	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_SCSI_DATA_OUT:
++	case ISCSI_OP_SCSI_TMFUNC:
+ 		BUG_ON(1);
+ 		/* Find a command in the hash list */
+ 		/* data_out_start(conn, cmnd); */
+@@ -490,7 +489,6 @@
+ 
+ 	INIT_LIST_HEAD(&amp;istgt_session-&gt;recvlist);
+ 	INIT_LIST_HEAD(&amp;istgt_session-&gt;cmd_hash);
+-	spin_lock_init(&amp;istgt_session-&gt;slock);
+ 
+ 	INIT_WORK(&amp;istgt_session-&gt;recvwork, istgt_recvworker, cls_session);
+ 
+@@ -533,7 +531,7 @@
+ }
+ 
+ static int istgt_transfer_data(struct scsi_cmnd *scmd,
+-				  void (*done)(struct scsi_cmnd *))
++			       void (*done)(struct scsi_cmnd *))
+ {
+ 	struct iscsi_cmd_task *ctask = (struct iscsi_cmd_task *) scmd-&gt;SCp.ptr;
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000457.html">[Stgt-svn] r470 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000459.html">[Stgt-svn] r472 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#458">[ date ]</a>
+              <a href="thread.html#458">[ thread ]</a>
+              <a href="subject.html#458">[ subject ]</a>
+              <a href="author.html#458">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

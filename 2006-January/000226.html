@@ -1,0 +1,107 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r239 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r239%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601280004.k0S04lXs027380%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000225.html">
+   <LINK REL="Next"  HREF="000227.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r239 - branches/use-scsi-ml/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r239%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200601280004.k0S04lXs027380%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r239 - branches/use-scsi-ml/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Jan 28 01:04:47 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000225.html">[Stgt-svn] r238 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000227.html">[Stgt-svn] r240 - branches/use-scsi-ml/include
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#226">[ date ]</a>
+              <a href="thread.html#226">[ thread ]</a>
+              <a href="subject.html#226">[ subject ]</a>
+              <a href="author.html#226">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-28 01:04:04 +0100 (Sat, 28 Jan 2006)
+New Revision: 239
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+must call bio_endio in destruction path incase it was bounced
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-01-27 23:56:43 UTC (rev 238)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-01-28 00:04:04 UTC (rev 239)
+@@ -146,11 +146,16 @@
+ {
+ 	struct bio *bio;
+ 
+-	while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_done_list)))
++	/* must call bio_endio in case bio was bounced */
++	while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_done_list))) {
++		bio_endio(bio, bio-&gt;bi_size, 0);
+ 		bio_unmap_user(bio);
++	}
+ 
+-	while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_list)))
++	while ((bio = bio_list_pop(&amp;cmd-&gt;xfer_list))) {
++		bio_endio(bio, bio-&gt;bi_size, 0);
+ 		bio_unmap_user(bio);
++	}
+ }
+ 
+ static void scsi_tgt_cmd_destroy(void *data)
+@@ -260,7 +265,11 @@
+ 
+ 		/*
+ 		 * The first bio is added and merged. We could probably
+-		 * try to add others but for now we keep it simple.
++		 * try to add others using scsi_merge_bio() but for now
++		 * we keep it simple. The first bio should be pretty large
++		 * (either hitting the 1 MB bio pages limit or a queue limit)
++		 * already but for really large IO we may want to try and
++		 * merge these.
+ 		 */
+ 		if (!rq-&gt;bio)
+ 			blk_rq_bio_prep(q, rq, bio);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000225.html">[Stgt-svn] r238 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000227.html">[Stgt-svn] r240 - branches/use-scsi-ml/include
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#226">[ date ]</a>
+              <a href="thread.html#226">[ thread ]</a>
+              <a href="subject.html#226">[ subject ]</a>
+              <a href="author.html#226">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

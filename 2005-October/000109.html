@@ -1,0 +1,240 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r115%20-%20in%20trunk%3A%20.%20istgt/include%20istgt/kernel%20istgt/usr%20usr&In-Reply-To=%3C200510012301.j91N1aqF028361%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000108.html">
+   <LINK REL="Next"  HREF="000110.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r115%20-%20in%20trunk%3A%20.%20istgt/include%20istgt/kernel%20istgt/usr%20usr&In-Reply-To=%3C200510012301.j91N1aqF028361%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Oct  2 01:01:36 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000108.html">[Stgt-svn] r114 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000110.html">[Stgt-svn] r116 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#109">[ date ]</a>
+              <a href="thread.html#109">[ thread ]</a>
+              <a href="subject.html#109">[ subject ]</a>
+              <a href="author.html#109">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-02 01:01:32 +0200 (Sun, 02 Oct 2005)
+New Revision: 115
+
+Modified:
+   trunk/initd
+   trunk/istgt/include/iet_u.h
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/usr/ctldev.c
+   trunk/usr/scsi.c
+   trunk/usr/tgtd.c
+Log:
+Trivial cleanup.
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/initd	2005-10-01 23:01:32 UTC (rev 115)
+@@ -5,6 +5,7 @@
+ 
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ MEM_SIZE=1048576
++export LD_LIBRARY_PATH=${PWD}/istgt/usr:${LD_LIBRARY_PATH}
+ 
+ start_server()
+ {
+
+Modified: trunk/istgt/include/iet_u.h
+===================================================================
+--- trunk/istgt/include/iet_u.h	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/istgt/include/iet_u.h	2005-10-01 23:01:32 UTC (rev 115)
+@@ -1,11 +1,11 @@
+ #ifndef _IET_U_H
+ #define _IET_U_H
+ 
+-#define IET_VERSION_STRING	&quot;0.4.12&quot;
++#define VERSION_STRING	&quot;0.4.12&quot;
++#define	THIS_NAME		&quot;istgt&quot;
+ 
+ /* The maximum length of 223 bytes in the RFC. */
+ #define ISCSI_NAME_LEN	256
+-#define ISCSI_ARGS_LEN	2048
+ 
+ #define VENDOR_ID_LEN	8
+ #define SCSI_ID_LEN	24
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/istgt/kernel/iscsi.c	2005-10-01 23:01:32 UTC (rev 115)
+@@ -1340,10 +1340,7 @@
+ 			iscsi_cmnd_remove(rsp);
+ 		}
+ 		list_del_init(&amp;cmnd-&gt;list);
+-	} else
+-		if (cmnd_queued(cmnd))
+-			;
+-/* 			iscsi_scsi_dequeuecmnd(cmnd); */
++	}
+ 
+ 	if (cmnd_hashed(cmnd))
+ 		cmnd_remove_hash(cmnd);
+@@ -1622,8 +1619,8 @@
+ 	return 0;
+ }
+ 
+-static struct tgt_target_template iet_tgt_target_template = {
+-	.name = &quot;iet&quot;,
++static struct tgt_target_template istgt_template = {
++	.name = THIS_NAME,
+ 	.module = THIS_MODULE,
+ 	.protocol = &quot;scsi&quot;,
+ 	.target_create = target_add,
+@@ -1639,21 +1636,22 @@
+ 	if (iscsi_cmnd_cache)
+ 		kmem_cache_destroy(iscsi_cmnd_cache);
+ 
+-	tgt_target_template_unregister(&amp;iet_tgt_target_template);
++	tgt_target_template_unregister(&amp;istgt_template);
+ }
+ 
+ static int iscsi_init(void)
+ {
+ 	int err = -ENOMEM;
+ 
+-	printk(&quot;iSCSI Enterprise Target Software - version %s\n&quot;, IET_VERSION_STRING);
++	printk(&quot;iSCSI Target Software for Linux Target Framework %s\n&quot;,
++	       VERSION_STRING);
+ 
+ 	iscsi_cmnd_cache = kmem_cache_create(&quot;iscsi_cmnd&quot;, sizeof(struct iscsi_cmnd),
+ 					     0, 0, NULL, NULL);
+ 	if (!iscsi_cmnd_cache)
+ 		goto err;
+ 
+-	err = tgt_target_template_register(&amp;iet_tgt_target_template);
++	err = tgt_target_template_register(&amp;istgt_template);
+ 	if (err &lt; 0)
+ 		goto err;
+ 
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/istgt/kernel/iscsi.h	2005-10-01 23:01:32 UTC (rev 115)
+@@ -255,7 +255,6 @@
+ 
+ enum cmnd_flags {
+ 	CMND_hashed,
+-	CMND_queued,
+ 	CMND_final,
+ 	CMND_waitio,
+ 	CMND_close,
+@@ -266,9 +265,6 @@
+ #define set_cmnd_hashed(cmnd)	set_bit(CMND_hashed, &amp;(cmnd)-&gt;flags)
+ #define cmnd_hashed(cmnd)	test_bit(CMND_hashed, &amp;(cmnd)-&gt;flags)
+ 
+-#define set_cmnd_queued(cmnd)	set_bit(CMND_queued, &amp;(cmnd)-&gt;flags)
+-#define cmnd_queued(cmnd)	test_bit(CMND_queued, &amp;(cmnd)-&gt;flags)
+-
+ #define set_cmnd_final(cmnd)	set_bit(CMND_final, &amp;(cmnd)-&gt;flags)
+ #define cmnd_final(cmnd)	test_bit(CMND_final, &amp;(cmnd)-&gt;flags)
+ 
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/istgt/usr/ctldev.c	2005-10-01 23:01:32 UTC (rev 115)
+@@ -356,7 +356,7 @@
+ 		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
+ 	ev = NLMSG_DATA(nlh);
+-	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, &quot;iet&quot;);
++	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, THIS_NAME);
+ 	ev-&gt;u.c_target.nr_cmds = DEFAULT_NR_QUEUED_CMNDS;
+ 
+ 	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+@@ -608,7 +608,7 @@
+ 		if (err &lt; 0)
+ 			continue;
+ 		eprintf(&quot;%s\n&quot;, buf);
+-		if (!strncmp(buf, &quot;iet&quot;, 3)) {
++		if (!strncmp(buf, THIS_NAME, strlen(THIS_NAME))) {
+ 			int tid;
+ 
+ 			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/usr/scsi.c	2005-10-01 23:01:32 UTC (rev 115)
+@@ -426,11 +426,6 @@
+ 	fd = 0;
+ 	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+ 
+-	/*
+-	 * this will work when we merge the daemons (fd's are associated
+-	 * with procssess so this will fail when ietd opens the fd and
+-	 * this thread syncs it).
+-	 */
+ 	err = fsync(fd);
+ 	if (err) {
+ 		log_error(&quot;scsi sync_cache fsync of fd %d failed err %d&quot;,
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2005-10-01 09:02:09 UTC (rev 114)
++++ trunk/usr/tgtd.c	2005-10-01 23:01:32 UTC (rev 115)
+@@ -71,8 +71,7 @@
+ {
+ 	char path[PATH_MAX];
+ 
+-	getcwd(path, sizeof(path));
+-	strcat(path, &quot;/istgt/usr/istgt.so&quot;);
++	strcat(path, &quot;istgt.so&quot;);
+ 
+ 	dl_handles[0] = dlopen(path, RTLD_LAZY);
+ 	if (!dl_handles[0]) {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000108.html">[Stgt-svn] r114 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000110.html">[Stgt-svn] r116 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#109">[ date ]</a>
+              <a href="thread.html#109">[ thread ]</a>
+              <a href="subject.html#109">[ subject ]</a>
+              <a href="author.html#109">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

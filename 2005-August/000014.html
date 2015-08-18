@@ -1,0 +1,541 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r20 - in trunk: include iscsi/kernel kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r20%20-%20in%20trunk%3A%20include%20iscsi/kernel%20kernel%20usr&In-Reply-To=%3C200508260535.j7Q5ZZhe000383%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000013.html">
+   <LINK REL="Next"  HREF="000015.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r20 - in trunk: include iscsi/kernel kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r20%20-%20in%20trunk%3A%20include%20iscsi/kernel%20kernel%20usr&In-Reply-To=%3C200508260535.j7Q5ZZhe000383%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r20 - in trunk: include iscsi/kernel kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Aug 26 07:35:35 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000013.html">[Stgt-svn] r18 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000015.html">[Stgt-svn] r21 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#14">[ date ]</a>
+              <a href="thread.html#14">[ thread ]</a>
+              <a href="subject.html#14">[ subject ]</a>
+              <a href="author.html#14">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-26 07:35:30 +0200 (Fri, 26 Aug 2005)
+New Revision: 20
+
+Modified:
+   trunk/include/stgt_if.h
+   trunk/iscsi/kernel/iscsi.c
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+   trunk/kernel/stgt_device.h
+   trunk/kernel/stgt_sd.c
+   trunk/kernel/stgt_sysfs.c
+   trunk/kernel/stgt_vsd.c
+   trunk/usr/scsi.c
+   trunk/usr/stgtd.c
+Log:
+Change stgt_cmnd_queue interface to initialize stgt_cmnd-&gt;lun
+(Should stgt_cmnd_create do this?). stgtd builds real responses
+by using sysfs info.
+
+
+Modified: trunk/include/stgt_if.h
+===================================================================
+--- trunk/include/stgt_if.h	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/include/stgt_if.h	2005-08-26 05:35:30 UTC (rev 20)
+@@ -18,6 +18,8 @@
+ struct stgt_event {
+ 	union {
+ 		struct {
++			uint64_t tid;
++			uint32_t lun;
+ 			uint64_t cid;
+ 			uint32_t size;
+ 		} msg_scsi_cmnd;
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/iscsi/kernel/iscsi.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -720,7 +720,8 @@
+ 	} else {
+ 		set_cmnd_waitio(cmnd);
+ 		cmnd-&gt;stc-&gt;private = cmnd;
+-		stgt_cmnd_queue(cmnd-&gt;stc, scsi_cmnd_done);
++		stgt_cmnd_queue(cmnd-&gt;stc, cmnd_hdr(cmnd)-&gt;lun,
++				sizeof(cmnd_hdr(cmnd)-&gt;lun), scsi_cmnd_done);
+ 	}
+ }
+ 
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -621,6 +621,8 @@
+ 	memset(ev, 0, sizeof(*ev));
+ 
+ 	pdu = (char *) ev + sizeof(*ev);
++	ev-&gt;u.msg_scsi_cmnd.tid = cmnd-&gt;session-&gt;target-&gt;tid;
++	ev-&gt;u.msg_scsi_cmnd.lun = cmnd-&gt;lun;
+ 	ev-&gt;u.msg_scsi_cmnd.cid = cmnd-&gt;cid;
+ 
+ 	memcpy(pdu, cmnd-&gt;scb, sizeof(cmnd-&gt;scb));
+@@ -687,8 +689,29 @@
+ 	}
+ }
+ 
+-int stgt_cmnd_queue(struct stgt_cmnd *cmnd, void (*done)(struct stgt_cmnd *))
++static uint32_t translate_lun(uint8_t *p, int size)
+ {
++	uint32_t lun = ~0U;
++
++	switch (*p &gt;&gt; 6) {
++	case 0:
++		lun = p[1];
++		break;
++	case 1:
++		lun = (0x3f &amp; p[0]) &lt;&lt; 8 | p[1];
++		break;
++	case 2:
++	case 3:
++	default:
++		break;
++	}
++
++	return lun;
++}
++
++int stgt_cmnd_queue(struct stgt_cmnd *cmnd, uint8_t *lun, int lun_size,
++		    void (*done)(struct stgt_cmnd *))
++{
+ 	struct stgt_work *work;
+ 	struct stgt_session *session = cmnd-&gt;session;
+ 
+@@ -704,6 +727,9 @@
+ 	work = stgt_init_work(session, queuecommand, cmnd);
+ 	if (!work)
+ 		return -ENOMEM;
++
++	cmnd-&gt;lun = translate_lun(lun, lun_size);
++
+ 	stgt_queue_work(session-&gt;target, work);
+ 
+ 	return 0;
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt.h	2005-08-26 05:35:30 UTC (rev 20)
+@@ -50,6 +50,7 @@
+ extern void stgt_cmnd_alloc_buffer(struct stgt_cmnd *cmnd,
+ 				  void (*done)(struct stgt_cmnd *));
+ extern int stgt_cmnd_queue(struct stgt_cmnd *cmnd,
++			   uint8_t *lun, int lun_len,
+ 			   void (*done)(struct stgt_cmnd *));
+ extern int stgt_sysfs_init(void);
+ extern void stgt_sysfs_exit(void);
+
+Modified: trunk/kernel/stgt_device.h
+===================================================================
+--- trunk/kernel/stgt_device.h	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt_device.h	2005-08-26 05:35:30 UTC (rev 20)
+@@ -39,7 +39,7 @@
+         char *path;
+         uint32_t lun;
+         uint32_t blk_shift;
+-        uint64_t blk_count;
++        uint64_t size;
+ 
+         struct stgt_target *target;
+         struct list_head dlist;
+
+Modified: trunk/kernel/stgt_sd.c
+===================================================================
+--- trunk/kernel/stgt_sd.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt_sd.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -79,6 +79,8 @@
+ 	if (err)
+ 		return err;
+ 
++	device-&gt;size = sddev-&gt;bdev-&gt;bd_block_size;
++
+ 	return 0;
+ }
+ 
+
+Modified: trunk/kernel/stgt_sysfs.c
+===================================================================
+--- trunk/kernel/stgt_sysfs.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt_sysfs.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -138,10 +138,12 @@
+ static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+ 
+ stgt_device_rd_attr(path, &quot;%s\n&quot;);
++stgt_device_rd_attr(size, &quot;%llu\n&quot;);
+ 
+ static struct class_device_attribute *stgt_device_attrs[] = {
+ 	&amp;class_device_attr_path,
+-	NULL
++	&amp;class_device_attr_size,
++	NULL,
+ };
+ 
+ 
+
+Modified: trunk/kernel/stgt_vsd.c
+===================================================================
+--- trunk/kernel/stgt_vsd.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/kernel/stgt_vsd.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -62,6 +62,7 @@
+ 		goto out;
+ 	}
+ 
++	device-&gt;size = inode-&gt;i_size;
+ 	printk(&quot;%s %llu\n&quot;, device-&gt;path, inode-&gt;i_size &gt;&gt; 9);
+ 
+ 	return 0;
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/usr/scsi.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -11,9 +11,14 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;unistd.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;asm/byteorder.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;fcntl.h&gt;
+ 
++
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+ #define cpu_to_be64 __cpu_to_be64
+@@ -27,7 +32,6 @@
+ #endif
+ 
+ static uint32_t blk_shift = 9;
+-static uint64_t blk_cnt = 1 &lt;&lt; 20;
+ 
+ #define eprintf(fmt, args...)						\
+ do {									\
+@@ -51,6 +55,23 @@
+ #define max_t(type,x,y) \
+ 	({ type __x = (x); type __y = (y); __x &gt; __y ? __x: __y; })
+ 
++static int device_info(int tid, uint32_t lun, uint64_t *size)
++{
++	int fd, err;
++	char path[PATH_MAX], buf[128];
++
++	sprintf(path, &quot;/sys/class/stgt_device/device%d:%u/size&quot;, tid, lun);
++
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0)
++		return fd;
++	err = read(fd, buf, sizeof(buf));
++	if (err &lt; 0)
++		return err;
++	*size = strtoull(buf, NULL, 10);
++	return 0;
++}
++
+ static int insert_disconnect_pg(uint8_t *ptr)
+ {
+ 	unsigned char disconnect_pg[] = {0x02, 0x0e, 0x80, 0x80, 0x00, 0x0a, 0x00, 0x00,
+@@ -112,18 +133,22 @@
+ 	return sizeof(geo_m_pg);
+ }
+ 
+-static int build_mode_sense_response(uint8_t *scb, uint8_t *data)
++static int mode_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
+ {
+ 	int len = 4, err = 0;
+ 	uint8_t pcode = scb[2] &amp; 0x3f;
++	uint64_t size;
+ 
++	device_info(tid, lun, &amp;size);
++	size &gt;&gt;= blk_shift;
++
+ 	if ((scb[1] &amp; 0x8))
+ 		data[3] = 0;
+ 	else {
+ 		data[3] = 8;
+ 		len += 8;
+-		*(uint32_t *)(data + 4) = (blk_cnt &gt;&gt; 32) ?
+-			cpu_to_be32(0xffffffff) : cpu_to_be32(blk_cnt);
++		*(uint32_t *)(data + 4) = (size &gt;&gt; 32) ?
++			cpu_to_be32(0xffffffff) : cpu_to_be32(size);
+ 		*(uint32_t *)(data + 8) = cpu_to_be32(1 &lt;&lt; blk_shift);
+ 	}
+ 
+@@ -137,7 +162,7 @@
+ 		len += insert_format_m_pg(data + len);
+ 		break;
+ 	case 0x4:
+-		len += insert_geo_m_pg(data + len, blk_cnt);
++		len += insert_geo_m_pg(data + len, size);
+ 		break;
+ 	case 0x8:
+ 		len += insert_caching_pg(data + len);
+@@ -151,7 +176,7 @@
+ 	case 0x3f:
+ 		len += insert_disconnect_pg(data + len);
+ 		len += insert_format_m_pg(data + len);
+-		len += insert_geo_m_pg(data + len, blk_cnt);
++		len += insert_geo_m_pg(data + len, size);
+ 		len += insert_caching_pg(data + len);
+ 		len += insert_ctrl_m_pg(data + len);
+ 		len += insert_iec_m_pg(data + len);
+@@ -169,7 +194,7 @@
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-static int build_inquiry_response(uint8_t *scb, uint8_t *data)
++static int inquiry(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
+ {
+ 	int err = -1;
+ 	int len = 0;
+@@ -229,7 +254,8 @@
+ 			data[4] = 0x1;
+ 			data[5] = 0x1;
+ 			data[7] = tmp;
+-			memcpy(data + 8, &quot;deadbeaf&quot;, tmp);
++			if (lun != ~0UL)
++				sprintf(data + 8, &quot;deadbeaf%d:%u&quot;, tid, lun);
+ 			len = tmp + 8;
+ 			err = 0;
+ 		}
+@@ -237,41 +263,75 @@
+ 
+ 	len = min_t(int, len, scb[4]);
+ 
+-/* 	if (!cmnd-&gt;lun) */
+-/* 		data[0] = TYPE_NO_LUN; */
++	if (lun == ~0UL)
++		data[0] = TYPE_NO_LUN;
+ 
+ 	return len;
+ }
+ 
+-static int build_report_luns_response(uint8_t *scb, uint8_t *p)
++static int report_luns(int tid, uint32_t unused, uint8_t *scb, uint8_t *p)
+ {
+-	uint32_t size, len, lun = 0;
++	uint32_t lun;
+ 	uint32_t *data = (uint32_t *) p;
++	int idx, alen, oalen, rbuflen, nr_luns;
++	DIR *dir;
++	struct dirent *ent;
++	char buf[128];
+ 
+-	size = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+-	if (size &lt; 16)
++	dir = opendir(&quot;/sys/class/stgt_device&quot;);
++	if (!dir)
+ 		return -1;
+ 
+-	len = 8;
+-	size = min(size &amp; ~(8 - 1), len + 8);
++	alen = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	if (alen &lt; 16)
++		return -1;
+ 
+-	*data++ = cpu_to_be32(len);
+-	*data++ = 0;
++	alen &amp;= ~(8 - 1);
++	oalen = alen;
+ 
+-	*data++ = cpu_to_be32((0x3ff &amp; lun) &lt;&lt; 16 |
+-			      (lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0);
+-	*data++ = 0;
++	/* We'll set data[0] later. */
++	data[1] = 0;
+ 
+-	return size;
++	alen -= 8;
++	rbuflen = 8192 - 8; /* FIXME */
++	idx = 2;
++	nr_luns = 0;
++
++	sprintf(buf, &quot;device%d:&quot;, tid);
++	while ((ent = readdir(dir))) {
++		if (!strncmp(ent-&gt;d_name, buf, strlen(buf))) {
++			sscanf(ent-&gt;d_name, &quot;device%d:%u&quot;, &amp;tid, &amp;lun);
++			data[idx++] = cpu_to_be32((0x3ff &amp; lun) &lt;&lt; 16 |
++						  ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0));
++			data[idx++] = 0;
++			if (!(alen -= 8))
++				break;
++			if (!(rbuflen -= 8)) {
++				fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
++				exit(-1);
++			}
++			nr_luns++;
++		}
++	}
++
++	data[0] = cpu_to_be32(nr_luns * 8);
++
++	closedir(dir);
++
++	return min(oalen, nr_luns * 8 + 8);
+ }
+ 
+-static int build_read_capacity_response(uint8_t *scb, uint8_t *p)
++static int read_capacity(int tid, uint32_t lun, uint8_t *scb, uint8_t *p)
+ {
+ 	int len;
+ 	uint32_t *data = (uint32_t *) p;
++	uint64_t size;
+ 
+-	data[0] = (blk_cnt &gt;&gt; 32) ?
+-		cpu_to_be32(0xffffffff) : cpu_to_be32(blk_cnt - 1);
++	device_info(tid, lun, &amp;size);
++	size &gt;&gt;= blk_shift;
++
++	data[0] = (size &gt;&gt; 32) ?
++		cpu_to_be32(0xffffffff) : cpu_to_be32(size - 1);
+ 	data[1] = cpu_to_be32(1U &lt;&lt; blk_shift);
+ 
+ 	len = 8;
+@@ -279,7 +339,7 @@
+ 	return len;
+ }
+ 
+-static int build_request_sense_response(uint8_t *scb, uint8_t *data)
++static int request_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
+ {
+ 	int len;
+ 
+@@ -293,14 +353,17 @@
+ 	return len;
+ }
+ 
+-static int build_sevice_action_response(uint8_t *scb, uint8_t *p)
++static int sevice_action(int tid, uint32_t lun, uint8_t *scb, uint8_t *p)
+ {
+ 	int len;
+ 	uint32_t *data = (uint32_t *) p;
+-	uint64_t *data64;
++	uint64_t *data64, size;
+ 
++	device_info(tid, lun, &amp;size);
++	size &gt;&gt;= blk_shift;
++
+ 	data64 = (uint64_t *) data;
+-	data64[0] = cpu_to_be64(blk_cnt - 1);
++	data64[0] = cpu_to_be64(size - 1);
+ 	data[2] = cpu_to_be32(1UL &lt;&lt; blk_shift);
+ 
+ 	len = 32;
+@@ -308,7 +371,7 @@
+ 	return len;
+ }
+ 
+-int disk_execute_cmnd(uint8_t *scb, uint8_t *data)
++int disk_execute_cmnd(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
+ {
+ 	int len = -1;
+ 
+@@ -316,22 +379,22 @@
+ 
+ 	switch (scb[0]) {
+ 	case INQUIRY:
+-		len = build_inquiry_response(scb, data);
++		len = inquiry(tid, lun, scb, data);
+ 		break;
+ 	case REPORT_LUNS:
+-		len = build_report_luns_response(scb, data);
++		len = report_luns(tid, lun, scb, data);
+ 		break;
+ 	case READ_CAPACITY:
+-		len = build_read_capacity_response(scb, data);
++		len = read_capacity(tid, lun, scb, data);
+ 		break;
+ 	case MODE_SENSE:
+-		len = build_mode_sense_response(scb, data);
++		len = mode_sense(tid, lun, scb, data);
+ 		break;
+ 	case REQUEST_SENSE:
+-		len = build_request_sense_response(scb, data);
++		len = request_sense(tid, lun, scb, data);
+ 		break;
+ 	case SERVICE_ACTION_IN:
+-		len = build_sevice_action_response(scb, data);
++		len = sevice_action(tid, lun, scb, data);
+ 		break;
+ 	case START_STOP:
+ 	case TEST_UNIT_READY:
+
+Modified: trunk/usr/stgtd.c
+===================================================================
+--- trunk/usr/stgtd.c	2005-08-25 17:05:38 UTC (rev 19)
++++ trunk/usr/stgtd.c	2005-08-26 05:35:30 UTC (rev 20)
+@@ -27,7 +27,7 @@
+ 	fprintf(stderr, &quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+ } while (0)
+ 
+-extern int disk_execute_cmnd(char *scb, char *data);
++extern int disk_execute_cmnd(int tid, uint32_t lun, char *scb, char *data);
+ 
+ static struct sockaddr_nl src_addr, dest_addr;
+ static void *nlm_recvbuf;
+@@ -155,7 +155,10 @@
+ 	scb = recvbuf + sizeof(*ev);
+ 	eprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, ev-&gt;u.msg_scsi_cmnd.cid, scb[0]);
+ 
+-	if ((err = disk_execute_cmnd(scb, sendbuf)) &lt; 0)
++	err = disk_execute_cmnd(ev-&gt;u.msg_scsi_cmnd.tid,
++				ev-&gt;u.msg_scsi_cmnd.lun,
++				scb, sendbuf);
++	if (err &lt; 0)
+ 		return err;
+ 
+ 	uev.u.msg_scsi_cmnd.size = err;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000013.html">[Stgt-svn] r18 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000015.html">[Stgt-svn] r21 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#14">[ date ]</a>
+              <a href="thread.html#14">[ thread ]</a>
+              <a href="subject.html#14">[ subject ]</a>
+              <a href="author.html#14">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

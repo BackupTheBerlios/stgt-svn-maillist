@@ -1,0 +1,118 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r589 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r589%20-%20trunk/doc&In-Reply-To=%3C200609030741.k837fdw1027866%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000575.html">
+   <LINK REL="Next"  HREF="000577.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r589 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r589%20-%20trunk/doc&In-Reply-To=%3C200609030741.k837fdw1027866%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r589 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Sep  3 09:41:39 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000575.html">[Stgt-svn] r588 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000577.html">[Stgt-svn] r590 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#576">[ date ]</a>
+              <a href="thread.html#576">[ thread ]</a>
+              <a href="subject.html#576">[ subject ]</a>
+              <a href="author.html#576">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-03 09:41:38 +0200 (Sun, 03 Sep 2006)
+New Revision: 589
+
+Added:
+   trunk/doc/README.iscsi
+Log:
+Add simple README for iSCSI.
+
+Added: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-09-03 07:18:57 UTC (rev 588)
++++ trunk/doc/README.iscsi	2006-09-03 07:41:38 UTC (rev 589)
+@@ -0,0 +1,42 @@
++Installation
++-------------
++This driver runs in user-space, however, you still need tgt header
++files and kernel modifications. So get the latest code from the
++linux-2.6-target git tree. Then, apply aiopoll-2.6.18-rc4.diff in the
++patch directory, rebuild the kernel, and reboot with the new kernel.
++After the reboot, compile the source code:
++
++make KSRC=&lt;kernel-src&gt;
++
++
++Starting
++-------------
++Try the following commands:
++
++host:~/tgt$ su
++host:~/tgt# ./usr/tgtd -l iscsi
++
++
++Configuration
++-------------
++Now there is no handy way for the configuration. Everyting is
++configured via the tgtadm management tool after you run tgt daemon.
++
++The following example creates a target with id 1 (the iqn is
++iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz) and adds a
++logical unit (backed by /dev/hdc1) with lun 0.
++
++host:~/tgt$ su
++host:~/tgt# ./usr/tgtadm -l iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++host:~/tgt# ./usr/tgtadm -l iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
++
++iSCSI parameters were tuned for reasonable performance (InitialR2T=No
++and MaxRecvDataSegmentLength=262144).
++
++
++Status
++-------------
++It should work under normal circumstances (good initiator, no network
++problem, etc). However, don't play with important data.
++
++Probabaly, the current quality is similar to the IET 0.2.x.
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000575.html">[Stgt-svn] r588 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000577.html">[Stgt-svn] r590 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#576">[ date ]</a>
+              <a href="thread.html#576">[ thread ]</a>
+              <a href="subject.html#576">[ subject ]</a>
+              <a href="author.html#576">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,127 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r566 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r566%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200608311214.k7VCEZYH010422%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000552.html">
+   <LINK REL="Next"  HREF="000554.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r566 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r566%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200608311214.k7VCEZYH010422%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r566 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 14:14:35 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000552.html">[Stgt-svn] r565 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000554.html">[Stgt-svn] r567 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#553">[ date ]</a>
+              <a href="thread.html#553">[ thread ]</a>
+              <a href="subject.html#553">[ subject ]</a>
+              <a href="author.html#553">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 14:14:34 +0200 (Thu, 31 Aug 2006)
+New Revision: 566
+
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/iscsi/iscsid.c
+Log:
+Compile with -g.
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-08-31 12:14:00 UTC (rev 565)
++++ trunk/usr/Makefile	2006-08-31 12:14:34 UTC (rev 566)
+@@ -1,4 +1,4 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE -I$(KERNELSRC)/include -I../include -I.
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE -I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+ TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o
+ 
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-08-31 12:14:00 UTC (rev 565)
++++ trunk/usr/iscsi/iscsid.c	2006-08-31 12:14:34 UTC (rev 566)
+@@ -872,7 +872,9 @@
+ 	}
+ 	return -EINVAL;
+ found:
+-	eprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u\n&quot;, ctask-&gt;tag,
++	eprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u %u %u\n&quot;, ctask-&gt;tag,
++		ntohl(((struct iscsi_cmd *) (&amp;ctask-&gt;req))-&gt;data_length),
++		ctask-&gt;offset,
+ 		ctask-&gt;r2t_count,
+ 		ntoh24(req-&gt;dlength), be32_to_cpu(req-&gt;offset));
+ 
+@@ -905,7 +907,7 @@
+ 
+ 	list_add(&amp;ctask-&gt;c_hlist, &amp;conn-&gt;session-&gt;cmd_list);
+ 
+-	dprintf(&quot;%u %x %d %d %u\n&quot;, conn-&gt;session-&gt;tsih,
++	dprintf(&quot;%u %x %d %d %x\n&quot;, conn-&gt;session-&gt;tsih,
+ 		req-&gt;cdb[0], ntohl(req-&gt;data_length),
+ 		req-&gt;flags &amp; ISCSI_FLAG_CMD_ATTR_MASK, req-&gt;itt);
+ 
+@@ -1029,7 +1031,6 @@
+ 	int err;
+ 
+ 	op = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+-	dprintf(&quot;%u\n&quot;, op);
+ 	switch (op) {
+ 	case ISCSI_OP_SCSI_CMD:
+ 		err = iscsi_cmd_init(conn);
+@@ -1103,6 +1104,11 @@
+ 
+ 	ctask = list_entry(conn-&gt;tx_clist.next, struct iscsi_ctask, c_txlist);
+ 	conn-&gt;tx_ctask = ctask;
++	eprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u\n&quot;, ctask-&gt;tag,
++		ntohl(((struct iscsi_cmd *) (&amp;ctask-&gt;req))-&gt;data_length),
++		ctask-&gt;offset,
++		ctask-&gt;r2t_count);
++
+ 	list_del(&amp;ctask-&gt;c_txlist);
+ 
+ 	req = (struct iscsi_cmd *) &amp;ctask-&gt;req;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000552.html">[Stgt-svn] r565 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000554.html">[Stgt-svn] r567 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#553">[ date ]</a>
+              <a href="thread.html#553">[ thread ]</a>
+              <a href="subject.html#553">[ subject ]</a>
+              <a href="author.html#553">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

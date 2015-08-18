@@ -1,0 +1,98 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r252 - branches/use-scsi-ml
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r252%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602021024.k12AO5Fb024607%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000240.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r252 - branches/use-scsi-ml</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r252%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602021024.k12AO5Fb024607%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r252 - branches/use-scsi-ml">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb  2 11:24:05 CET 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000240.html">[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#239">[ date ]</a>
+              <a href="thread.html#239">[ thread ]</a>
+              <a href="subject.html#239">[ subject ]</a>
+              <a href="author.html#239">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-02 11:24:05 +0100 (Thu, 02 Feb 2006)
+New Revision: 252
+
+Modified:
+   branches/use-scsi-ml/Makefile
+Log:
+No ppc64 after 2.6.15.
+
+Modified: branches/use-scsi-ml/Makefile
+===================================================================
+--- branches/use-scsi-ml/Makefile	2006-01-30 23:50:28 UTC (rev 251)
++++ branches/use-scsi-ml/Makefile	2006-02-02 10:24:05 UTC (rev 252)
+@@ -7,18 +7,19 @@
+ export KERNELSRC
+ 
+ all:
+-ifeq ($(ARCH), ppc64)
++ifeq ($(ARCH), powerpc)
+ 	make -C ibmvstgt
++else
++	make -C istgt
+ endif
+-	make -C istgt
+-
+ 	make -C usr
+ 	make -C kernel
+ clean:
+ 	make -C usr clean
+ 	make -C kernel clean
+ 
+-ifeq ($(ARCH), ppc64)
++ifeq ($(ARCH), powerpc)
+ 	make -C ibmvstgt clean
++else
++	make -C istgt clean
+ endif
+-	make -C istgt clean
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000240.html">[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#239">[ date ]</a>
+              <a href="thread.html#239">[ thread ]</a>
+              <a href="subject.html#239">[ subject ]</a>
+              <a href="author.html#239">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

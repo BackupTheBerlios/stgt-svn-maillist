@@ -1,0 +1,206 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r466 - in branches/use-scsi-ml/istgt: kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r466%20-%20in%20branches/use-scsi-ml/istgt%3A%20kernel%20usr&In-Reply-To=%3C200605070027.k470ROYM019997%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000452.html">
+   <LINK REL="Next"  HREF="000454.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r466 - in branches/use-scsi-ml/istgt: kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r466%20-%20in%20branches/use-scsi-ml/istgt%3A%20kernel%20usr&In-Reply-To=%3C200605070027.k470ROYM019997%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r466 - in branches/use-scsi-ml/istgt: kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun May  7 02:27:24 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000452.html">[Stgt-svn] r465 - branches/use-scsi-ml
+</A></li>
+        <LI>Next message: <A HREF="000454.html">[Stgt-svn] r467 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#453">[ date ]</a>
+              <a href="thread.html#453">[ thread ]</a>
+              <a href="subject.html#453">[ subject ]</a>
+              <a href="author.html#453">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-07 02:27:10 +0200 (Sun, 07 May 2006)
+New Revision: 466
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+   branches/use-scsi-ml/istgt/usr/conn.c
+   branches/use-scsi-ml/istgt/usr/param.h
+Log:
+Set parameters properly.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-06 17:02:24 UTC (rev 465)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-07 00:27:10 UTC (rev 466)
+@@ -2195,7 +2195,7 @@
+ 	}
+ }
+ 
+-static int
++int
+ iscsi_conn_set_param(struct iscsi_cls_conn *cls_conn, enum iscsi_param param,
+ 		     uint32_t value)
+ {
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-05-06 17:02:24 UTC (rev 465)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_priv.h	2006-05-07 00:27:10 UTC (rev 466)
+@@ -36,5 +36,9 @@
+ 
+ extern void iscsi_tcp_cleanup_ctask(struct iscsi_conn *conn, struct iscsi_cmd_task *ctask);
+ 
++extern int
++iscsi_conn_set_param(struct iscsi_cls_conn *cls_conn, enum iscsi_param param,
++		     uint32_t value);
++
+ extern int iscsi_tcp_init(void);
+ extern void iscsi_tcp_exit(void);
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 17:02:24 UTC (rev 465)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-07 00:27:10 UTC (rev 466)
+@@ -456,6 +456,7 @@
+ 	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	int err;
++	struct iscsi_session *session = class_to_transport_session(cls_session);
+ 
+ 	dprintk(&quot;%llu %u\n&quot;, (unsigned long long) transport_eph, is_leading);
+ 
+@@ -473,6 +474,13 @@
+ 
+ 	INIT_WORK(&amp;conn-&gt;tcpwork, __istgt_tcp_data_ready, cls_conn);
+ 
++	dprintk(&quot;%u %u %u %u %u %u %u %u %u %u %u %u\n&quot;,
++		conn-&gt;max_recv_dlength, conn-&gt;max_xmit_dlength,
++		conn-&gt;hdrdgst_en, conn-&gt;datadgst_en, session-&gt;initial_r2t_en,
++		session-&gt;max_r2t, session-&gt;imm_data_en,
++		session-&gt;first_burst, session-&gt;max_burst,
++		session-&gt;pdu_inorder_en, session-&gt;dataseq_inorder_en, session-&gt;erl);
++
+ 	return 0;
+ }
+ 
+@@ -803,6 +811,7 @@
+ 	.destroy_conn		= iscsi_tcp_conn_destroy,
+ 	.bind_conn		= istgt_tcp_conn_bind,
+ 	.start_conn		= iscsi_conn_start,
++	.set_param		= iscsi_conn_set_param,
+ 	.terminate_conn		= iscsi_tcp_terminate_conn,
+ 	.xmit_cmd_task		= istgt_tcp_ctask_xmit,
+ };
+
+Modified: branches/use-scsi-ml/istgt/usr/conn.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/conn.c	2006-05-06 17:02:24 UTC (rev 465)
++++ branches/use-scsi-ml/istgt/usr/conn.c	2006-05-07 00:27:10 UTC (rev 466)
+@@ -66,7 +66,7 @@
+ 
+ void conn_take_fd(struct connection *conn, int fd)
+ {
+-	int err;
++	int i, err;
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
+ 
+ 	log_debug(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64,
+@@ -82,28 +82,29 @@
+ 		goto out;
+ 	}
+ 
++	for (i = 0; i &lt; ISCSI_PARAM_ERL + 1; i++) {
++		/* FIXME */
++		if (i == ISCSI_PARAM_DATADGST_EN || i == ISCSI_PARAM_HDRDGST_EN)
++			continue;
++		if (ki-&gt;set_param(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid, i,
++				  &amp;conn-&gt;session_param[i].val,
++				  sizeof(uint32_t), &amp;err) || err) {
++			break;
++		}
++	}
++
+ 	if (ki-&gt;bind_conn(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid, fd, 1, &amp;err) || err) {
+ 		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
+ 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 		goto out;
+ 	}
+ 
+-/* 	if (ki-&gt;set_param(thandle, sid, conn-&gt;cid, ISCSI_PARAM_EXP_STATSN, */
+-/* 			  conn-&gt;exp_stat_sn, &amp;err, || err) { */
+-/* 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid); */
+-/* 		goto out; */
+-/* 	} */
+-
+ 	if (ki-&gt;start_conn(thandle, conn-&gt;session-&gt;ksid, conn-&gt;kcid, &amp;err) || err) {
+ 		eprintf(&quot;%d %d %u %u %u %&quot; PRIx64,
+ 			fd, err, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 		goto out;
+ 	}
+ 
+-/* 	conn-&gt;stat_sn */
+-/* 		conn-&gt;session_param[key_header_digest].val, */
+-/* 		conn-&gt;session_param[key_data_digest].val); */
+-
+ out:
+ 	return;
+ }
+
+Modified: branches/use-scsi-ml/istgt/usr/param.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/param.h	2006-05-06 17:02:24 UTC (rev 465)
++++ branches/use-scsi-ml/istgt/usr/param.h	2006-05-07 00:27:10 UTC (rev 466)
+@@ -30,7 +30,6 @@
+ };
+ 
+ extern struct iscsi_key session_keys[];
+-extern struct iscsi_key target_keys[];
+ 
+ extern void param_set_defaults(struct param *, struct iscsi_key *);
+ extern int param_index_by_name(char *, struct iscsi_key *);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000452.html">[Stgt-svn] r465 - branches/use-scsi-ml
+</A></li>
+	<LI>Next message: <A HREF="000454.html">[Stgt-svn] r467 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#453">[ date ]</a>
+              <a href="thread.html#453">[ thread ]</a>
+              <a href="subject.html#453">[ subject ]</a>
+              <a href="author.html#453">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

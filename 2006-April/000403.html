@@ -1,0 +1,197 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r416 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r416%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160016.k3G0GY7J009649%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000402.html">
+   <LINK REL="Next"  HREF="000404.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r416 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r416%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160016.k3G0GY7J009649%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r416 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Apr 16 02:16:34 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000402.html">[Stgt-svn] r415 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000404.html">[Stgt-svn] r417 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#403">[ date ]</a>
+              <a href="thread.html#403">[ thread ]</a>
+              <a href="subject.html#403">[ subject ]</a>
+              <a href="author.html#403">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-16 02:16:11 +0200 (Sun, 16 Apr 2006)
+New Revision: 416
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Just cleanups.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-15 07:25:34 UTC (rev 415)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-16 00:16:11 UTC (rev 416)
+@@ -443,13 +443,12 @@
+ 		data_dir = DMA_FROM_DEVICE;
+ 	len = vscsis_data_length(&amp;iu-&gt;srp.cmd, data_dir);
+ 
+-	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag,
++	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;, iue, iu-&gt;srp.cmd.cdb[0],
++		iu-&gt;srp.cmd.lun, data_dir, len, tag,
+ 		(unsigned long long) iu-&gt;srp.cmd.tag);
+ 
+ 	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+ 	BUG_ON(!scmd);
+-
+ 	scmd-&gt;SCp.ptr = (char *) iue;
+ 	memcpy(scmd-&gt;data_cmnd, iu-&gt;srp.cmd.cdb, MAX_COMMAND_SIZE);
+ 	scmd-&gt;request_bufflen = len;
+@@ -458,8 +457,8 @@
+ 	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun,
+ 			       iu-&gt;srp.cmd.tag);
+ 
+-	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;,
+-		iue, scmd, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag);
++	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;, iue, scmd, iu-&gt;srp.cmd.cdb[0],
++		iu-&gt;srp.cmd.lun, data_dir, len, tag);
+ 
+ 	return 0;
+ }
+@@ -704,7 +703,6 @@
+ 	iue-&gt;scmd = NULL;
+ 	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
+ 	iue-&gt;flags = 0;
+-
+ 	return iue;
+ }
+ 
+@@ -791,7 +789,6 @@
+ {
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	struct srp_login_rsp *rsp = &amp;iu-&gt;srp.login_rsp;
+-
+ 	uint64_t tag = iu-&gt;srp.rsp.tag;
+ 
+ 	/* TODO handle case that requested size is wrong and
+@@ -876,14 +873,12 @@
+ 		break;
+ 	case VIOSRP_ADAPTER_INFO_TYPE:
+ 		info = &amp;iu-&gt;mad.adapter_info;
+-
+ 		info-&gt;common.status = send_adapter_info(iue, info-&gt;buffer,
+ 							info-&gt;common.length);
+ 		send_iu(iue, sizeof(*info), VIOSRP_MAD_FORMAT);
+ 		break;
+ 	case VIOSRP_HOST_CONFIG_TYPE:
+ 		conf = &amp;iu-&gt;mad.host_config;
+-
+ 		conf-&gt;common.status = 1;
+ 		send_iu(iue, sizeof(*conf), VIOSRP_MAD_FORMAT);
+ 		break;
+@@ -1186,20 +1181,17 @@
+ 	return 0;
+ }
+ 
+-static ssize_t
+-system_id_show(struct class_device *cdev, char *buf)
++static ssize_t system_id_show(struct class_device *cdev, char *buf)
+ {
+ 	return snprintf(buf, PAGE_SIZE, &quot;%s\n&quot;, system_id);
+ }
+ 
+-static ssize_t
+-partition_number_show(struct class_device *cdev, char *buf)
++static ssize_t partition_number_show(struct class_device *cdev, char *buf)
+ {
+ 	return snprintf(buf, PAGE_SIZE, &quot;%x\n&quot;, partition_number);
+ }
+ 
+-static ssize_t
+-unit_address_show(struct class_device *cdev, char *buf)
++static ssize_t unit_address_show(struct class_device *cdev, char *buf)
+ {
+ 	struct Scsi_Host *shost = class_to_shost(cdev);
+ 	struct srp_target *target = host_to_target(shost);
+@@ -1250,7 +1242,8 @@
+ 	shost = scsi_host_alloc(&amp;ibmvstgt_sht, sizeof(struct srp_target));
+ 	if (!shost)
+ 		goto free_vport;
+-	if (scsi_tgt_alloc_queue(shost))
++	err = scsi_tgt_alloc_queue(shost);
++	if (err)
+ 		goto put_host;
+ 
+ 	target = host_to_target(shost);
+@@ -1262,8 +1255,8 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;cmd_queue);
+ 	target-&gt;ldata = vport;
+ 
+-	dma = (unsigned int *)
+-		vio_get_attribute(dev, &quot;ibm,my-dma-window&quot;, &amp;dma_size);
++	dma = (unsigned int *) vio_get_attribute(dev, &quot;ibm,my-dma-window&quot;,
++						 &amp;dma_size);
+ 	if (!dma || dma_size != 40) {
+ 		eprintk(&quot;Couldn't get window property %d\n&quot;, dma_size);
+ 		err = -EIO;
+@@ -1287,7 +1280,8 @@
+ 	if (err)
+ 		goto free_pool;
+ 
+-	if (scsi_add_host(shost, target-&gt;dev))
++	err = scsi_add_host(shost, target-&gt;dev);
++	if (err)
+ 		goto destroy_queue;
+ 	return 0;
+ 
+@@ -1373,7 +1367,7 @@
+ 		return err;
+ 
+ 	err = get_system_info();
+-	if (err &lt; 0)
++	if (err)
+ 		goto destroy_wq;
+ 
+ 	err = vio_register_driver(&amp;ibmvstgt_driver);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000402.html">[Stgt-svn] r415 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000404.html">[Stgt-svn] r417 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#403">[ date ]</a>
+              <a href="thread.html#403">[ thread ]</a>
+              <a href="subject.html#403">[ subject ]</a>
+              <a href="author.html#403">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,113 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r164 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r164%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051114.jA5BEF9p017052%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000157.html">
+   <LINK REL="Next"  HREF="000159.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r164 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r164%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051114.jA5BEF9p017052%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r164 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 12:14:15 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000157.html">[Stgt-svn] r163 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000159.html">[Stgt-svn] r165 - in trunk: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#158">[ date ]</a>
+              <a href="thread.html#158">[ thread ]</a>
+              <a href="subject.html#158">[ subject ]</a>
+              <a href="author.html#158">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 12:14:14 +0100 (Sat, 05 Nov 2005)
+New Revision: 164
+
+Modified:
+   trunk/istgt/kernel/iscsi.h
+Log:
+Minor cleanups of iscsi.h
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-11-05 10:38:59 UTC (rev 163)
++++ trunk/istgt/kernel/iscsi.h	2005-11-05 11:14:14 UTC (rev 164)
+@@ -236,11 +236,11 @@
+ 	hton24(pdu-&gt;bhs.dlength, pdu-&gt;datasize);
+ }
+ 
+-#define cmd_hdr(cmd) ((struct iscsi_cmd *) (&amp;((cmd)-&gt;pdu.bhs)))
+-#define cmd_ttt(cmd) cpu_to_be32((cmd)-&gt;pdu.bhs.ttt)
+-#define cmd_itt(cmd) cpu_to_be32((cmd)-&gt;pdu.bhs.itt)
+-#define cmd_opcode(cmd) ((cmd)-&gt;pdu.bhs.opcode &amp; ISCSI_OPCODE_MASK)
+-#define cmd_scsicode(cmd) cmd_hdr(cmd)-&gt;cdb[0]
++#define cmd_hdr(cmd)		((struct iscsi_cmd *) (&amp;((cmd)-&gt;pdu.bhs)))
++#define cmd_ttt(cmd)		cpu_to_be32((cmd)-&gt;pdu.bhs.ttt)
++#define cmd_itt(cmd)		cpu_to_be32((cmd)-&gt;pdu.bhs.itt)
++#define cmd_opcode(cmd)		((cmd)-&gt;pdu.bhs.opcode &amp; ISCSI_OPCODE_MASK)
++#define cmd_scsicode(cmd)	cmd_hdr(cmd)-&gt;cdb[0]
+ 
+ #define	SECTOR_SIZE_BITS	9
+ 
+@@ -253,16 +253,16 @@
+ };
+ 
+ #define set_cmd_hashed(cmd)	set_bit(CMD_hashed, &amp;(cmd)-&gt;flags)
+-#define cmd_hashed(cmd)	test_bit(CMD_hashed, &amp;(cmd)-&gt;flags)
++#define cmd_hashed(cmd)		test_bit(CMD_hashed, &amp;(cmd)-&gt;flags)
+ 
+ #define set_cmd_final(cmd)	set_bit(CMD_final, &amp;(cmd)-&gt;flags)
+-#define cmd_final(cmd)	test_bit(CMD_final, &amp;(cmd)-&gt;flags)
++#define cmd_final(cmd)		test_bit(CMD_final, &amp;(cmd)-&gt;flags)
+ 
+ #define set_cmd_waitio(cmd)	set_bit(CMD_waitio, &amp;(cmd)-&gt;flags)
+-#define cmd_waitio(cmd)	test_bit(CMD_waitio, &amp;(cmd)-&gt;flags)
++#define cmd_waitio(cmd)		test_bit(CMD_waitio, &amp;(cmd)-&gt;flags)
+ 
+ #define set_cmd_close(cmd)	set_bit(CMD_close, &amp;(cmd)-&gt;flags)
+-#define cmd_close(cmd)	test_bit(CMD_close, &amp;(cmd)-&gt;flags)
++#define cmd_close(cmd)		test_bit(CMD_close, &amp;(cmd)-&gt;flags)
+ 
+ #define set_cmd_pending(cmd)	set_bit(CMD_pending, &amp;(cmd)-&gt;flags)
+ #define clear_cmd_pending(cmd)	clear_bit(CMD_pending, &amp;(cmd)-&gt;flags)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000157.html">[Stgt-svn] r163 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000159.html">[Stgt-svn] r165 - in trunk: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#158">[ date ]</a>
+              <a href="thread.html#158">[ thread ]</a>
+              <a href="subject.html#158">[ subject ]</a>
+              <a href="author.html#158">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

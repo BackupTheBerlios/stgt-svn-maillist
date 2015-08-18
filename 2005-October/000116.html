@@ -1,0 +1,765 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r122 - in trunk: . kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r122%20-%20in%20trunk%3A%20.%20kernel%20usr&In-Reply-To=%3C200510271247.j9RClIJi008079%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000115.html">
+   <LINK REL="Next"  HREF="000117.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r122 - in trunk: . kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r122%20-%20in%20trunk%3A%20.%20kernel%20usr&In-Reply-To=%3C200510271247.j9RClIJi008079%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r122 - in trunk: . kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Oct 27 14:47:18 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000115.html">[Stgt-svn] r121 - in trunk: kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000117.html">[Stgt-svn] r123 - in trunk: . kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#116">[ date ]</a>
+              <a href="thread.html#116">[ thread ]</a>
+              <a href="subject.html#116">[ subject ]</a>
+              <a href="author.html#116">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-27 14:47:15 +0200 (Thu, 27 Oct 2005)
+New Revision: 122
+
+Added:
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+Modified:
+   trunk/initd
+   trunk/kernel/tgt.c
+   trunk/usr/Makefile
+   trunk/usr/ipc.c
+   trunk/usr/log.h
+   trunk/usr/netlink.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Fix target dynamic library code. At the boot time tgtd asks the kernel
+module what target drivers are available. That is, it is dynamically
+changeable only at the boot time. some target driver libraries like
+istgt.so need to keep the state information, so it is difficult to
+implement the code that can load dynamic libraries at any time.
+
+Asynchronous event handling always get information from /sys
+directory. Maybe we need more efficient schemes (like adding target
+driver id).
+
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/initd	2005-10-27 12:47:15 UTC (rev 122)
+@@ -22,7 +22,7 @@
+ 	
+ stop_server()
+ {
+-	${PWD}/usr/tgtadm --op delete
++	${PWD}/usr/tgtadm --driver istgt --op delete
+ 	killall -9 tgtd
+ 
+ 	rmmod iscsi_trgt
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/kernel/tgt.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -874,6 +874,44 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
++static void tgt_start(void)
++{
++	struct tgt_event ev;
++	struct target_type_internal *ti;
++	unsigned long flags;
++	int n, err, done, rest = PAGE_SIZE;
++	char *p;
++
++	p = kzalloc(rest, GFP_KERNEL);
++	if (!p)
++		rest = 0;
++
++	n = done = 0;
++
++	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
++	list_for_each_entry(ti, &amp;target_tmpl_list, list) {
++		dprintk(&quot;%s %s\n&quot;, ti-&gt;tt-&gt;name, ti-&gt;proto-&gt;name);
++		if (strlen(ti-&gt;tt-&gt;name) + strlen(ti-&gt;proto-&gt;name) + 2 &gt; rest)
++			break;
++		err = snprintf(p + done, rest, &quot;%s:%s,&quot;,
++			       ti-&gt;tt-&gt;name, ti-&gt;proto-&gt;name);
++		if (err &lt; 0)
++			break;
++		rest -= err;
++		done += err;
++		n++;
++	}
++	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++
++	memset(&amp;ev, 0, sizeof(ev));
++	send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, p, done,
++		       GFP_KERNEL | __GFP_NOFAIL);
++
++	kfree(p);
++
++	eprintk(&quot;start %d target drivers\n&quot;, n);
++}
++
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	int err = 0;
+@@ -887,7 +925,7 @@
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
+ 		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
+-		dprintk(&quot;start %d\n&quot;, tgtd_pid);
++		tgt_start();
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+ 		target = tgt_target_create(ev-&gt;u.c_target.type,
+@@ -966,7 +1004,8 @@
+ 		 * TODO for passthru commands the lower level should
+ 		 * probably handle the result or we should modify this
+ 		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
++		if (nlh-&gt;nlmsg_type != TGT_UEVENT_START &amp;&amp;
++		    nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
+ 		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
+ 			struct tgt_event ev;
+ 
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/Makefile	2005-10-27 12:47:15 UTC (rev 122)
+@@ -3,7 +3,7 @@
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o scsi.o netlink.o ipc.o log.o
++tgtd: tgtd.o scsi.o netlink.o ipc.o dl.o log.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+ tgtadm: tgtadm.o
+
+Added: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/dl.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -0,0 +1,140 @@
++/*
++ * Dynamic library
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This code is licenced under the GPL.
++ */
++
++/* TODO : better handling of dynamic library. */
++
++#include &lt;string.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;dlfcn.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/poll.h&gt;
++
++#include &quot;log.h&quot;
++#include &quot;dl.h&quot;
++
++#define	MAX_DL_HANDLES	32
++
++struct driver_info {
++	char *name;
++	void *dl;
++	void *pdl;
++};
++
++static struct driver_info dinfo[MAX_DL_HANDLES];
++
++static int driver_find_by_name(char *name)
++{
++	int i;
++
++	for (i = 0; i &lt; MAX_DL_HANDLES; i++)
++		if (!strncmp(dinfo[i].name, name, strlen(dinfo[i].name)))
++			return i;
++
++	return -ENOENT;
++}
++
++int dl_init(char *p)
++{
++	int i;
++	char path[PATH_MAX], *driver, *proto;
++
++	for (i = 0; (driver = strsep(&amp;p, &quot;,&quot;)); i++) {
++		proto = strchr(driver, ':');
++		if (!proto)
++			continue;
++
++		*proto++ = '\0';
++		dprintf(&quot;%s %s\n&quot;, driver, proto);
++
++		memset(path, 0, sizeof(path));
++		strcpy(path, driver);
++		strcat(path, &quot;.so&quot;);
++
++		dinfo[i].name = strdup(driver);
++		dinfo[i].dl = dlopen(path, RTLD_LAZY);
++		if (!dinfo[i].dl)
++			fprintf(stderr, &quot;%s\n&quot;, dlerror());
++	}
++
++	return i;
++}
++
++void dl_config_load(void)
++{
++	void (* fn)(void);
++	int i;
++
++	for (i = 0; i &lt; MAX_DL_HANDLES; i++) {
++		if (!dinfo[i].dl)
++			continue;
++
++		fn = dlsym(dinfo[i].dl, &quot;initial_config_load&quot;);
++		if (!fn)
++			eprintf(&quot;%s\n&quot;, dlerror());
++		else
++			fn();
++	}
++}
++
++void *dl_poll_init_fn(int idx)
++{
++	if (dinfo[idx].dl)
++		return dlsym(dinfo[idx].dl, &quot;poll_init&quot;);
++	return NULL;
++}
++
++void *dl_poll_fn(int idx)
++{
++	if (dinfo[idx].dl)
++		return dlsym(dinfo[idx].dl, &quot;poll_event&quot;);
++	return NULL;
++}
++
++void *dl_ipc_fn(char *name)
++{
++	int idx = driver_find_by_name(name);
++	if (idx &lt; 0)
++		eprintf(&quot;%d %s\n&quot;, idx, name);
++
++	if (idx &gt;= 0 &amp;&amp; dinfo[idx].dl)
++		return dlsym(dinfo[idx].dl, &quot;ipc_mgmt&quot;);
++	return NULL;
++}
++
++void *dl_event_fn(int tid)
++{
++	char path[PATH_MAX], name[PATH_MAX];
++	int idx, fd, err;
++
++	memset(path, 0, sizeof(path));
++
++	sprintf(path, &quot;/sys/class/tgt_target/target%d/name&quot;, tid);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0)
++		return NULL;
++
++	err = read(fd, name, sizeof(name));
++	close(fd);
++	if (err &lt; 0)
++		return NULL;
++
++	idx = driver_find_by_name(name);
++	if (idx &lt; 0)
++		eprintf(&quot;%d %s %d\n&quot;, idx, name, tid);
++
++	if (idx &gt;= 0 &amp;&amp; dinfo[idx].dl)
++		return dlsym(dinfo[idx].dl, &quot;async_event&quot;);
++
++	return NULL;
++}
+
+Added: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/dl.h	2005-10-27 12:47:15 UTC (rev 122)
+@@ -0,0 +1,13 @@
++#ifndef __DL_H
++#define __DL_H
++
++extern int dl_init(char *data);
++extern void dl_config_load(void);
++extern struct pollfd * dl_poll_init(int *nr);
++
++extern void *dl_poll_init_fn(int idx);
++extern void *dl_poll_fn(int idx);
++extern void *dl_ipc_fn(char *driver);
++extern void *dl_event_fn(int tid);
++
++#endif
+
+Modified: trunk/usr/ipc.c
+===================================================================
+--- trunk/usr/ipc.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/ipc.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -9,7 +9,6 @@
+ #include &lt;errno.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;dlfcn.h&gt;
+ #include &lt;errno.h&gt;
+ #include &lt;inttypes.h&gt;
+ #include &lt;sys/socket.h&gt;
+@@ -21,6 +20,7 @@
+ 
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
++#include &quot;dl.h&quot;
+ 
+ static int ipc_accept(int afd)
+ {
+@@ -58,6 +58,7 @@
+ 	struct iovec iov;
+ 	struct msghdr msg;
+ 	struct tgtadm_res *res;
++	struct tgtadm_req *req;
+ 	int (*fn) (char *, char *);
+ 
+ 	fd = ipc_accept(accept_fd);
+@@ -96,11 +97,13 @@
+ 	if (err &lt; 0)
+ 		goto fail;
+ 
+-	eprintf(&quot;%s %d %d %d\n&quot;, __FUNCTION__, __LINE__, err, nlh-&gt;nlmsg_len);
++	req = NLMSG_DATA(nlh);
+ 
+-	fn = dlsym(dl_handles[0], &quot;ipc_mgmt&quot;);
++	dprintf(&quot;%s %d %d\n&quot;, req-&gt;driver, err, nlh-&gt;nlmsg_len);
++
++	fn = dl_ipc_fn(req-&gt;driver);
+ 	if (!fn) {
+-		eprintf(&quot;%s\n&quot;, dlerror());
++		eprintf(&quot;Cannot handle event %s\n&quot;, req-&gt;driver);
+ 		err = -EINVAL;
+ 		goto fail;
+ 	}
+
+Modified: trunk/usr/log.h
+===================================================================
+--- trunk/usr/log.h	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/log.h	2005-10-27 12:47:15 UTC (rev 122)
+@@ -73,12 +73,12 @@
+ 
+ #define eprintf(fmt, args...)						\
+ do {									\
+-	log_error(&quot;%s/%d &quot; fmt, __FUNCTION__, __LINE__, args);	\
++	log_error(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+ } while (0)
+ 
+ #define dprintf(fmt, args...)						\
+ do {									\
+-	log_debug(&quot;%s/%d &quot; fmt, __FUNCTION__, __LINE__, args);	\
++	log_debug(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+ } while (0)
+ 
+ #endif	/* LOG_H */
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/netlink.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -21,10 +21,10 @@
+ #include &lt;sys/socket.h&gt;
+ #include &lt;asm/types.h&gt;
+ #include &lt;linux/netlink.h&gt;
+-#include &lt;dlfcn.h&gt;
+ 
+ #include &lt;tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
++#include &quot;dl.h&quot;
+ 
+ #define	NL_BUFSIZE	8192
+ 
+@@ -158,9 +158,12 @@
+ 		cmd_queue(fd, NLMSG_DATA(recvbuf), sendbuf);
+ 		break;
+ 	case TGT_KEVENT_TARGET_PASSTHRU:
+-		fn = dlsym(dl_handles[0], &quot;async_event&quot;);
++		fn = dl_event_fn(ev-&gt;k.tgt_passthru.tid);
+ 		if (fn)
+ 			fn(NLMSG_DATA(recvbuf));
++		else
++			eprintf(&quot;Cannot handle async event %d\n&quot;,
++				ev-&gt;k.tgt_passthru.tid);
+ 		break;
+ 	default:
+ 		/* kernel module bug */
+@@ -189,7 +192,7 @@
+ 	return err;
+ }
+ 
+-static void nl_start(int fd)
++static int nl_start(int fd)
+ {
+ 	int err;
+ 	struct tgt_event *ev;
+@@ -207,9 +210,11 @@
+ 		eprintf(&quot;%d %d\n&quot;, err, ev-&gt;k.event_res.err);
+ 		exit(-1);
+ 	}
++
++	return dl_init((char *) ev-&gt;data);
+ }
+ 
+-int nl_open(void)
++int nl_open(int *nr)
+ {
+ 	int fd, err;
+ 
+@@ -240,7 +245,7 @@
+ 	dest_addr.nl_pid = 0; /* kernel */
+ 	dest_addr.nl_groups = 0; /* unicast */
+ 
+-	nl_start(fd);
++	*nr = nl_start(fd);
+ 
+ 	return fd;
+ 
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/tgtadm.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -34,6 +34,7 @@
+ 
+ static struct option const long_options[] =
+ {
++	{&quot;driver&quot;, required_argument, NULL, 'n'},
+ 	{&quot;op&quot;, required_argument, NULL, 'o'},
+ 	{&quot;tid&quot;, required_argument, NULL, 't'},
+ 	{&quot;sid&quot;, required_argument, NULL, 's'},
+@@ -204,18 +205,21 @@
+ 	int tid = -1;
+ 	uint32_t cid = 0, set = 0;
+ 	uint64_t sid = 0, lun = 0;
+-	char *params = NULL;
++	char *params = NULL, *driver = NULL;
+ 	struct tgtadm_req *req;
+ 	char sbuf[8192], rbuf[8912];
+ 
+-	while ((ch = getopt_long(argc, argv, &quot;o:t:s:c:l:p:uvh&quot;,
++	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvh&quot;,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
++		case 'n':
++			driver = optarg;
++			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+ 			break;
+ 		case 't':
+-			tid = strtoul(optarg, NULL, 10);
++			tid = strtol(optarg, NULL, 10);
+ 			set |= SET_TARGET;
+ 			break;
+ 		case 's':
+@@ -253,6 +257,11 @@
+ 		goto out;
+ 	}
+ 
++	if (!driver) {
++		fprintf(stderr, &quot;You must specify the driver name\n&quot;);
++		goto out;
++	}
++
+ 	if (optind &lt; argc) {
+ 		fprintf(stderr, &quot;unrecognized: &quot;);
+ 		while (optind &lt; argc)
+@@ -265,6 +274,7 @@
+ 	memset(rbuf, 0, sizeof(rbuf));
+ 
+ 	req = (struct tgtadm_req *) sbuf;
++	strncpy(req-&gt;driver, driver, sizeof(req-&gt;driver));
+ 	req-&gt;op = op;
+ 	req-&gt;set = set;
+ 	req-&gt;tid = tid;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/tgtadm.h	2005-10-27 12:47:15 UTC (rev 122)
+@@ -9,6 +9,8 @@
+ #define	SET_DEVICE	(1 &lt;&lt; 3)
+ #define	SET_USER	(1 &lt;&lt; 4)
+ 
++#define	TGT_DNAME_LEN	64
++
+ enum tgtadm_op {
+ 	OP_NEW,
+ 	OP_DELETE,
+@@ -17,6 +19,7 @@
+ };
+ 
+ struct tgtadm_req {
++	char driver[TGT_DNAME_LEN];
+ 	int op;
+ 	uint32_t set;
+ 
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/tgtd.c	2005-10-27 12:47:15 UTC (rev 122)
+@@ -16,7 +16,6 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;dlfcn.h&gt;
+ #include &lt;asm/types.h&gt;
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/signal.h&gt;
+@@ -25,14 +24,12 @@
+ 
+ #include &lt;tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
++#include &quot;dl.h&quot;
+ 
++#define	POLLS_PER_DRV	64
++
+ int nl_fd, ipc_fd;
+ 
+-#define	MAX_DL_HANDLES	32
+-void *dl_handles[MAX_DL_HANDLES];
+-
+-#define	POLLS_PER_DL	64
+-
+ enum {
+ 	POLL_NL,
+ 	POLL_IPC,
+@@ -65,49 +62,6 @@
+ 	exit(1);
+ }
+ 
+-/* TODO : proper handling of libraries.*/
+-
+-static int dl_init(void)
+-{
+-	char path[PATH_MAX];
+-
+-	strcat(path, &quot;istgt.so&quot;);
+-
+-	dl_handles[0] = dlopen(path, RTLD_LAZY);
+-	if (!dl_handles[0]) {
+-		fprintf(stderr, &quot;%s\n&quot;, dlerror());
+-		exit(-1);
+-	}
+-
+-	return 1;
+-}
+-
+-static void dl_config_load(int nr)
+-{
+-	void (* fn)(void);
+-
+-	fn = dlsym(dl_handles[0], &quot;initial_config_load&quot;);
+-	if (!fn) {
+-		eprintf(&quot;fail to dlsym %s\n&quot;, dlerror());
+-		exit(-1);
+-	}
+-
+-	fn();
+-}
+-
+-static void dl_poll_init(int nr, struct pollfd *poll_array)
+-{
+-	void (* fn)(struct pollfd *, int);
+-
+-	fn = dlsym(dl_handles[0], &quot;poll_init&quot;);
+-	if (!fn) {
+-		eprintf(&quot;fail to dlsym %s\n&quot;, dlerror());
+-		exit(-1);
+-	}
+-
+-	fn(poll_array, POLLS_PER_DL);
+-}
+-
+ static void signal_catch(int signo) {
+ }
+ 
+@@ -147,7 +101,7 @@
+ 
+ static void event_loop(int nr_dls, struct pollfd *poll_array)
+ {
+-	int err, i, poll_max = (nr_dls + 1) * POLLS_PER_DL;
++	int err, i, poll_max = (nr_dls + 1) * POLLS_PER_DRV;
+ 	void (* fn)(struct pollfd *, int);
+ 
+ 	while (1) {
+@@ -165,28 +119,47 @@
+ 		if (poll_array[POLL_IPC].revents)
+ 			ipc_event_handle(ipc_fd);
+ 
+-		for (i = 0; i &lt; nr_dls &amp;&amp; dl_handles[i]; i++) {
+-			fn = dlsym(dl_handles[i], &quot;poll_event&quot;);
+-			if (!fn) {
+-				eprintf(&quot;%s\n&quot;, dlerror());
+-				continue;
+-			}
+-			fn(poll_array + ((i + 1) * POLLS_PER_DL), POLLS_PER_DL);
++		for (i = 0; i &lt; nr_dls; i++) {
++			fn = dl_poll_fn(i);
++			if (fn)
++				fn(poll_array + ((i + 1) * POLLS_PER_DRV), POLLS_PER_DRV);
+ 		}
+ 	}
+ }
+ 
++static struct pollfd * poll_init(int nr)
++{
++	struct pollfd *array;
++	void (* fn)(struct pollfd *, int);
++	int i;
++
++	array = calloc((nr + 1) * POLLS_PER_DRV,
++		       sizeof(struct pollfd));
++	if (!array)
++		exit(-ENOMEM);
++
++	array[POLL_NL].fd = nl_fd;
++	array[POLL_NL].events = POLLIN;
++	array[POLL_IPC].fd = ipc_fd;
++	array[POLL_IPC].events = POLLIN;
++
++	for (i = 0; i &lt; nr; i++) {
++		fn = dl_poll_init_fn(i);
++		if (fn)
++			fn(array + (i + 1) * POLLS_PER_DRV, POLLS_PER_DRV);
++	}
++
++	return array;
++}
++
+ int main(int argc, char **argv)
+ {
+ 	int ch, longindex;
+-	int nr_dls, is_daemon = 1, is_debug = 1;
++	int is_daemon = 1, is_debug = 1;
++	int nr;
+ 	pid_t pid;
+ 	struct pollfd *poll_array;
+ 
+-	nr_dls = dl_init();
+-	if (nr_dls &lt; 0)
+-		nr_dls = 0;
+-
+ 	while ((ch = getopt_long(argc, argv, &quot;fd:vh&quot;, long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'f':
+@@ -225,11 +198,7 @@
+ 		setsid();
+ 	}
+ 
+-	poll_array = calloc((nr_dls + 1) * POLLS_PER_DL, sizeof(struct pollfd));
+-	if (!poll_array)
+-		exit(-ENOMEM);
+-
+-	nl_fd = nl_open();
++	nl_fd = nl_open(&amp;nr);
+ 	if (nl_fd &lt; 0)
+ 		exit(nl_fd);
+ 
+@@ -237,16 +206,11 @@
+ 	if (ipc_fd &lt; 0)
+ 		exit(ipc_fd);
+ 
+-	poll_array[POLL_NL].fd = nl_fd;
+-	poll_array[POLL_NL].events = POLLIN;
+-	poll_array[POLL_IPC].fd = ipc_fd;
+-	poll_array[POLL_IPC].events = POLLIN;
++	poll_array = poll_init(nr);
+ 
+-	dl_poll_init(nr_dls, poll_array + POLLS_PER_DL);
++	dl_config_load();
+ 
+-	dl_config_load(nr_dls);
++	event_loop(nr, poll_array);
+ 
+-	event_loop(nr_dls, poll_array);
+-
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2005-10-27 08:32:56 UTC (rev 121)
++++ trunk/usr/tgtd.h	2005-10-27 12:47:15 UTC (rev 122)
+@@ -1,12 +1,11 @@
+-#ifndef __SCSI_TARGET_DAEMON_H
+-#define __SCSI_TARGET_DAEMON_H
++#ifndef __TARGET_DAEMON_H
++#define __TARGET_DAEMON_H
+ 
+ #include &quot;log.h&quot;
+ 
+ extern int nl_fd;
+-extern void *dl_handles[];
+ 
+-extern int nl_open(void);
++extern int nl_open(int *nr_drivers);
+ extern void nl_event_handle(int fd);
+ extern int nl_cmd_call(int fd, int type, char *data, int size, char *rbuf);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000115.html">[Stgt-svn] r121 - in trunk: kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000117.html">[Stgt-svn] r123 - in trunk: . kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#116">[ date ]</a>
+              <a href="thread.html#116">[ thread ]</a>
+              <a href="subject.html#116">[ subject ]</a>
+              <a href="author.html#116">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

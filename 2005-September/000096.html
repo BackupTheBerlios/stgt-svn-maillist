@@ -1,0 +1,202 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r102 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r102%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251042.j8PAgAVm026945%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000095.html">
+   <LINK REL="Next"  HREF="000097.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r102 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r102%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251042.j8PAgAVm026945%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r102 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 12:42:10 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000095.html">[Stgt-svn] r101 - in trunk/iscsi: kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000097.html">[Stgt-svn] r103 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#96">[ date ]</a>
+              <a href="thread.html#96">[ thread ]</a>
+              <a href="subject.html#96">[ subject ]</a>
+              <a href="author.html#96">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 12:42:08 +0200 (Sun, 25 Sep 2005)
+New Revision: 102
+
+Modified:
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/session.c
+Log:
+Cleanup of iscsi session stuff.
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-25 10:20:55 UTC (rev 101)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-25 10:42:08 UTC (rev 102)
+@@ -81,7 +81,6 @@
+ 	struct list_head list;
+ 	struct iscsi_target *target;
+ 
+-	char *initiator;
+ 	u64 sid;
+ 
+ 	u32 exp_cmd_sn;
+
+Modified: trunk/iscsi/kernel/session.c
+===================================================================
+--- trunk/iscsi/kernel/session.c	2005-09-25 10:20:55 UTC (rev 101)
++++ trunk/iscsi/kernel/session.c	2005-09-25 10:42:08 UTC (rev 102)
+@@ -21,17 +21,21 @@
+ 	return NULL;
+ }
+ 
+-static int iet_session_alloc(struct iscsi_target *target, struct session_info *info)
++int session_add(struct iscsi_target *target, struct session_info *info)
+ {
+-	int err, i;
+ 	struct iscsi_session *session;
++	int i;
+ 
+ 	dprintk(D_SETUP, &quot;%p %u %#Lx\n&quot;, target, target-&gt;tid,
+ 		(unsigned long long) info-&gt;sid);
+ 
+-	if (!(session = kmalloc(sizeof(*session), GFP_KERNEL)))
++	session = session_lookup(target, info-&gt;sid);
++	if (session)
++		return -EEXIST;
++
++	session = kzalloc(sizeof(*session), GFP_KERNEL);
++	if (!session)
+ 		return -ENOMEM;
+-	memset(session, 0, sizeof(*session));
+ 
+ 	session-&gt;target = target;
+ 	session-&gt;sid = info-&gt;sid;
+@@ -41,13 +45,6 @@
+ 	session-&gt;exp_cmd_sn = info-&gt;exp_cmd_sn;
+ 	session-&gt;max_cmd_sn = info-&gt;max_cmd_sn;
+ 
+-	session-&gt;initiator = kmalloc(sizeof(info-&gt;initiator_name), GFP_KERNEL);
+-	if (!session-&gt;initiator) {
+-		err = -ENOMEM;
+-		goto err;
+-	}
+-	memcpy(session-&gt;initiator, info-&gt;initiator_name, sizeof(info-&gt;initiator_name));
+-
+ 	INIT_LIST_HEAD(&amp;session-&gt;conn_list);
+ 	INIT_LIST_HEAD(&amp;session-&gt;pending_list);
+ 
+@@ -62,60 +59,36 @@
+ 	session-&gt;ts = tgt_session_create(target-&gt;tt, 64, NULL, NULL);
+ 
+ 	return 0;
+-err:
+-	if (session) {
+-		kfree(session-&gt;initiator);
+-		kfree(session);
+-	}
+-	return err;
+ }
+ 
+-int session_add(struct iscsi_target *target, struct session_info *info)
++int session_del(struct iscsi_target *target, u64 sid)
+ {
++	int i;
+ 	struct iscsi_session *session;
+-	int err = -EEXIST;
+ 
+-	if ((session = session_lookup(target, info-&gt;sid)))
+-		return err;
++	session = session_lookup(target, sid);
++	if (!session)
++		return -ENOENT;
+ 
+-	err = iet_session_alloc(target, info);
+-
+-	return err;
+-}
+-
+-static int session_free(struct iscsi_session *session)
+-{
+-	int i;
+-
+ 	dprintk(D_SETUP, &quot;%#Lx\n&quot;, (unsigned long long) session-&gt;sid);
+ 
+-	assert(list_empty(&amp;session-&gt;conn_list));
++	if (!list_empty(&amp;session-&gt;conn_list)) {
++		eprintk(&quot;%llu still have connections\n&quot;,
++			(unsigned long long) session-&gt;sid);
++		return -EBUSY;
++	}
+ 
++	BUG_ON(!list_empty(&amp;session-&gt;conn_list));
++
+ 	for (i = 0; i &lt; ARRAY_SIZE(session-&gt;cmnd_hash); i++) {
+ 		if (!list_empty(&amp;session-&gt;cmnd_hash[i]))
+ 			BUG();
+ 	}
+ 
+ 	list_del(&amp;session-&gt;list);
+-	kfree(session-&gt;initiator);
+ 
+ 	tgt_session_destroy(session-&gt;ts);
+ 	kfree(session);
+ 
+ 	return 0;
+ }
+-
+-int session_del(struct iscsi_target *target, u64 sid)
+-{
+-	struct iscsi_session *session;
+-
+-	if (!(session = session_lookup(target, sid)))
+-		return -ENOENT;
+-
+-	if (!list_empty(&amp;session-&gt;conn_list)) {
+-		eprintk(&quot;%llu still have connections\n&quot;, (unsigned long long) session-&gt;sid);
+-		return -EBUSY;
+-	}
+-
+-	return session_free(session);
+-}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000095.html">[Stgt-svn] r101 - in trunk/iscsi: kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000097.html">[Stgt-svn] r103 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#96">[ date ]</a>
+              <a href="thread.html#96">[ thread ]</a>
+              <a href="subject.html#96">[ subject ]</a>
+              <a href="author.html#96">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

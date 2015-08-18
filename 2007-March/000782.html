@@ -1,0 +1,672 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r795 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r795%20-%20trunk/usr&In-Reply-To=%3C200703031329.l23DTtD2006294%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000781.html">
+   <LINK REL="Next"  HREF="000783.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r795 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r795%20-%20trunk/usr&In-Reply-To=%3C200703031329.l23DTtD2006294%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r795 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar  3 14:29:55 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000781.html">[Stgt-svn] r794 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000783.html">[Stgt-svn] r796 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#782">[ date ]</a>
+              <a href="thread.html#782">[ thread ]</a>
+              <a href="subject.html#782">[ subject ]</a>
+              <a href="author.html#782">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-03 14:29:54 +0100 (Sat, 03 Mar 2007)
+New Revision: 795
+
+Added:
+   trunk/usr/spt.c
+Removed:
+   trunk/usr/bd_sg.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+change pass through from backing storage type to target type
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/Makefile	2007-03-03 13:29:54 UTC (rev 795)
+@@ -21,7 +21,7 @@
+ endif
+ 
+ ifneq ($(RAW),)
+-TGTD_OBJS += bd_sg.o
++TGTD_OBJS += spt.o
+ CFLAGS += -DUSE_RAW
+ endif
+ 
+
+Deleted: trunk/usr/bd_sg.c
+===================================================================
+--- trunk/usr/bd_sg.c	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/bd_sg.c	2007-03-03 13:29:54 UTC (rev 795)
+@@ -1,219 +0,0 @@
+-/*
+- * rawio routine
+- *
+- * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;sys/epoll.h&gt;
+-#include &lt;limits.h&gt;
+-#include &lt;sys/ioctl.h&gt;
+-#include &lt;sys/stat.h&gt;
+-#include &lt;sys/time.h&gt;
+-#include &lt;linux/types.h&gt;
+-#include &lt;scsi/sg.h&gt;
+-#include &lt;linux/bsg.h&gt;
+-
+-#include &quot;list.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgtd.h&quot;
+-#include &quot;target.h&quot;
+-
+-static void sg_handler(int fd, int events, void *data)
+-{
+-	int i, err;
+-	struct sg_io_v4 hdrs[64];
+-	struct tgt_device *dev = data;
+-
+-	err = read(dev-&gt;fd, hdrs, sizeof(hdrs));
+-	if (err &lt; 0)
+-		return;
+-
+-	for (i = 0; i &lt; err / sizeof(hdrs[0]); i++) {
+-		struct scsi_cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
+-		if (hdrs[i].din_resid)
+-			cmd-&gt;len = hdrs[i].din_resid;
+-		target_cmd_io_done(cmd, 0);
+-	}
+-}
+-
+-static int bd_sg_open(struct tgt_device *dev,
+-		      char *path, int *fd, uint64_t *size)
+-{
+-	int err, maj, min;
+-	char *sd, buf[256];
+-	struct stat64 st;
+-	struct timeval t;
+-	struct sg_io_v4 hdr, *h;
+-	int nr_queue_cmd;
+-
+-	/* we assume something like /dev/sda */
+-	eprintf(&quot;%Zd %Zd %Zd\n&quot;, sizeof(hdr), sizeof(*h), sizeof(struct sg_io_v4));
+-
+-	*fd = backed_file_open(path, 0, size);
+-	if (*fd &lt; 0)
+-		return *fd;
+-
+-	err = fstat64(*fd, &amp;st);
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't get stat %d, %m\n&quot;, *fd);
+-		goto close_fd;
+-	}
+-
+-	if(!S_ISBLK(st.st_mode)) {
+-		eprintf(&quot;only scsi devices are supported %s\n&quot;, path);
+-		err = -EINVAL;
+-		goto close_fd;
+-	}
+-
+-	close(*fd);
+-
+-	sd = strrchr(path, '/');
+-	if (!sd) {
+-		eprintf(&quot;invalid path %s\n&quot;, path);
+-		return -EINVAL;
+-	}
+-
+-	snprintf(buf, sizeof(buf), &quot;/sys/class/bsg%s/dev&quot;, sd);
+-	*fd = open(buf, O_RDONLY);
+-	if (*fd &lt; 0) {
+-		eprintf(&quot;can't open %s, %m\n&quot;, buf);
+-		return -errno;
+-	}
+-
+-	err = read(*fd, buf, sizeof(buf));
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't open %s, %m\n&quot;, buf);
+-		goto close_fd;
+-	}
+-
+-	err = sscanf(buf, &quot;%u:%u&quot;, &amp;maj, &amp;min);
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't get bsg major/minor number %s, %m\n&quot;, buf);
+-		goto close_fd;
+-	}
+-
+-	dprintf(&quot;%s's bsg device number: %d %d\n&quot;, path, maj, min);
+-	close(*fd);
+-
+-	err = gettimeofday(&amp;t, NULL);
+-	if (err) {
+-		eprintf(&quot;can't get temporary name for bsg device, %m\n&quot;);
+-		return -errno;
+-	}
+-
+-	memset(buf, 0, sizeof(buf));
+-	snprintf(buf, sizeof(buf), &quot;/tmp/%lx%lx&quot;, t.tv_sec, t.tv_usec);
+-	err = mknod(buf, S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+-		    maj &lt;&lt; 8 | min);
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't create the bsg device %s, %m\n&quot;, buf);
+-		return -errno;
+-	}
+-
+-	*fd = open(buf, O_RDWR | O_NONBLOCK);
+-
+-	dprintf(&quot;%d %s\n&quot;, *fd, buf);
+-	unlink(buf);
+-
+-	if (*fd &lt; 0) {
+-		eprintf(&quot;can't open the bsg device %s, %m\n&quot;, buf);
+-		return -errno;
+-	}
+-
+-	/* workaround */
+-	nr_queue_cmd = 128;
+-	err = ioctl(*fd, SG_SET_COMMAND_Q, &amp;nr_queue_cmd);
+-	if (err) {
+-		eprintf(&quot;can't set the queue depth %d, %m\n&quot;, nr_queue_cmd);
+-		goto close_fd;
+-	}
+-
+-	err = tgt_event_add(*fd, EPOLLIN, sg_handler, dev);
+-	if (err) {
+-		free(dev);
+-		goto close_fd;
+-	}
+-
+-	return 0;
+-close_fd:
+-	close(*fd);
+-	return err;
+-}
+-
+-static void bd_sg_close(struct tgt_device *dev)
+-{
+-	tgt_event_del(dev-&gt;fd);
+-	close(dev-&gt;fd);
+-}
+-
+-static int bd_sg_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	return 0;
+-}
+-
+-static int bd_sg_cmd_submit(struct tgt_device *dev, uint8_t *scb,
+-			    int rw, uint32_t datalen, unsigned long *uaddr,
+-			    uint64_t offset, int *async, void *key)
+-{
+-	int err;
+-	struct sg_io_v4 hdr;
+-
+-	/* TODO sense */
+-
+-	dprintf(&quot;%x %d %u %lx\n&quot;, scb[0], rw, datalen, *uaddr);
+-	memset(&amp;hdr, 0, sizeof(hdr));
+-	hdr.guard = 'Q';
+-	hdr.request_len = 16;
+-	hdr.request = (unsigned long) scb;
+-
+-	if (rw) {
+-		hdr.dout_xfer_len = datalen;
+-		hdr.dout_xferp = *uaddr;
+-	} else {
+-		hdr.din_xfer_len = datalen;
+-		hdr.din_xferp = *uaddr;
+-	}
+-
+-/* 	hdr.max_response_len = sizeof(sense); */
+-/* 	hdr.response = (unsigned long) sense; */
+-
+-	hdr.usr_ptr = (unsigned long) key;
+-
+-	*async = 1;
+-
+-	err = write(dev-&gt;fd, &amp;hdr, sizeof(hdr));
+-	if (err != sizeof(hdr))
+-		eprintf(&quot;%d %m\n&quot;, err);
+-	else
+-		err = 0;
+-	return err;
+-}
+-
+-struct backedio_template sg_bdt = {
+-	.bd_open		= bd_sg_open,
+-	.bd_close		= bd_sg_close,
+-	.bd_cmd_submit		= bd_sg_cmd_submit,
+-	.bd_cmd_done		= bd_sg_cmd_done,
+-};
+
+Copied: trunk/usr/spt.c (from rev 794, trunk/usr/bd_sg.c)
+===================================================================
+--- trunk/usr/bd_sg.c	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/spt.c	2007-03-03 13:29:54 UTC (rev 795)
+@@ -0,0 +1,254 @@
++/*
++ * SCSI pass through
++ *
++ * Copyright (C) 2006-2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006-2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;sys/epoll.h&gt;
++#include &lt;limits.h&gt;
++#include &lt;sys/ioctl.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/time.h&gt;
++#include &lt;linux/types.h&gt;
++#include &lt;scsi/sg.h&gt;
++#include &lt;linux/bsg.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++#include &quot;scsi.h&quot;
++#include &quot;spc.h&quot;
++
++static void sg_handler(int fd, int events, void *data)
++{
++	int i, err;
++	struct sg_io_v4 hdrs[64];
++	struct tgt_device *dev = data;
++
++	err = read(dev-&gt;fd, hdrs, sizeof(hdrs));
++	if (err &lt; 0)
++		return;
++
++	for (i = 0; i &lt; err / sizeof(hdrs[0]); i++) {
++		struct scsi_cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
++		if (hdrs[i].din_resid)
++			cmd-&gt;len = hdrs[i].din_resid;
++		target_cmd_io_done(cmd, 0);
++	}
++}
++
++static int bd_sg_open(struct tgt_device *dev,
++		      char *path, int *fd, uint64_t *size)
++{
++	int err, maj, min;
++	char *sd, buf[256];
++	struct stat64 st;
++	struct timeval t;
++	struct sg_io_v4 hdr, *h;
++	int nr_queue_cmd;
++
++	/* we assume something like /dev/sda */
++	eprintf(&quot;%Zd %Zd %Zd\n&quot;, sizeof(hdr), sizeof(*h), sizeof(struct sg_io_v4));
++
++	*fd = backed_file_open(path, 0, size);
++	if (*fd &lt; 0)
++		return *fd;
++
++	err = fstat64(*fd, &amp;st);
++	if (err &lt; 0) {
++		eprintf(&quot;can't get stat %d, %m\n&quot;, *fd);
++		goto close_fd;
++	}
++
++	if(!S_ISBLK(st.st_mode)) {
++		eprintf(&quot;only scsi devices are supported %s\n&quot;, path);
++		err = -EINVAL;
++		goto close_fd;
++	}
++
++	close(*fd);
++
++	sd = strrchr(path, '/');
++	if (!sd) {
++		eprintf(&quot;invalid path %s\n&quot;, path);
++		return -EINVAL;
++	}
++
++	snprintf(buf, sizeof(buf), &quot;/sys/class/bsg%s/dev&quot;, sd);
++	*fd = open(buf, O_RDONLY);
++	if (*fd &lt; 0) {
++		eprintf(&quot;can't open %s, %m\n&quot;, buf);
++		return -errno;
++	}
++
++	err = read(*fd, buf, sizeof(buf));
++	if (err &lt; 0) {
++		eprintf(&quot;can't open %s, %m\n&quot;, buf);
++		goto close_fd;
++	}
++
++	err = sscanf(buf, &quot;%u:%u&quot;, &amp;maj, &amp;min);
++	if (err &lt; 0) {
++		eprintf(&quot;can't get bsg major/minor number %s, %m\n&quot;, buf);
++		goto close_fd;
++	}
++
++	dprintf(&quot;%s's bsg device number: %d %d\n&quot;, path, maj, min);
++	close(*fd);
++
++	err = gettimeofday(&amp;t, NULL);
++	if (err) {
++		eprintf(&quot;can't get temporary name for bsg device, %m\n&quot;);
++		return -errno;
++	}
++
++	memset(buf, 0, sizeof(buf));
++	snprintf(buf, sizeof(buf), &quot;/tmp/%lx%lx&quot;, t.tv_sec, t.tv_usec);
++	err = mknod(buf, S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
++		    maj &lt;&lt; 8 | min);
++	if (err &lt; 0) {
++		eprintf(&quot;can't create the bsg device %s, %m\n&quot;, buf);
++		return -errno;
++	}
++
++	*fd = open(buf, O_RDWR | O_NONBLOCK);
++
++	dprintf(&quot;%d %s\n&quot;, *fd, buf);
++	unlink(buf);
++
++	if (*fd &lt; 0) {
++		eprintf(&quot;can't open the bsg device %s, %m\n&quot;, buf);
++		return -errno;
++	}
++
++	/* workaround */
++	nr_queue_cmd = 128;
++	err = ioctl(*fd, SG_SET_COMMAND_Q, &amp;nr_queue_cmd);
++	if (err) {
++		eprintf(&quot;can't set the queue depth %d, %m\n&quot;, nr_queue_cmd);
++		goto close_fd;
++	}
++
++	err = tgt_event_add(*fd, EPOLLIN, sg_handler, dev);
++	if (err) {
++		free(dev);
++		goto close_fd;
++	}
++
++	return 0;
++close_fd:
++	close(*fd);
++	return err;
++}
++
++static void bd_sg_close(struct tgt_device *dev)
++{
++	tgt_event_del(dev-&gt;fd);
++	close(dev-&gt;fd);
++}
++
++static int bd_sg_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	return 0;
++}
++
++static int sg_cmd_submit(struct scsi_cmd *cmd)
++{
++	int ret;
++	struct sg_io_v4 hdr;
++
++	/* TODO sense */
++
++	dprintf(&quot;%x %d %u %&quot; PRIx64&quot;\n&quot;, cmd-&gt;scb[0], cmd-&gt;rw, cmd-&gt;len, cmd-&gt;uaddr);
++	memset(&amp;hdr, 0, sizeof(hdr));
++	hdr.guard = 'Q';
++	hdr.request_len = 16;
++	hdr.request = (unsigned long) cmd-&gt;scb;
++
++	if (cmd-&gt;rw) {
++		hdr.dout_xfer_len = cmd-&gt;len;
++		hdr.dout_xferp = cmd-&gt;uaddr;
++	} else {
++		hdr.din_xfer_len = cmd-&gt;len;
++		hdr.din_xferp = cmd-&gt;uaddr;
++	}
++
++	hdr.max_response_len = sizeof(cmd-&gt;sense_buffer);
++	hdr.response = (unsigned long) cmd-&gt;sense_buffer;
++
++	hdr.usr_ptr = (unsigned long) cmd;
++
++	ret = write(cmd-&gt;dev-&gt;fd, &amp;hdr, sizeof(hdr));
++	if (ret == sizeof(hdr)) {
++		cmd-&gt;async = 1;
++		return 0;
++	} else {
++		eprintf(&quot;%d %m\n&quot;, ret);
++		return -1;
++	}
++}
++
++struct backedio_template sg_bdt = {
++	.bd_open		= bd_sg_open,
++	.bd_close		= bd_sg_close,
++	.bd_cmd_done		= bd_sg_cmd_done,
++};
++
++static int spt_cmd_perform(int host_no, struct scsi_cmd *cmd)
++{
++	int ret;
++	ret = sg_cmd_submit(cmd);
++	if (ret) {
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	} else
++		return SAM_STAT_GOOD;
++}
++
++struct device_command_operations spt_ops[] = {
++	[0x40 ... 0x7f] = {spt_cmd_perform,},
++
++	{spc_report_luns,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++	{spt_cmd_perform,},
++
++	[0xb0 ... 0xff] = {spt_cmd_perform},
++};
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/target.c	2007-03-03 13:29:54 UTC (rev 795)
+@@ -36,7 +36,7 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-extern struct device_command_operations sbc_ops[];
++extern struct device_command_operations sbc_ops[], spt_ops[];
+ 
+ static LIST_HEAD(target_list);
+ 
+@@ -431,25 +431,6 @@
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
+ 
+-	/* FIXME */
+-	if (target-&gt;target_iotype == SCSI_TARGET_RAWIO) {
+-		dprintf(&quot;%u %s\n&quot;, scb[0], cmd-&gt;dev ? &quot;do sg&quot; : &quot;fake&quot;);
+-
+-		/* we can't pass through REPORT_LUNS. */
+-		if (cmd-&gt;dev &amp;&amp; scb[0] != REPORT_LUNS) {
+-			uint64_t offset = 0;
+-			int async = 0;
+-
+-			target-&gt;bdt-&gt;bd_cmd_submit(cmd-&gt;dev, cmd-&gt;scb, rw,
+-						   data_len, &amp;uaddr, offset,
+-						   &amp;async, (void *) cmd);
+-			cmd-&gt;len = data_len;
+-			cmd-&gt;uaddr = uaddr;
+-			goto out;
+-		} else
+-			enabled = 1;
+-	}
+-
+ 	if (cmd-&gt;dev)
+ 		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
+ 	else
+@@ -477,7 +458,7 @@
+ 
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
+-out:
++
+ 	return 0;
+ }
+ 
+@@ -1225,6 +1206,9 @@
+ 	case TARGET_SBC:
+ 		target-&gt;dev_cmd_ops = sbc_ops;
+ 		break;
++	case TARGET_SPT:
++		target-&gt;dev_cmd_ops = spt_ops;
++		break;
+ 	default:
+ 		free(target);
+ 		return TGTADM_INVALID_REQUEST;
+@@ -1251,7 +1235,7 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 
+ 	/* FIXME */
+-	if (bs_type == LU_BS_RAW) {
++	if (t_type == TARGET_SPT) {
+ 		target-&gt;target_iotype = SCSI_TARGET_RAWIO;
+ 		target-&gt;bdt = &amp;sg_bdt;
+ 	} else {
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/tgtadm.c	2007-03-03 13:29:54 UTC (rev 795)
+@@ -315,6 +315,8 @@
+ 	} else if (!strcmp(str, &quot;osd&quot;)) {
+ 		eprintf(&quot;osd isn't supported yet\n&quot;);
+ 		exit(EINVAL);
++	} else if (!strcmp(str, &quot;pt&quot;)) {
++		return TARGET_SPT;
+ 	} else {
+ 		eprintf(&quot;unknown target type: %s\n&quot;, str);
+ 		exit(EINVAL);
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2007-03-03 11:29:27 UTC (rev 794)
++++ trunk/usr/tgtadm.h	2007-03-03 13:29:54 UTC (rev 795)
+@@ -54,6 +54,7 @@
+ 	TARGET_SSC, /* tape */
+ 	TARGET_MMC, /* cdrom */
+ 	TARGET_OSD, /* object storage device */
++	TARGET_SPT, /* pass through */
+ };
+ 
+ /* backing store type */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000781.html">[Stgt-svn] r794 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000783.html">[Stgt-svn] r796 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#782">[ date ]</a>
+              <a href="thread.html#782">[ thread ]</a>
+              <a href="subject.html#782">[ subject ]</a>
+              <a href="author.html#782">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

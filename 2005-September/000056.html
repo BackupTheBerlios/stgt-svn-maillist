@@ -1,0 +1,161 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r63 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r63%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509091018.j89AIefp016402%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000055.html">
+   <LINK REL="Next"  HREF="000057.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r63 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r63%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509091018.j89AIefp016402%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r63 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Sep  9 12:18:40 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000055.html">[Stgt-svn] r62 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000057.html">[Stgt-svn] r64 - trunk/iscsi/include
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#56">[ date ]</a>
+              <a href="thread.html#56">[ thread ]</a>
+              <a href="subject.html#56">[ subject ]</a>
+              <a href="author.html#56">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-09 12:18:39 +0200 (Fri, 09 Sep 2005)
+New Revision: 63
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi.h
+Log:
+Make IET compatible with stgt's new way to handle sense data.
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-09 10:17:20 UTC (rev 62)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-09 10:18:39 UTC (rev 63)
+@@ -264,7 +264,7 @@
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+ 	struct iscsi_sense_data *sense;
+-	struct scatterlist *sg = req-&gt;stc-&gt;sg;
++	struct scatterlist *sg = &amp;req-&gt;sense_sg;
+ 
+ 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+ 
+@@ -275,12 +275,13 @@
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
+ 
+-	sense = (struct iscsi_sense_data *) page_address(sg[0].page);
+-	memmove(sense-&gt;data, sense, req-&gt;stc-&gt;bufflen);
+-	sense-&gt;length = cpu_to_be16(req-&gt;stc-&gt;bufflen);
++	sense = (struct iscsi_sense_data *) req-&gt;stc-&gt;error_buff;
++	memmove(sense-&gt;data, sense, req-&gt;stc-&gt;error_buff_len);
++	sense-&gt;length = cpu_to_be16(req-&gt;stc-&gt;error_buff_len);
+ 
+-	req-&gt;stc-&gt;bufflen += sizeof(struct iscsi_sense_data);
+-	sg-&gt;length = req-&gt;stc-&gt;bufflen;
++	sg-&gt;page = virt_to_page(req-&gt;stc-&gt;error_buff);
++	sg-&gt;offset = offset_in_page(req-&gt;stc-&gt;error_buff);
++	sg-&gt;length = req-&gt;stc-&gt;error_buff_len + sizeof(struct iscsi_sense_data);
+ 	rsp-&gt;pdu.datasize = sg-&gt;length;
+ 	rsp-&gt;sg = sg;
+ 
+@@ -293,7 +294,7 @@
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+ 	struct iscsi_sense_data *sense;
+-	struct scatterlist *sg;
++	struct scatterlist *sg = &amp;req-&gt;sense_sg;
+ 
+ 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+ 
+@@ -304,21 +305,11 @@
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
+ 
+-	assert(req-&gt;stc);
+-	assert(!req-&gt;stc-&gt;sg);
++	sg-&gt;page = virt_to_page(req-&gt;stc-&gt;error_buff);
++	sg-&gt;offset = offset_in_page(req-&gt;stc-&gt;error_buff);
++	sg-&gt;length = req-&gt;stc-&gt;error_buff_len;
+ 
+-	/* TODO: really needs cleanups. */
+-	req-&gt;stc-&gt;bufflen = sizeof(struct iscsi_sense_data) + 14;
+-	req-&gt;stc-&gt;sg_count = 1;
+-	req-&gt;stc-&gt;sg = sg =
+-		kmalloc(sizeof(struct scatterlist *), __GFP_NOFAIL | GFP_KERNEL);
+-
+-	sg-&gt;page = alloc_page(__GFP_NOFAIL | GFP_KERNEL);
+-	sg-&gt;offset = 0;
+-	sg-&gt;length = req-&gt;stc-&gt;bufflen;
+-
+-	sense = (struct iscsi_sense_data *) page_address(sg[0].page);
+-	clear_page(sense);
++	sense = (struct iscsi_sense_data *) req-&gt;stc-&gt;error_buff;
+ 	sense-&gt;length = cpu_to_be16(14);
+ 	sense-&gt;data[0] = 0xf0;
+ 	sense-&gt;data[2] = sense_key;
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-09 10:17:20 UTC (rev 62)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-09 10:18:39 UTC (rev 63)
+@@ -12,6 +12,7 @@
+ #include &lt;linux/mm.h&gt;
+ #include &lt;linux/crypto.h&gt;
+ #include &lt;net/sock.h&gt;
++#include &lt;asm/scatterlist.h&gt;
+ 
+ #include &quot;iscsi_proto.h&quot;
+ #include &quot;iet_u.h&quot;
+@@ -179,7 +180,7 @@
+ 
+ 	struct list_head hash_list;
+ 
+-	struct scatterlist *sg;
++	struct scatterlist *sg, sense_sg;
+ 
+ 	u32 r2t_sn;
+ 	u32 r2t_length;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000055.html">[Stgt-svn] r62 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000057.html">[Stgt-svn] r64 - trunk/iscsi/include
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#56">[ date ]</a>
+              <a href="thread.html#56">[ thread ]</a>
+              <a href="subject.html#56">[ subject ]</a>
+              <a href="author.html#56">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

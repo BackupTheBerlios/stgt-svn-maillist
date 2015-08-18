@@ -1,0 +1,99 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r759 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r759%20-%20trunk/usr/iscsi&In-Reply-To=%3C200701060950.l069oAuq020298%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000745.html">
+   <LINK REL="Next"  HREF="000747.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r759 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r759%20-%20trunk/usr/iscsi&In-Reply-To=%3C200701060950.l069oAuq020298%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r759 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 10:50:10 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000745.html">[Stgt-svn] r758 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000747.html">[Stgt-svn] r760 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#746">[ date ]</a>
+              <a href="thread.html#746">[ thread ]</a>
+              <a href="subject.html#746">[ subject ]</a>
+              <a href="author.html#746">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 10:50:10 +0100 (Sat, 06 Jan 2007)
+New Revision: 759
+
+Modified:
+   trunk/usr/iscsi/target.c
+Log:
+Remove unused iSCSI show code.
+
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2007-01-06 09:43:17 UTC (rev 758)
++++ trunk/usr/iscsi/target.c	2007-01-06 09:50:10 UTC (rev 759)
+@@ -340,19 +340,13 @@
+ static int iscsi_target_show_session(struct iscsi_target* target, uint64_t sid,
+ 				     char *buf, int rest)
+ {
+-	int len, total = 0;
++	int len = 0, total = 0;
+ 	struct iscsi_session *session;
+ 
+ 	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
+-		if (sid64(session-&gt;isid, session-&gt;tsih) == sid || !sid) {
+-			if (sid)
+-				len = show_iscsi_param(buf, session-&gt;session_param, rest);
+-			else
+-				len = snprintf(buf, rest, &quot;sid:%&quot; PRIu64 &quot; initiator:%s\n&quot;,
+-					       sid64(session-&gt;isid, session-&gt;tsih),
+-					       session-&gt;initiator);
++		if (session-&gt;tsih == sid)
++			len = show_iscsi_param(buf, session-&gt;session_param, rest);
+ 			buffer_check(buf, total, len, rest);
+-		}
+ 	}
+ 
+ 	return total;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000745.html">[Stgt-svn] r758 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000747.html">[Stgt-svn] r760 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#746">[ date ]</a>
+              <a href="thread.html#746">[ thread ]</a>
+              <a href="subject.html#746">[ subject ]</a>
+              <a href="author.html#746">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

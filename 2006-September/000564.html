@@ -1,0 +1,144 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r577 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r577%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609010239.k812dsRM006689%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000563.html">
+   <LINK REL="Next"  HREF="000565.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r577 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r577%20-%20trunk/usr/iscsi&In-Reply-To=%3C200609010239.k812dsRM006689%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r577 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Sep  1 04:39:54 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000563.html">[Stgt-svn] r576 - in trunk: . usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000565.html">[Stgt-svn] r578 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#564">[ date ]</a>
+              <a href="thread.html#564">[ thread ]</a>
+              <a href="subject.html#564">[ subject ]</a>
+              <a href="author.html#564">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-01 04:39:52 +0200 (Fri, 01 Sep 2006)
+New Revision: 577
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Minor cleanups again.
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-01 01:12:35 UTC (rev 576)
++++ trunk/usr/iscsi/iscsid.c	2006-09-01 02:39:52 UTC (rev 577)
+@@ -692,19 +692,16 @@
+ 		cmnd_exec_login(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+-		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	case ISCSI_OP_TEXT:
+ 		cmnd_exec_text(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+-		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	case ISCSI_OP_LOGOUT:
+ 		cmnd_exec_logout(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+-		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	default:
+ 		/* reject */
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-09-01 01:12:35 UTC (rev 576)
++++ trunk/usr/iscsi/iscsid.h	2006-09-01 02:39:52 UTC (rev 577)
+@@ -9,7 +9,6 @@
+ 
+ #include &lt;stdint.h&gt;
+ #include &lt;inttypes.h&gt;
+-#include &lt;sys/types.h&gt;
+ #include &lt;linux/types.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+ 
+@@ -28,7 +27,7 @@
+ #define ISCSI_NAME_LEN 256
+ #define ISTGT_NAMESPACE &quot;ISTGT_ABSTRACT_NAMESPACE&quot;
+ 
+-#define DIGEST_ALL	(DIGEST_NONE | DIGEST_CRC32C)
++#define DIGEST_ALL		(DIGEST_NONE | DIGEST_CRC32C)
+ #define DIGEST_NONE		(1 &lt;&lt; 0)
+ #define DIGEST_CRC32C           (1 &lt;&lt; 1)
+ 
+@@ -108,7 +107,6 @@
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+ 	uint16_t cid;
+-	uint16_t pad;
+ 	int session_type;
+ 	int auth_method;
+ 
+@@ -179,7 +177,7 @@
+ #define AUTH_CHAP		1
+ #define DIGEST_UNKNOWN		-1
+ 
+-#define BHS_SIZE		48
++#define BHS_SIZE		sizeof(struct iscsi_hdr)
+ 
+ #define INCOMING_BUFSIZE	8192
+ 
+@@ -228,8 +226,4 @@
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+ 
+-#define log_pdu(x, y)							\
+-do {									\
+-} while (0)
+-
+ #endif	/* ISCSID_H */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000563.html">[Stgt-svn] r576 - in trunk: . usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000565.html">[Stgt-svn] r578 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#564">[ date ]</a>
+              <a href="thread.html#564">[ thread ]</a>
+              <a href="subject.html#564">[ subject ]</a>
+              <a href="author.html#564">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

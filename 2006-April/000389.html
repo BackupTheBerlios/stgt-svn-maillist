@@ -1,0 +1,2181 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r402 - in branches/use-scsi-ml: . patchset patchset/broken-out
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r402%20-%20in%20branches/use-scsi-ml%3A%20.%20patchset%20patchset/broken-out&In-Reply-To=%3C200604140254.k3E2s4R9002376%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000388.html">
+   <LINK REL="Next"  HREF="000390.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r402 - in branches/use-scsi-ml: . patchset patchset/broken-out</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r402%20-%20in%20branches/use-scsi-ml%3A%20.%20patchset%20patchset/broken-out&In-Reply-To=%3C200604140254.k3E2s4R9002376%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r402 - in branches/use-scsi-ml: . patchset patchset/broken-out">tomo at berlios.de
+       </A><BR>
+    <I>Fri Apr 14 04:54:04 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000388.html">[Stgt-svn] r401 - branches/use-scsi-ml/ibmvstgt
+</A></li>
+        <LI>Next message: <A HREF="000390.html">[Stgt-svn] r403 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#389">[ date ]</a>
+              <a href="thread.html#389">[ thread ]</a>
+              <a href="subject.html#389">[ subject ]</a>
+              <a href="author.html#389">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-14 04:53:14 +0200 (Fri, 14 Apr 2006)
+New Revision: 402
+
+Removed:
+   branches/use-scsi-ml/patchset/broken-out/0001-block-layer-revoke-the-original-patch-to-add-partial-mappings-support.txt
+   branches/use-scsi-ml/patchset/broken-out/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+   branches/use-scsi-ml/patchset/broken-out/0003-scsi-tgt-use-the-original-bio_map_user-interface.txt
+   branches/use-scsi-ml/patchset/broken-out/0004-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt
+   branches/use-scsi-ml/patchset/broken-out/0005-scsi-tgt-kernel-user-interface-changes.txt
+   branches/use-scsi-ml/patchset/broken-out/0006-scsi-tgt-fix-double-lock-in-scsi_uspace_request_fn.txt
+   branches/use-scsi-ml/patchset/broken-out/0007-scsi-tgt-remove-blk_queue_end_tag.txt
+   branches/use-scsi-ml/patchset/broken-out/0008-scsi-tgt-replace-the-elevator-code.txt
+Modified:
+   branches/use-scsi-ml/README
+   branches/use-scsi-ml/patchset/scsi-target-2.6-tree.diff
+Log:
+The patchset was merged into the scsi-target-2.6 tree.
+
+
+Modified: branches/use-scsi-ml/README
+===================================================================
+--- branches/use-scsi-ml/README	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/README	2006-04-14 02:53:14 UTC (rev 402)
+@@ -16,9 +16,11 @@
+ 
+ master.kernel.org:/pub/scm/linux/kernel/git/jejb/scsi-target-2.6.git
+ 
+-Next, apply scsi-target-2.6-tree.diff in the patchset directory,
+-rebuild the kernel, and reboot with the new kernel.
++Second, if you use ibmvstgt, apply scsi-target-2.6-tree.diff in the
++patchset directory. If not, you can skip this.
+ 
++Third, rebuild the kernel, and reboot with the new kernel.
++
+ The compilation of the kernel modules require the path to above kernel
+ source:
+ 
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0001-block-layer-revoke-the-original-patch-to-add-partial-mappings-support.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0001-block-layer-revoke-the-original-patch-to-add-partial-mappings-support.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0001-block-layer-revoke-the-original-patch-to-add-partial-mappings-support.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,130 +0,0 @@
+-Subject: [PATCH 01/10] block layer: revoke the original patch to add partial mappings support
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409079 +0900
+-
+-For target mode we could end up with the case where we get very large
+-request from the initiator. The request could be so large that we
+-cannot transfer all the data in one operation. For example the
+-HBA's segment or max_sector limits might limit us to a 1 MB transfer.
+-To send a 5 MB command then we need to transfer the command chunk by chunk.
+-
+-To do this, tgt core will map in as much data as possible into a bio,
+-send this off, then when that transfer is completed we send off another
+-request/bio. To be able to pack as much data into a bio as possible
+-we need bio_map_user to support partially mapped bios.
+-
+-Following the comments from Jens Axboe on the original patch:
+-
+-<A HREF="http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114012008928530&amp;w=2">http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114012008928530&amp;w=2</A>
+-
+-This patch will revoke changes by the original patch.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- block/ll_rw_blk.c   |    5 ++---
+- fs/bio.c            |   11 ++++-------
+- include/linux/bio.h |    5 ++---
+- 3 files changed, 8 insertions(+), 13 deletions(-)
+-
+-4d84a7a7218de12ef1e3f58a0a5514a730994848
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index 13c40a0..03d9c82 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2287,7 +2287,7 @@ int blk_rq_map_user(request_queue_t *q, 
+- 	 */
+- 	uaddr = (unsigned long) ubuf;
+- 	if (!(uaddr &amp; queue_dma_alignment(q)) &amp;&amp; !(len &amp; queue_dma_alignment(q)))
+--		bio = bio_map_user(q, NULL, uaddr, len, reading, 0);
+-+		bio = bio_map_user(q, NULL, uaddr, len, reading);
+- 	else
+- 		bio = bio_copy_user(q, uaddr, len, reading);
+- 
+-@@ -2339,8 +2339,7 @@ int blk_rq_map_user_iov(request_queue_t 
+- 	/* we don't allow misaligned data like bio_map_user() does.  If the
+- 	 * user is using sg, they're expected to know the alignment constraints
+- 	 * and respect them accordingly */
+--	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ,
+--				0);
+-+	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ);
+- 	if (IS_ERR(bio))
+- 		return PTR_ERR(bio);
+- 
+-diff --git a/fs/bio.c b/fs/bio.c
+-index 3e940c9..d8259d9 100644
+---- a/fs/bio.c
+-+++ b/fs/bio.c
+-@@ -718,21 +718,19 @@ static struct bio *__bio_map_user_iov(re
+-  *	@uaddr: start of user address
+-  *	@len: length in bytes
+-  *	@write_to_vm: bool indicating writing to pages or not
+-- *	@support_partial: support partial mappings
+-  *
+-  *	Map the user space address into a bio suitable for io to a block
+-  *	device. Returns an error pointer in case of error.
+-  */
+- struct bio *bio_map_user(request_queue_t *q, struct block_device *bdev,
+--			 unsigned long uaddr, unsigned int len, int write_to_vm,
+--			 int support_partial)
+-+			 unsigned long uaddr, unsigned int len, int write_to_vm)
+- {
+- 	struct sg_iovec iov;
+- 
+- 	iov.iov_base = (void __user *)uaddr;
+- 	iov.iov_len = len;
+- 
+--	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm, support_partial);
+-+	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm);
+- }
+- 
+- /**
+-@@ -742,14 +740,13 @@ struct bio *bio_map_user(request_queue_t
+-  *	@iov:	the iovec.
+-  *	@iov_count: number of elements in the iovec
+-  *	@write_to_vm: bool indicating writing to pages or not
+-- *	@support_partial: support partial mappings
+-  *
+-  *	Map the user space address into a bio suitable for io to a block
+-  *	device. Returns an error pointer in case of error.
+-  */
+- struct bio *bio_map_user_iov(request_queue_t *q, struct block_device *bdev,
+- 			     struct sg_iovec *iov, int iov_count,
+--			     int write_to_vm, int support_partial)
+-+			     int write_to_vm)
+- {
+- 	struct bio *bio;
+- 	int len = 0, i;
+-@@ -770,7 +767,7 @@ struct bio *bio_map_user_iov(request_que
+- 	for (i = 0; i &lt; iov_count; i++)
+- 		len += iov[i].iov_len;
+- 
+--	if (bio-&gt;bi_size == len || support_partial)
+-+	if (bio-&gt;bi_size == len)
+- 		return bio;
+- 
+- 	/*
+-diff --git a/include/linux/bio.h b/include/linux/bio.h
+-index fc0906c..b60ffe3 100644
+---- a/include/linux/bio.h
+-+++ b/include/linux/bio.h
+-@@ -295,13 +295,12 @@ extern int bio_add_page(struct bio *, st
+- extern int bio_add_pc_page(struct request_queue *, struct bio *, struct page *,
+- 			   unsigned int, unsigned int);
+- extern int bio_get_nr_vecs(struct block_device *);
+--extern int __bio_get_nr_vecs(struct request_queue *);
+- extern struct bio *bio_map_user(struct request_queue *, struct block_device *,
+--				unsigned long, unsigned int, int, int);
+-+				unsigned long, unsigned int, int);
+- struct sg_iovec;
+- extern struct bio *bio_map_user_iov(struct request_queue *,
+- 				    struct block_device *,
+--				    struct sg_iovec *, int, int, int);
+-+				    struct sg_iovec *, int, int);
+- extern void bio_unmap_user(struct bio *);
+- extern struct bio *bio_map_kern(struct request_queue *, void *, unsigned int,
+- 				gfp_t);
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,149 +0,0 @@
+-Subject: [PATCH 02/10] block layer: add partial mappings support to bio_map_user
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409163 +0900
+-
+-This is the updated patch for partial mappings support.
+-
+-- bio_map_user_iov always allows partial mappings.
+-
+-- The two users (blk_rq_map_user and blk_rq_map_user_iov) will fails
+-if the bio is partially mapped.
+-
+-- Added a length argument to blk_rq_map_user_iov in order to avoid
+-including sg.h in ll_rw_blk.c for struct sg_iovec.
+-
+-This is a resend:
+-
+-<A HREF="http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114086655400806&amp;w=2">http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114086655400806&amp;w=2</A>
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- block/ll_rw_blk.c      |   29 ++++++++++++++++++-----------
+- block/scsi_ioctl.c     |    3 ++-
+- fs/bio.c               |   14 +-------------
+- include/linux/blkdev.h |    3 ++-
+- 4 files changed, 23 insertions(+), 26 deletions(-)
+-
+-d43dcc5c747b5896c795e1fe1f8a6d5df525daa6
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index 03d9c82..6849859 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2291,19 +2291,20 @@ int blk_rq_map_user(request_queue_t *q, 
+- 	else
+- 		bio = bio_copy_user(q, uaddr, len, reading);
+- 
+--	if (!IS_ERR(bio)) {
+--		rq-&gt;bio = rq-&gt;biotail = bio;
+--		blk_rq_bio_prep(q, rq, bio);
+-+	if (IS_ERR(bio))
+-+		return PTR_ERR(bio);
+- 
+--		rq-&gt;buffer = rq-&gt;data = NULL;
+--		rq-&gt;data_len = len;
+--		return 0;
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+- 	}
+- 
+--	/*
+--	 * bio is the err-ptr
+--	 */
+--	return PTR_ERR(bio);
+-+	rq-&gt;bio = rq-&gt;biotail = bio;
+-+	blk_rq_bio_prep(q, rq, bio);
+-+	rq-&gt;buffer = rq-&gt;data = NULL;
+-+	rq-&gt;data_len = len;
+-+	return 0;
+- }
+- 
+- EXPORT_SYMBOL(blk_rq_map_user);
+-@@ -2329,7 +2330,7 @@ EXPORT_SYMBOL(blk_rq_map_user);
+-  *    unmapping.
+-  */
+- int blk_rq_map_user_iov(request_queue_t *q, struct request *rq,
+--			struct sg_iovec *iov, int iov_count)
+-+			struct sg_iovec *iov, int iov_count, unsigned int len)
+- {
+- 	struct bio *bio;
+- 
+-@@ -2343,6 +2344,12 @@ int blk_rq_map_user_iov(request_queue_t 
+- 	if (IS_ERR(bio))
+- 		return PTR_ERR(bio);
+- 
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+-+	}
+-+
+- 	rq-&gt;bio = rq-&gt;biotail = bio;
+- 	blk_rq_bio_prep(q, rq, bio);
+- 	rq-&gt;buffer = rq-&gt;data = NULL;
+-diff --git a/block/scsi_ioctl.c b/block/scsi_ioctl.c
+-index 24f7af9..ef9900d 100644
+---- a/block/scsi_ioctl.c
+-+++ b/block/scsi_ioctl.c
+-@@ -274,7 +274,8 @@ static int sg_io(struct file *file, requ
+- 			goto out;
+- 		}
+- 
+--		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count);
+-+		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count,
+-+					  hdr-&gt;dxfer_len);
+- 		kfree(iov);
+- 	} else if (hdr-&gt;dxfer_len)
+- 		ret = blk_rq_map_user(q, rq, hdr-&gt;dxferp, hdr-&gt;dxfer_len);
+-diff --git a/fs/bio.c b/fs/bio.c
+-index d8259d9..f51a873 100644
+---- a/fs/bio.c
+-+++ b/fs/bio.c
+-@@ -749,7 +749,6 @@ struct bio *bio_map_user_iov(request_que
+- 			     int write_to_vm)
+- {
+- 	struct bio *bio;
+--	int len = 0, i;
+- 
+- 	bio = __bio_map_user_iov(q, bdev, iov, iov_count, write_to_vm);
+- 
+-@@ -764,18 +763,7 @@ struct bio *bio_map_user_iov(request_que
+- 	 */
+- 	bio_get(bio);
+- 
+--	for (i = 0; i &lt; iov_count; i++)
+--		len += iov[i].iov_len;
+--
+--	if (bio-&gt;bi_size == len)
+--		return bio;
+--
+--	/*
+--	 * don't support partial mappings
+--	 */
+--	bio_endio(bio, bio-&gt;bi_size, 0);
+--	bio_unmap_user(bio);
+--	return ERR_PTR(-EINVAL);
+-+	return bio;
+- }
+- 
+- static void __bio_unmap_user(struct bio *bio)
+-diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+-index 860e7a4..619ef1d 100644
+---- a/include/linux/blkdev.h
+-+++ b/include/linux/blkdev.h
+-@@ -611,7 +611,8 @@ extern void blk_queue_activity_fn(reques
+- extern int blk_rq_map_user(request_queue_t *, struct request *, void __user *, unsigned int);
+- extern int blk_rq_unmap_user(struct bio *, unsigned int);
+- extern int blk_rq_map_kern(request_queue_t *, struct request *, void *, unsigned int, gfp_t);
+--extern int blk_rq_map_user_iov(request_queue_t *, struct request *, struct sg_iovec *, int);
+-+extern int blk_rq_map_user_iov(request_queue_t *, struct request *,
+-+			       struct sg_iovec *, int, unsigned int);
+- extern int blk_execute_rq(request_queue_t *, struct gendisk *,
+- 			  struct request *, int);
+- extern void blk_execute_rq_nowait(request_queue_t *, struct gendisk *,
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0003-scsi-tgt-use-the-original-bio_map_user-interface.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0003-scsi-tgt-use-the-original-bio_map_user-interface.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0003-scsi-tgt-use-the-original-bio_map_user-interface.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,28 +0,0 @@
+-Subject: [PATCH 03/10] scsi tgt: use the original bio_map_user interface
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409283 +0900
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi_tgt_lib.c |    2 +-
+- 1 files changed, 1 insertions(+), 1 deletions(-)
+-
+-2c78c6353dc183a16ef3e12b9c5618dd5b89679c
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 8746236..941dd64 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -315,7 +315,7 @@ static int scsi_map_user_pages(struct sc
+- 
+- 	while (len &gt; 0) {
+- 		dprintk(&quot;%lx %u\n&quot;, (unsigned long) uaddr, len);
+--		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw, 1);
+-+		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw);
+- 		if (IS_ERR(bio)) {
+- 			err = PTR_ERR(bio);
+- 			dprintk(&quot;fail to map %lx %u %d %x\n&quot;,
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0004-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0004-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0004-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,54 +0,0 @@
+-Subject: [PATCH 04/10] block layer: use blk_rq_bio_prep in init_request_from_bio
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409371 +0900
+-
+-Patch to use blk_rq_bio_prep in init_request_from_bio. And remove
+-blk_rq_bio_prep's flags copying. The first three bits have not been
+-the same for some time so that has been broken. The user of
+-blk_rq_bio_prep will setup the request flags so if it wanted failfast
+-or to be a barrier it will set the correct flag itself.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- block/ll_rw_blk.c |   11 ++---------
+- 1 files changed, 2 insertions(+), 9 deletions(-)
+-
+-4b387c65f0645e86794c06eb3e734b0ec6e5733c
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index 13c40a0..da2c57d 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2765,16 +2765,12 @@ static void init_request_from_bio(struct
+- 
+- 	req-&gt;errors = 0;
+- 	req-&gt;hard_sector = req-&gt;sector = bio-&gt;bi_sector;
+--	req-&gt;hard_nr_sectors = req-&gt;nr_sectors = bio_sectors(bio);
+--	req-&gt;current_nr_sectors = req-&gt;hard_cur_sectors = bio_cur_sectors(bio);
+--	req-&gt;nr_phys_segments = bio_phys_segments(req-&gt;q, bio);
+--	req-&gt;nr_hw_segments = bio_hw_segments(req-&gt;q, bio);
+--	req-&gt;buffer = bio_data(bio);	/* see -&gt;buffer comment above */
+- 	req-&gt;waiting = NULL;
+--	req-&gt;bio = req-&gt;biotail = bio;
+- 	req-&gt;ioprio = bio_prio(bio);
+- 	req-&gt;rq_disk = bio-&gt;bi_bdev-&gt;bd_disk;
+- 	req-&gt;start_time = jiffies;
+-+
+-+	blk_rq_bio_prep(req-&gt;q, req, bio);
+- }
+- 
+- static int __make_request(request_queue_t *q, struct bio *bio)
+-@@ -3403,9 +3399,6 @@ EXPORT_SYMBOL(end_request);
+- 
+- void blk_rq_bio_prep(request_queue_t *q, struct request *rq, struct bio *bio)
+- {
+--	/* first three bits are identical in rq-&gt;flags and bio-&gt;bi_rw */
+--	rq-&gt;flags |= (bio-&gt;bi_rw &amp; 7);
+--
+- 	rq-&gt;nr_phys_segments = bio_phys_segments(q, bio);
+- 	rq-&gt;nr_hw_segments = bio_hw_segments(q, bio);
+- 	rq-&gt;current_nr_sectors = bio_cur_sectors(bio);
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0005-scsi-tgt-kernel-user-interface-changes.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0005-scsi-tgt-kernel-user-interface-changes.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0005-scsi-tgt-kernel-user-interface-changes.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,293 +0,0 @@
+-Subject: [PATCH 05/10] scsi tgt: kernel/user interface changes
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409611 +0900
+-
+-- merge the tgt command structure with the the event structure for simplicity.
+-- add a new event type for task management.
+-- remove some of unused event types.
+-- send task attributes to user-space daemon.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi_tgt_if.c   |   52 ++++++++++++++++++------------------------
+- drivers/scsi/scsi_tgt_lib.c  |   10 ++++----
+- drivers/scsi/scsi_tgt_priv.h |    4 ++-
+- include/scsi/scsi_tgt_if.h   |   50 ++++++++++++++++++++--------------------
+- 4 files changed, 54 insertions(+), 62 deletions(-)
+-
+-5804be31dad9a5ca05bef0ff2674cde90299ac3d
+-diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
+-index 38b35da..a31c8d5 100644
+---- a/drivers/scsi/scsi_tgt_if.c
+-+++ b/drivers/scsi/scsi_tgt_if.c
+-@@ -35,15 +35,15 @@
+- static int tgtd_pid;
+- static struct sock *nl_sk;
+- 
+--static int send_event_res(uint16_t type, struct tgt_event *p,
+--			  void *data, int dlen, gfp_t flags, pid_t pid)
+-+static int send_event_rsp(uint16_t type, struct tgt_event *p, gfp_t flags,
+-+			  pid_t pid)
+- {
+- 	struct tgt_event *ev;
+- 	struct nlmsghdr *nlh;
+- 	struct sk_buff *skb;
+- 	uint32_t len;
+- 
+--	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-+	len = NLMSG_SPACE(sizeof(*ev));
+- 	skb = alloc_skb(len, flags);
+- 	if (!skb)
+- 		return -ENOMEM;
+-@@ -52,8 +52,6 @@ static int send_event_res(uint16_t type,
+- 
+- 	ev = NLMSG_DATA(nlh);
+- 	memcpy(ev, p, sizeof(*ev));
+--	if (dlen)
+--		memcpy(ev-&gt;data, data, dlen);
+- 
+- 	return netlink_unicast(nl_sk, skb, pid, 0);
+- }
+-@@ -64,10 +62,12 @@ int scsi_tgt_uspace_send(struct scsi_cmn
+- 	struct sk_buff *skb;
+- 	struct nlmsghdr *nlh;
+- 	struct tgt_event *ev;
+--	struct tgt_cmd *tcmd;
+- 	int err, len;
+- 
+--	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct tgt_cmd));
+-+	/* FIXME: we need scsi core to do that. */
+-+	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+-+
+-+	len = NLMSG_SPACE(sizeof(*ev));
+- 	/*
+- 	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+- 	 */
+-@@ -82,17 +82,13 @@ int scsi_tgt_uspace_send(struct scsi_cmn
+- 	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+- 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+- 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+-+	memcpy(ev-&gt;k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev-&gt;k.cmd_req.scb));
+-+	memcpy(ev-&gt;k.cmd_req.lun, lun, sizeof(ev-&gt;k.cmd_req.lun));
+-+	ev-&gt;k.cmd_req.attribute = cmd-&gt;tag;
+- 
+- 	dprintk(&quot;%d %u %u\n&quot;, ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.cid,
+- 		ev-&gt;k.cmd_req.data_len);
+- 
+--	/* FIXME: we need scsi core to do that. */
+--	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+--
+--	tcmd = (struct tgt_cmd *) ev-&gt;data;
+--	memcpy(tcmd-&gt;scb, cmd-&gt;cmnd, sizeof(tcmd-&gt;scb));
+--	memcpy(tcmd-&gt;lun, lun, sizeof(struct scsi_lun));
+--
+- 	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+- 	if (err &lt; 0)
+- 		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb %d\n&quot;,
+-@@ -104,15 +100,13 @@ int scsi_tgt_uspace_send_status(struct s
+- {
+- 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+- 	struct tgt_event ev;
+--	char dummy[sizeof(struct tgt_cmd)];
+- 
+- 	memset(&amp;ev, 0, sizeof(ev));
+- 	ev.k.cmd_done.host_no = shost-&gt;host_no;
+- 	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+- 	ev.k.cmd_done.result = cmd-&gt;result;
+- 
+--	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
+--			      gfp_mask, tgtd_pid);
+-+	return send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev, gfp_mask, tgtd_pid);
+- }
+- 
+- static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+-@@ -124,19 +118,17 @@ static int event_recv_msg(struct sk_buff
+- 		nlh-&gt;nlmsg_pid, current-&gt;pid);
+- 
+- 	switch (nlh-&gt;nlmsg_type) {
+--	case TGT_UEVENT_TGTD_BIND:
+-+	case TGT_UEVENT_REQ:
+- 		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+- 		break;
+--	case TGT_UEVENT_CMD_RES:
+-+	case TGT_UEVENT_CMD_RSP:
+- 		/* TODO: handle multiple cmds in one event */
+--		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_res.host_no,
+--					   ev-&gt;u.cmd_res.cid,
+--					   ev-&gt;u.cmd_res.result,
+--					   ev-&gt;u.cmd_res.len,
+--					   ev-&gt;u.cmd_res.offset,
+--					   ev-&gt;u.cmd_res.uaddr,
+--					   ev-&gt;u.cmd_res.rw,
+--					   ev-&gt;u.cmd_res.try_map);
+-+		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_rsp.host_no,
+-+					   ev-&gt;u.cmd_rsp.cid,
+-+					   ev-&gt;u.cmd_rsp.result,
+-+					   ev-&gt;u.cmd_rsp.len,
+-+					   ev-&gt;u.cmd_rsp.uaddr,
+-+					   ev-&gt;u.cmd_rsp.rw);
+- 		break;
+- 	default:
+- 		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+-@@ -166,12 +158,12 @@ static int event_recv_skb(struct sk_buff
+- 		 * TODO for passthru commands the lower level should
+- 		 * probably handle the result or we should modify this
+- 		 */
+--		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES) {
+-+		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RSP) {
+- 			struct tgt_event ev;
+- 
+- 			memset(&amp;ev, 0, sizeof(ev));
+--			ev.k.event_res.err = err;
+--			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-+			ev.k.event_rsp.err = err;
+-+			send_event_rsp(TGT_KEVENT_RSP, &amp;ev,
+- 				       GFP_KERNEL | __GFP_NOFAIL,
+- 					nlh-&gt;nlmsg_pid);
+- 		}
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 8746236..3549e7c 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -315,7 +315,7 @@ static int scsi_map_user_pages(struct sc
+- 
+- 	while (len &gt; 0) {
+- 		dprintk(&quot;%lx %u\n&quot;, (unsigned long) uaddr, len);
+--		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw, 1);
+-+		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw);
+- 		if (IS_ERR(bio)) {
+- 			err = PTR_ERR(bio);
+- 			dprintk(&quot;fail to map %lx %u %d %x\n&quot;,
+-@@ -438,16 +438,16 @@ static int scsi_tgt_copy_sense(struct sc
+- 	return 0;
+- }
+- 
+--int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len, u64 offset,
+--			 unsigned long uaddr, u8 rw, u8 try_map)
+-+int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+-+			 unsigned long uaddr, u8 rw)
+- {
+- 	struct Scsi_Host *shost;
+- 	struct scsi_cmnd *cmd;
+- 	struct request *rq;
+- 	int err = 0;
+- 
+--	dprintk(&quot;%d %u %d %u %llu %lx %u %u\n&quot;, host_no, cid, result,
+--		len, (unsigned long long) offset, uaddr, rw, try_map);
+-+	dprintk(&quot;%d %u %d %u %lx %u\n&quot;, host_no, cid, result,
+-+		len, uaddr, rw);
+- 
+- 	/* TODO: replace with a O(1) alg */
+- 	shost = scsi_host_lookup(host_no);
+-diff --git a/drivers/scsi/scsi_tgt_priv.h b/drivers/scsi/scsi_tgt_priv.h
+-index 4236e50..fcf2ec6 100644
+---- a/drivers/scsi/scsi_tgt_priv.h
+-+++ b/drivers/scsi/scsi_tgt_priv.h
+-@@ -21,5 +21,5 @@ extern int scsi_tgt_if_init(void);
+- extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t flags);
+- extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+- extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+--				u64 offset, unsigned long uaddr, u8 rw,
+--				u8 try_map);
+-+				unsigned long uaddr, u8 rw);
+-+
+-diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
+-index da3a808..ebca452 100644
+---- a/include/scsi/scsi_tgt_if.h
+-+++ b/include/scsi/scsi_tgt_if.h
+-@@ -24,65 +24,65 @@
+- 
+- enum tgt_event_type {
+- 	/* user -&gt; kernel */
+--	TGT_UEVENT_TGTD_BIND,
+--	TGT_UEVENT_TARGET_SETUP,
+--	TGT_UEVENT_CMD_RES,
+-+	TGT_UEVENT_REQ,
+-+	TGT_UEVENT_CMD_RSP,
+-+	TGT_UEVENT_TSK_MGMT_RSP,
+- 
+- 	/* kernel -&gt; user */
+--	TGT_KEVENT_RESPONSE,
+-+	TGT_KEVENT_RSP,
+- 	TGT_KEVENT_CMD_REQ,
+- 	TGT_KEVENT_CMD_DONE,
+-+	TGT_KEVENT_TSK_MGMT_REQ,
+- };
+- 
+- struct tgt_event {
+- 	/* user-&gt; kernel */
+- 	union {
+- 		struct {
+--			int pk_fd;
+--		} tgtd_bind;
+-+			int type;
+-+			int host_no;
+-+		} event_req;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			uint32_t len;
+- 			int result;
+- 			uint64_t uaddr;
+--			uint64_t offset;
+- 			uint8_t rw;
+--			uint8_t try_map;
+--		} cmd_res;
+-+		} cmd_rsp;
+-+		struct {
+-+			int host_no;
+-+			int mid;
+-+			int result;
+-+		} tsk_mgmt_rsp;
+- 	} u;
+- 
+- 	/* kernel -&gt; user */
+- 	union {
+- 		struct {
+- 			int err;
+--		} event_res;
+-+		} event_rsp;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			uint32_t data_len;
+--			uint64_t dev_id;
+-+			uint8_t scb[16];
+-+			uint8_t lun[8];
+-+			int attribute;
+- 		} cmd_req;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			int result;
+- 		} cmd_done;
+-+		struct {
+-+			int host_no;
+-+			int mid;
+-+			uint64_t tag;
+-+			uint8_t lun[8];
+-+			int function;
+-+		} tsk_mgmt_req;
+- 	} k;
+- 
+--	/*
+--	 * I think a pointer is a unsigned long but this struct
+--	 * gets passed around from the kernel to userspace and
+--	 * back again so to handle some ppc64 setups where userspace is
+--	 * 32 bits but the kernel is 64 we do this odd thing
+--	 */
+--	uint64_t data[0];
+--} __attribute__ ((aligned (sizeof(uint64_t))));
+--
+--struct tgt_cmd {
+--	uint8_t scb[16];
+--	uint8_t lun[8];
+--	int tags;
+- } __attribute__ ((aligned (sizeof(uint64_t))));
+--
+- #endif
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0006-scsi-tgt-fix-double-lock-in-scsi_uspace_request_fn.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0006-scsi-tgt-fix-double-lock-in-scsi_uspace_request_fn.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0006-scsi-tgt-fix-double-lock-in-scsi_uspace_request_fn.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,28 +0,0 @@
+-Subject: [PATCH 06/10] scsi tgt: fix double lock in scsi_uspace_request_fn
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142409678 +0900
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi_tgt_lib.c |    2 +-
+- 1 files changed, 1 insertions(+), 1 deletions(-)
+-
+-1ddfd113a764450e7998cc16dd07dcc37077b05b
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 8746236..5d76078 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -136,7 +136,7 @@ requeue:
+- 	spin_lock_irq(q-&gt;queue_lock);
+- 	/* need to track cnts and plug */
+- 	blk_requeue_request(q, rq);
+--	spin_lock_irq(q-&gt;queue_lock);
+-+	spin_unlock_irq(q-&gt;queue_lock);
+- }
+- 
+- /**
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0007-scsi-tgt-remove-blk_queue_end_tag.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0007-scsi-tgt-remove-blk_queue_end_tag.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0007-scsi-tgt-remove-blk_queue_end_tag.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,32 +0,0 @@
+-Subject: [PATCH 07/10] scsi tgt: remove blk_queue_end_tag
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142422083 +0900
+-
+-Remove blk_queue_end_tag() in scsi_host_put_command() because tgt
+-doesn't use the elevator code.
+-
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi.c |    2 --
+- 1 files changed, 0 insertions(+), 2 deletions(-)
+-
+-fd45c05acbc00cd21fa7c82f6aed5a5ef3e5b98a
+-diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
+-index 3cf02b1..9c22465 100644
+---- a/drivers/scsi/scsi.c
+-+++ b/drivers/scsi/scsi.c
+-@@ -352,8 +352,6 @@ void scsi_host_put_command(struct Scsi_H
+- 	spin_unlock(&amp;shost-&gt;free_list_lock);
+- 
+- 	spin_lock(q-&gt;queue_lock);
+--	if (blk_rq_tagged(rq))
+--		blk_queue_end_tag(q, rq);
+- 	__blk_put_request(q, rq);
+- 	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+- 
+--- 
+-1.1.5
+
+Deleted: branches/use-scsi-ml/patchset/broken-out/0008-scsi-tgt-replace-the-elevator-code.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/broken-out/0008-scsi-tgt-replace-the-elevator-code.txt	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/broken-out/0008-scsi-tgt-replace-the-elevator-code.txt	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,340 +0,0 @@
+-Subject: [PATCH 08/10] scsi tgt: replace the elevator code
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: 1142464394 +0900
+-
+-tgt uses the elevator code to send SCSI commands to the user-space
+-daemon (q-&gt;request_fn sends netlink packets including commands).
+-
+-This patch replaces the elevator code with a simple list.
+-
+-This is mainly because tgt also needs to send TMF requests to the
+-user-space daemon (the daemon does all the SCSI state machine
+-stuff). tgt must send SCSI commands and TMF requests in an exact order
+-so that it would be preferable to use a single queue (per host) for
+-both. To uses the elevator code for TMF requests, tgt needs to
+-allocate request structures for them. That's wasteful because request
+-structures is useless for TMF requests, which don't perform any I/Os.
+-
+-We basically have a netdev queue of events to send to userspace so by
+-using the request_queue and netdev queue we are basically double
+-queueing and wasting resources and it is affecting performance
+-
+-We like to use shared memory stuff between kernel and user spaces
+-instead of netlink in the future. These queues would go away.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-
+----
+-
+- drivers/scsi/scsi_tgt_lib.c  |  180 ++++++++++++++++++++++++++++++------------
+- drivers/scsi/scsi_tgt_priv.h |    4 -
+- 2 files changed, 129 insertions(+), 55 deletions(-)
+-
+-c4bb05742e1834d664a7d8e721ecea71d42fd7f7
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 274d929..2cbc749 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -20,7 +20,7 @@
+-  * 02110-1301 USA
+-  */
+- #include &lt;linux/blkdev.h&gt;
+--#include &lt;linux/elevator.h&gt;
+-+#include &lt;linux/hash.h&gt;
+- #include &lt;linux/module.h&gt;
+- #include &lt;linux/pagemap.h&gt;
+- #include &lt;scsi/scsi.h&gt;
+-@@ -46,6 +46,24 @@ struct scsi_tgt_cmd {
+- 	struct bio_list xfer_done_list;
+- 	struct bio_list xfer_list;
+- 	struct scsi_lun *lun;
+-+
+-+	struct list_head hash_list;
+-+	struct request *rq;
+-+};
+-+
+-+#define TGT_HASH_ORDER	4
+-+#define cmd_hashfn(cid)	hash_long((cid), TGT_HASH_ORDER)
+-+
+-+struct scsi_tgt_queuedata {
+-+	struct Scsi_Host *shost;
+-+	struct list_head cmd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+-+	spinlock_t cmd_hash_lock;
+-+
+-+	struct work_struct uspace_send_work;
+-+
+-+	spinlock_t cmd_req_lock;
+-+	struct mutex cmd_req_mutex;
+-+	struct list_head cmd_req;
+- };
+- 
+- static void scsi_unmap_user_pages(struct scsi_tgt_cmd *tcmd)
+-@@ -68,9 +86,16 @@ static void scsi_tgt_cmd_destroy(void *d
+- {
+- 	struct scsi_cmnd *cmd = data;
+- 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	struct scsi_tgt_queuedata *qdata = cmd-&gt;request-&gt;q-&gt;queuedata;
+-+	unsigned long flags;
+- 
+- 	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
+- 		rq_data_dir(cmd-&gt;request));
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_del(&amp;tcmd-&gt;hash_list);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+
+- 	/*
+- 	 * We must set rq-&gt;flags here because bio_map_user and
+- 	 * blk_rq_bio_prep ruined ti.
+-@@ -88,55 +113,84 @@ static void scsi_tgt_cmd_destroy(void *d
+- 
+- static void init_scsi_tgt_cmd(struct request *rq, struct scsi_tgt_cmd *tcmd)
+- {
+-+	struct scsi_tgt_queuedata *qdata = rq-&gt;q-&gt;queuedata;
+-+	unsigned long flags;
+-+	struct list_head *head;
+-+	static u32 tag = 0;
+-+
+- 	tcmd-&gt;lun = rq-&gt;end_io_data;
+- 	bio_list_init(&amp;tcmd-&gt;xfer_list);
+- 	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+--}
+--
+--static int scsi_uspace_prep_fn(struct request_queue *q, struct request *rq)
+--{
+--	struct scsi_tgt_cmd *tcmd;
+- 
+--	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+--	if (!tcmd)
+--		return BLKPREP_DEFER;
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	rq-&gt;tag = tag++;
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(rq-&gt;tag)];
+-+	list_add(&amp;tcmd-&gt;hash_list, head);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+- 
+--	init_scsi_tgt_cmd(rq, tcmd);
+-+	tcmd-&gt;rq = rq;
+- 	rq-&gt;end_io_data = tcmd;
+- 	rq-&gt;flags |= REQ_DONTPREP;
+--	return BLKPREP_OK;
+- }
+- 
+--static void scsi_uspace_request_fn(struct request_queue *q)
+-+static void scsi_tgt_uspace_send_fn(void *data)
+- {
+-+	struct request_queue *q = data;
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+- 	struct request *rq;
+- 	struct scsi_cmnd *cmd;
+- 	struct scsi_tgt_cmd *tcmd;
+-+	unsigned long flags;
+-+	int err;
+- 
+--	/*
+--	 * TODO: just send everthing in the queue to userspace in
+--	 * one vector instead of multiple calls
+--	 */
+--	while ((rq = elv_next_request(q)) != NULL) {
+--		cmd = rq-&gt;special;
+--		tcmd = rq-&gt;end_io_data;
+-+retry:
+-+	err = 0;
+-+	if (list_empty(&amp;qdata-&gt;cmd_req))
+-+		return;
+- 
+--		/* the completion code kicks us in case we hit this */
+--		if (blk_queue_start_tag(q, rq))
+--			break;
+-+	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+-+	if (!tcmd) {
+-+		err = -ENOMEM;
+-+		goto out;
+-+	}
+-+
+-+	mutex_lock(&amp;qdata-&gt;cmd_req_mutex);
+- 
+--		spin_unlock_irq(q-&gt;queue_lock);
+--		if (scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC) &lt; 0)
+--			goto requeue;
+--		spin_lock_irq(q-&gt;queue_lock);
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+	if (list_empty(&amp;qdata-&gt;cmd_req)) {
+-+		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+		mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-+		kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+-+		goto out;
+- 	}
+-+	rq = list_entry_rq(qdata-&gt;cmd_req.next);
+-+	list_del_init(&amp;rq-&gt;queuelist);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+- 
+--	return;
+--requeue:
+--	spin_lock_irq(q-&gt;queue_lock);
+--	/* need to track cnts and plug */
+--	blk_requeue_request(q, rq);
+--	spin_unlock_irq(q-&gt;queue_lock);
+-+	if ((rq-&gt;flags &amp; REQ_DONTPREP)) {
+-+		kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+-+		tcmd = rq-&gt;end_io_data;
+-+	} else
+-+		init_scsi_tgt_cmd(rq, tcmd);
+-+
+-+	cmd = rq-&gt;special;
+-+	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC);
+-+	if (err &lt; 0) {
+-+		eprintk(&quot;failed to send: %p %d\n&quot;, cmd, err);
+-+
+-+		spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+		list_add(&amp;rq-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-+		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+	}
+-+
+-+	mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-+out:
+-+	/* TODO: proper error handling */
+-+	if (err &lt; 0)
+-+		queue_delayed_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work,
+-+				   HZ / 10);
+-+	else
+-+		goto retry;
+- }
+- 
+- /**
+-@@ -150,13 +204,13 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- {
+- 	struct scsi_tgt_queuedata *queuedata;
+- 	struct request_queue *q;
+--	int err;
+-+	int err, i;
+- 
+- 	/*
+- 	 * Do we need to send a netlink event or should uspace
+- 	 * just respond to the hotplug event?
+- 	 */
+--	q = __scsi_alloc_queue(shost, scsi_uspace_request_fn);
+-+	q = __scsi_alloc_queue(shost, NULL);
+- 	if (!q)
+- 		return -ENOMEM;
+- 
+-@@ -168,19 +222,12 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- 	queuedata-&gt;shost = shost;
+- 	q-&gt;queuedata = queuedata;
+- 
+--	elevator_exit(q-&gt;elevator);
+--	err = elevator_init(q, &quot;noop&quot;);
+--	if (err)
+--		goto free_data;
+--
+--	blk_queue_prep_rq(q, scsi_uspace_prep_fn);
+- 	/*
+- 	 * this is a silly hack. We should probably just queue as many
+- 	 * command as is recvd to userspace. uspace can then make
+- 	 * sure we do not overload the HBA
+- 	 */
+- 	q-&gt;nr_requests = shost-&gt;hostt-&gt;can_queue;
+--	blk_queue_init_tags(q, shost-&gt;hostt-&gt;can_queue, NULL);
+- 	/*
+- 	 * We currently only support software LLDs so this does
+- 	 * not matter for now. Do we need this for the cards we support?
+-@@ -189,10 +236,17 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- 	blk_queue_dma_alignment(q, 0);
+- 	shost-&gt;uspace_req_q = q;
+- 
+-+	for (i = 0; i &lt; ARRAY_SIZE(queuedata-&gt;cmd_hash); i++)
+-+		INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_hash[i]);
+-+	spin_lock_init(&amp;queuedata-&gt;cmd_hash_lock);
+-+
+-+	INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_req);
+-+	spin_lock_init(&amp;queuedata-&gt;cmd_req_lock);
+-+	INIT_WORK(&amp;queuedata-&gt;uspace_send_work, scsi_tgt_uspace_send_fn, q);
+-+	mutex_init(&amp;queuedata-&gt;cmd_req_mutex);
+-+
+- 	return 0;
+- 
+--free_data:
+--	kfree(queuedata);
+- cleanup_queue:
+- 	blk_cleanup_queue(q);
+- 	return err;
+-@@ -215,14 +269,17 @@ EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
+- void scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+- 			    int noblock)
+- {
+--	/*
+--	 * For now this just calls the request_fn from this context.
+--	 * For HW llds though we do not want to execute from here so
+--	 * the elevator code needs something like a REQ_TGT_CMD or
+--	 * REQ_MSG_DONT_UNPLUG_IMMED_BECUASE_WE_WILL_HANDLE_IT
+--	 */
+-+	struct request_queue *q = cmd-&gt;request-&gt;q;
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	unsigned long flags;
+-+
+- 	cmd-&gt;request-&gt;end_io_data = scsilun;
+--	elv_add_request(cmd-&gt;request-&gt;q, cmd-&gt;request, ELEVATOR_INSERT_BACK, 1);
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+	list_add_tail(&amp;cmd-&gt;request-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+
+-+	queue_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work);
+- }
+- EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+- 
+-@@ -438,6 +495,27 @@ static int scsi_tgt_copy_sense(struct sc
+- 	return 0;
+- }
+- 
+-+static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u32 cid)
+-+{
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	struct request *rq = NULL;
+-+	struct list_head *head;
+-+	struct scsi_tgt_cmd *tcmd;
+-+	unsigned long flags;
+-+
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(cid)];
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_for_each_entry(tcmd, head, hash_list) {
+-+		if (tcmd-&gt;rq-&gt;tag == cid) {
+-+			rq = tcmd-&gt;rq;
+-+			break;
+-+		}
+-+	}
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+
+-+	return rq;
+-+}
+-+
+- int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+- 			 unsigned long uaddr, u8 rw)
+- {
+-@@ -456,7 +534,7 @@ int scsi_tgt_kspace_exec(int host_no, u3
+- 		return -EINVAL;
+- 	}
+- 
+--	rq = blk_queue_find_tag(shost-&gt;uspace_req_q, cid);
+-+	rq = tgt_cmd_hash_lookup(shost-&gt;uspace_req_q, cid);
+- 	if (!rq) {
+- 		printk(KERN_ERR &quot;Could not find cid %u\n&quot;, cid);
+- 		err = -EINVAL;
+-diff --git a/drivers/scsi/scsi_tgt_priv.h b/drivers/scsi/scsi_tgt_priv.h
+-index fcf2ec6..6fedcec 100644
+---- a/drivers/scsi/scsi_tgt_priv.h
+-+++ b/drivers/scsi/scsi_tgt_priv.h
+-@@ -11,10 +11,6 @@ do {								\
+- 
+- #define eprintk dprintk
+- 
+--struct scsi_tgt_queuedata {
+--	struct Scsi_Host *shost;
+--};
+--
+- extern void scsi_tgt_if_exit(void);
+- extern int scsi_tgt_if_init(void);
+- 
+--- 
+-1.1.5
+
+Modified: branches/use-scsi-ml/patchset/scsi-target-2.6-tree.diff
+===================================================================
+--- branches/use-scsi-ml/patchset/scsi-target-2.6-tree.diff	2006-04-08 11:17:57 UTC (rev 401)
++++ branches/use-scsi-ml/patchset/scsi-target-2.6-tree.diff	2006-04-14 02:53:14 UTC (rev 402)
+@@ -1,114 +1,3 @@
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index 13c40a0..e9d3388 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2287,23 +2287,24 @@ int blk_rq_map_user(request_queue_t *q, 
+- 	 */
+- 	uaddr = (unsigned long) ubuf;
+- 	if (!(uaddr &amp; queue_dma_alignment(q)) &amp;&amp; !(len &amp; queue_dma_alignment(q)))
+--		bio = bio_map_user(q, NULL, uaddr, len, reading, 0);
+-+		bio = bio_map_user(q, NULL, uaddr, len, reading);
+- 	else
+- 		bio = bio_copy_user(q, uaddr, len, reading);
+- 
+--	if (!IS_ERR(bio)) {
+--		rq-&gt;bio = rq-&gt;biotail = bio;
+--		blk_rq_bio_prep(q, rq, bio);
+-+	if (IS_ERR(bio))
+-+		return PTR_ERR(bio);
+- 
+--		rq-&gt;buffer = rq-&gt;data = NULL;
+--		rq-&gt;data_len = len;
+--		return 0;
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+- 	}
+- 
+--	/*
+--	 * bio is the err-ptr
+--	 */
+--	return PTR_ERR(bio);
+-+	rq-&gt;bio = rq-&gt;biotail = bio;
+-+	blk_rq_bio_prep(q, rq, bio);
+-+	rq-&gt;buffer = rq-&gt;data = NULL;
+-+	rq-&gt;data_len = len;
+-+	return 0;
+- }
+- 
+- EXPORT_SYMBOL(blk_rq_map_user);
+-@@ -2329,7 +2330,7 @@ EXPORT_SYMBOL(blk_rq_map_user);
+-  *    unmapping.
+-  */
+- int blk_rq_map_user_iov(request_queue_t *q, struct request *rq,
+--			struct sg_iovec *iov, int iov_count)
+-+			struct sg_iovec *iov, int iov_count, unsigned int len)
+- {
+- 	struct bio *bio;
+- 
+-@@ -2339,11 +2340,16 @@ int blk_rq_map_user_iov(request_queue_t 
+- 	/* we don't allow misaligned data like bio_map_user() does.  If the
+- 	 * user is using sg, they're expected to know the alignment constraints
+- 	 * and respect them accordingly */
+--	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ,
+--				0);
+-+	bio = bio_map_user_iov(q, NULL, iov, iov_count, rq_data_dir(rq)== READ);
+- 	if (IS_ERR(bio))
+- 		return PTR_ERR(bio);
+- 
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+-+	}
+-+
+- 	rq-&gt;bio = rq-&gt;biotail = bio;
+- 	blk_rq_bio_prep(q, rq, bio);
+- 	rq-&gt;buffer = rq-&gt;data = NULL;
+-@@ -2765,16 +2771,12 @@ static void init_request_from_bio(struct
+- 
+- 	req-&gt;errors = 0;
+- 	req-&gt;hard_sector = req-&gt;sector = bio-&gt;bi_sector;
+--	req-&gt;hard_nr_sectors = req-&gt;nr_sectors = bio_sectors(bio);
+--	req-&gt;current_nr_sectors = req-&gt;hard_cur_sectors = bio_cur_sectors(bio);
+--	req-&gt;nr_phys_segments = bio_phys_segments(req-&gt;q, bio);
+--	req-&gt;nr_hw_segments = bio_hw_segments(req-&gt;q, bio);
+--	req-&gt;buffer = bio_data(bio);	/* see -&gt;buffer comment above */
+- 	req-&gt;waiting = NULL;
+--	req-&gt;bio = req-&gt;biotail = bio;
+- 	req-&gt;ioprio = bio_prio(bio);
+- 	req-&gt;rq_disk = bio-&gt;bi_bdev-&gt;bd_disk;
+- 	req-&gt;start_time = jiffies;
+-+
+-+	blk_rq_bio_prep(req-&gt;q, req, bio);
+- }
+- 
+- static int __make_request(request_queue_t *q, struct bio *bio)
+-@@ -3403,9 +3405,6 @@ EXPORT_SYMBOL(end_request);
+- 
+- void blk_rq_bio_prep(request_queue_t *q, struct request *rq, struct bio *bio)
+- {
+--	/* first three bits are identical in rq-&gt;flags and bio-&gt;bi_rw */
+--	rq-&gt;flags |= (bio-&gt;bi_rw &amp; 7);
+--
+- 	rq-&gt;nr_phys_segments = bio_phys_segments(q, bio);
+- 	rq-&gt;nr_hw_segments = bio_hw_segments(q, bio);
+- 	rq-&gt;current_nr_sectors = bio_cur_sectors(bio);
+-diff --git a/block/scsi_ioctl.c b/block/scsi_ioctl.c
+-index 24f7af9..ef9900d 100644
+---- a/block/scsi_ioctl.c
+-+++ b/block/scsi_ioctl.c
+-@@ -274,7 +274,8 @@ static int sg_io(struct file *file, requ
+- 			goto out;
+- 		}
+- 
+--		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count);
+-+		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count,
+-+					  hdr-&gt;dxfer_len);
+- 		kfree(iov);
+- 	} else if (hdr-&gt;dxfer_len)
+- 		ret = blk_rq_map_user(q, rq, hdr-&gt;dxferp, hdr-&gt;dxfer_len);
+ diff --git a/drivers/scsi/ibmvscsi/ibmvscsi.c b/drivers/scsi/ibmvscsi/ibmvscsi.c
+ index eaefedd..e7bd028 100644
+ --- a/drivers/scsi/ibmvscsi/ibmvscsi.c
+@@ -910,858 +799,3 @@
+  
+  enum viosrp_crq_formats {
+  	VIOSRP_SRP_FORMAT = 0x01,
+-diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
+-index 3cf02b1..9c22465 100644
+---- a/drivers/scsi/scsi.c
+-+++ b/drivers/scsi/scsi.c
+-@@ -352,8 +352,6 @@ void scsi_host_put_command(struct Scsi_H
+- 	spin_unlock(&amp;shost-&gt;free_list_lock);
+- 
+- 	spin_lock(q-&gt;queue_lock);
+--	if (blk_rq_tagged(rq))
+--		blk_queue_end_tag(q, rq);
+- 	__blk_put_request(q, rq);
+- 	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+- 
+-diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
+-index 38b35da..ba1b75b 100644
+---- a/drivers/scsi/scsi_tgt_if.c
+-+++ b/drivers/scsi/scsi_tgt_if.c
+-@@ -35,15 +35,15 @@
+- static int tgtd_pid;
+- static struct sock *nl_sk;
+- 
+--static int send_event_res(uint16_t type, struct tgt_event *p,
+--			  void *data, int dlen, gfp_t flags, pid_t pid)
+-+static int send_event_rsp(uint16_t type, struct tgt_event *p, gfp_t flags,
+-+			  pid_t pid)
+- {
+- 	struct tgt_event *ev;
+- 	struct nlmsghdr *nlh;
+- 	struct sk_buff *skb;
+- 	uint32_t len;
+- 
+--	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-+	len = NLMSG_SPACE(sizeof(*ev));
+- 	skb = alloc_skb(len, flags);
+- 	if (!skb)
+- 		return -ENOMEM;
+-@@ -52,26 +52,27 @@ static int send_event_res(uint16_t type,
+- 
+- 	ev = NLMSG_DATA(nlh);
+- 	memcpy(ev, p, sizeof(*ev));
+--	if (dlen)
+--		memcpy(ev-&gt;data, data, dlen);
+- 
+- 	return netlink_unicast(nl_sk, skb, pid, 0);
+- }
+- 
+--int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t gfp_mask)
+-+int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, u64 tag,
+-+			 gfp_t flags)
+- {
+- 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+- 	struct sk_buff *skb;
+- 	struct nlmsghdr *nlh;
+- 	struct tgt_event *ev;
+--	struct tgt_cmd *tcmd;
+- 	int err, len;
+- 
+--	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct tgt_cmd));
+-+	/* FIXME: we need scsi core to do that. */
+-+	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+-+
+-+	len = NLMSG_SPACE(sizeof(*ev));
+- 	/*
+- 	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+- 	 */
+--	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-+	skb = alloc_skb(NLMSG_SPACE(len), flags);
+- 	if (!skb)
+- 		return -ENOMEM;
+- 
+-@@ -82,16 +83,14 @@ int scsi_tgt_uspace_send(struct scsi_cmn
+- 	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+- 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+- 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+--
+--	dprintk(&quot;%d %u %u\n&quot;, ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.cid,
+--		ev-&gt;k.cmd_req.data_len);
+--
+--	/* FIXME: we need scsi core to do that. */
+--	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+--
+--	tcmd = (struct tgt_cmd *) ev-&gt;data;
+--	memcpy(tcmd-&gt;scb, cmd-&gt;cmnd, sizeof(tcmd-&gt;scb));
+--	memcpy(tcmd-&gt;lun, lun, sizeof(struct scsi_lun));
+-+	memcpy(ev-&gt;k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev-&gt;k.cmd_req.scb));
+-+	memcpy(ev-&gt;k.cmd_req.lun, lun, sizeof(ev-&gt;k.cmd_req.lun));
+-+	ev-&gt;k.cmd_req.attribute = cmd-&gt;tag;
+-+	ev-&gt;k.cmd_req.tag = tag;
+-+
+-+	dprintk(&quot;%p %d %u %u %x %llx\n&quot;, cmd, shost-&gt;host_no, ev-&gt;k.cmd_req.cid,
+-+		ev-&gt;k.cmd_req.data_len, cmd-&gt;tag,
+-+		(unsigned long long) ev-&gt;k.cmd_req.tag);
+- 
+- 	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+- 	if (err &lt; 0)
+-@@ -104,15 +103,31 @@ int scsi_tgt_uspace_send_status(struct s
+- {
+- 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+- 	struct tgt_event ev;
+--	char dummy[sizeof(struct tgt_cmd)];
+- 
+- 	memset(&amp;ev, 0, sizeof(ev));
+- 	ev.k.cmd_done.host_no = shost-&gt;host_no;
+- 	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+- 	ev.k.cmd_done.result = cmd-&gt;result;
+- 
+--	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
+--			      gfp_mask, tgtd_pid);
+-+	return send_event_rsp(TGT_KEVENT_CMD_DONE, &amp;ev, gfp_mask, tgtd_pid);
+-+}
+-+
+-+int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+				  struct scsi_lun *scsilun, void *data)
+-+{
+-+	struct tgt_event ev;
+-+
+-+	memset(&amp;ev, 0, sizeof(ev));
+-+	ev.k.tsk_mgmt_req.host_no = host_no;
+-+	ev.k.tsk_mgmt_req.function = function;
+-+	ev.k.tsk_mgmt_req.tag = tag;
+-+	memcpy(ev.k.tsk_mgmt_req.lun, scsilun, sizeof(ev.k.tsk_mgmt_req.lun));
+-+	ev.k.tsk_mgmt_req.mid = (u64) data;
+-+
+-+	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
+-+		(unsigned long long) ev.k.tsk_mgmt_req.mid);
+-+
+-+	return send_event_rsp(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev, GFP_KERNEL, tgtd_pid);
+- }
+- 
+- static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+-@@ -124,19 +139,22 @@ static int event_recv_msg(struct sk_buff
+- 		nlh-&gt;nlmsg_pid, current-&gt;pid);
+- 
+- 	switch (nlh-&gt;nlmsg_type) {
+--	case TGT_UEVENT_TGTD_BIND:
+-+	case TGT_UEVENT_REQ:
+- 		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+- 		break;
+--	case TGT_UEVENT_CMD_RES:
+-+	case TGT_UEVENT_CMD_RSP:
+- 		/* TODO: handle multiple cmds in one event */
+--		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_res.host_no,
+--					   ev-&gt;u.cmd_res.cid,
+--					   ev-&gt;u.cmd_res.result,
+--					   ev-&gt;u.cmd_res.len,
+--					   ev-&gt;u.cmd_res.offset,
+--					   ev-&gt;u.cmd_res.uaddr,
+--					   ev-&gt;u.cmd_res.rw,
+--					   ev-&gt;u.cmd_res.try_map);
+-+		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_rsp.host_no,
+-+					   ev-&gt;u.cmd_rsp.cid,
+-+					   ev-&gt;u.cmd_rsp.result,
+-+					   ev-&gt;u.cmd_rsp.len,
+-+					   ev-&gt;u.cmd_rsp.uaddr,
+-+					   ev-&gt;u.cmd_rsp.rw);
+-+		break;
+-+	case TGT_UEVENT_TSK_MGMT_RSP:
+-+		err = scsi_tgt_kspace_tsk_mgmt(ev-&gt;u.tsk_mgmt_rsp.host_no,
+-+					       ev-&gt;u.tsk_mgmt_rsp.mid,
+-+					       ev-&gt;u.tsk_mgmt_rsp.result);
+- 		break;
+- 	default:
+- 		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+-@@ -151,6 +169,7 @@ static int event_recv_skb(struct sk_buff
+- 	int err;
+- 	uint32_t rlen;
+- 	struct nlmsghdr	*nlh;
+-+	struct tgt_event ev;
+- 
+- 	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+- 		nlh = (struct nlmsghdr *) skb-&gt;data;
+-@@ -166,12 +185,14 @@ static int event_recv_skb(struct sk_buff
+- 		 * TODO for passthru commands the lower level should
+- 		 * probably handle the result or we should modify this
+- 		 */
+--		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES) {
+--			struct tgt_event ev;
+--
+-+		switch (nlh-&gt;nlmsg_type) {
+-+		case TGT_UEVENT_CMD_RSP:
+-+		case TGT_UEVENT_TSK_MGMT_RSP:
+-+			break;
+-+		default:
+- 			memset(&amp;ev, 0, sizeof(ev));
+--			ev.k.event_res.err = err;
+--			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-+			ev.k.event_rsp.err = err;
+-+			send_event_rsp(TGT_KEVENT_RSP, &amp;ev,
+- 				       GFP_KERNEL | __GFP_NOFAIL,
+- 					nlh-&gt;nlmsg_pid);
+- 		}
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-index 8746236..5a98fc4 100644
+---- a/drivers/scsi/scsi_tgt_lib.c
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -20,7 +20,7 @@
+-  * 02110-1301 USA
+-  */
+- #include &lt;linux/blkdev.h&gt;
+--#include &lt;linux/elevator.h&gt;
+-+#include &lt;linux/hash.h&gt;
+- #include &lt;linux/module.h&gt;
+- #include &lt;linux/pagemap.h&gt;
+- #include &lt;scsi/scsi.h&gt;
+-@@ -46,6 +46,25 @@ struct scsi_tgt_cmd {
+- 	struct bio_list xfer_done_list;
+- 	struct bio_list xfer_list;
+- 	struct scsi_lun *lun;
+-+
+-+	struct list_head hash_list;
+-+	struct request *rq;
+-+	u64 tag;
+-+};
+-+
+-+#define TGT_HASH_ORDER	4
+-+#define cmd_hashfn(cid)	hash_long((cid), TGT_HASH_ORDER)
+-+
+-+struct scsi_tgt_queuedata {
+-+	struct Scsi_Host *shost;
+-+	struct list_head cmd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+-+	spinlock_t cmd_hash_lock;
+-+
+-+	struct work_struct uspace_send_work;
+-+
+-+	spinlock_t cmd_req_lock;
+-+	struct mutex cmd_req_mutex;
+-+	struct list_head cmd_req;
+- };
+- 
+- static void scsi_unmap_user_pages(struct scsi_tgt_cmd *tcmd)
+-@@ -68,9 +87,16 @@ static void scsi_tgt_cmd_destroy(void *d
+- {
+- 	struct scsi_cmnd *cmd = data;
+- 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	struct scsi_tgt_queuedata *qdata = cmd-&gt;request-&gt;q-&gt;queuedata;
+-+	unsigned long flags;
+- 
+- 	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
+- 		rq_data_dir(cmd-&gt;request));
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_del(&amp;tcmd-&gt;hash_list);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+
+- 	/*
+- 	 * We must set rq-&gt;flags here because bio_map_user and
+- 	 * blk_rq_bio_prep ruined ti.
+-@@ -81,62 +107,71 @@ static void scsi_tgt_cmd_destroy(void *d
+- 		cmd-&gt;request-&gt;flags &amp;= ~1UL;
+- 
+- 	scsi_unmap_user_pages(tcmd);
+--	scsi_tgt_uspace_send_status(cmd, GFP_KERNEL);
+- 	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+- 	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+- }
+- 
+- static void init_scsi_tgt_cmd(struct request *rq, struct scsi_tgt_cmd *tcmd)
+- {
+--	tcmd-&gt;lun = rq-&gt;end_io_data;
+--	bio_list_init(&amp;tcmd-&gt;xfer_list);
+--	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+-+	struct scsi_tgt_queuedata *qdata = rq-&gt;q-&gt;queuedata;
+-+	unsigned long flags;
+-+	struct list_head *head;
+-+	static u32 tag = 0;
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	rq-&gt;tag = tag++;
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(rq-&gt;tag)];
+-+	list_add(&amp;tcmd-&gt;hash_list, head);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+- }
+- 
+--static int scsi_uspace_prep_fn(struct request_queue *q, struct request *rq)
+--{
+--	struct scsi_tgt_cmd *tcmd;
+--
+--	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+--	if (!tcmd)
+--		return BLKPREP_DEFER;
+--
+--	init_scsi_tgt_cmd(rq, tcmd);
+--	rq-&gt;end_io_data = tcmd;
+--	rq-&gt;flags |= REQ_DONTPREP;
+--	return BLKPREP_OK;
+--}
+--
+--static void scsi_uspace_request_fn(struct request_queue *q)
+-+static void scsi_tgt_uspace_send_fn(void *data)
+- {
+-+	struct request_queue *q = data;
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+- 	struct request *rq;
+- 	struct scsi_cmnd *cmd;
+- 	struct scsi_tgt_cmd *tcmd;
+-+	unsigned long flags;
+-+	int err;
+- 
+--	/*
+--	 * TODO: just send everthing in the queue to userspace in
+--	 * one vector instead of multiple calls
+--	 */
+--	while ((rq = elv_next_request(q)) != NULL) {
+--		cmd = rq-&gt;special;
+--		tcmd = rq-&gt;end_io_data;
+-+retry:
+-+	err = 0;
+-+	if (list_empty(&amp;qdata-&gt;cmd_req))
+-+		return;
+- 
+--		/* the completion code kicks us in case we hit this */
+--		if (blk_queue_start_tag(q, rq))
+--			break;
+-+	mutex_lock(&amp;qdata-&gt;cmd_req_mutex);
+- 
+--		spin_unlock_irq(q-&gt;queue_lock);
+--		if (scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC) &lt; 0)
+--			goto requeue;
+--		spin_lock_irq(q-&gt;queue_lock);
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+	if (list_empty(&amp;qdata-&gt;cmd_req)) {
+-+		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+		mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-+		goto out;
+-+	}
+-+	rq = list_entry_rq(qdata-&gt;cmd_req.next);
+-+	list_del_init(&amp;rq-&gt;queuelist);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+
+-+	tcmd = rq-&gt;end_io_data;
+-+	init_scsi_tgt_cmd(rq, tcmd);
+-+	cmd = rq-&gt;special;
+-+	err = scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, tcmd-&gt;tag, GFP_ATOMIC);
+-+	if (err &lt; 0) {
+-+		eprintk(&quot;failed to send: %p %d\n&quot;, cmd, err);
+-+
+-+		spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+		list_add(&amp;rq-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-+		spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+- 	}
+- 
+--	return;
+--requeue:
+--	spin_lock_irq(q-&gt;queue_lock);
+--	/* need to track cnts and plug */
+--	blk_requeue_request(q, rq);
+--	spin_lock_irq(q-&gt;queue_lock);
+-+	mutex_unlock(&amp;qdata-&gt;cmd_req_mutex);
+-+out:
+-+	/* TODO: proper error handling */
+-+	if (err &lt; 0)
+-+		queue_delayed_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work,
+-+				   HZ / 10);
+-+	else
+-+		goto retry;
+- }
+- 
+- /**
+-@@ -150,13 +185,13 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- {
+- 	struct scsi_tgt_queuedata *queuedata;
+- 	struct request_queue *q;
+--	int err;
+-+	int err, i;
+- 
+- 	/*
+- 	 * Do we need to send a netlink event or should uspace
+- 	 * just respond to the hotplug event?
+- 	 */
+--	q = __scsi_alloc_queue(shost, scsi_uspace_request_fn);
+-+	q = __scsi_alloc_queue(shost, NULL);
+- 	if (!q)
+- 		return -ENOMEM;
+- 
+-@@ -168,19 +203,12 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- 	queuedata-&gt;shost = shost;
+- 	q-&gt;queuedata = queuedata;
+- 
+--	elevator_exit(q-&gt;elevator);
+--	err = elevator_init(q, &quot;noop&quot;);
+--	if (err)
+--		goto free_data;
+--
+--	blk_queue_prep_rq(q, scsi_uspace_prep_fn);
+- 	/*
+- 	 * this is a silly hack. We should probably just queue as many
+- 	 * command as is recvd to userspace. uspace can then make
+- 	 * sure we do not overload the HBA
+- 	 */
+- 	q-&gt;nr_requests = shost-&gt;hostt-&gt;can_queue;
+--	blk_queue_init_tags(q, shost-&gt;hostt-&gt;can_queue, NULL);
+- 	/*
+- 	 * We currently only support software LLDs so this does
+- 	 * not matter for now. Do we need this for the cards we support?
+-@@ -189,10 +217,17 @@ int scsi_tgt_alloc_queue(struct Scsi_Hos
+- 	blk_queue_dma_alignment(q, 0);
+- 	shost-&gt;uspace_req_q = q;
+- 
+-+	for (i = 0; i &lt; ARRAY_SIZE(queuedata-&gt;cmd_hash); i++)
+-+		INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_hash[i]);
+-+	spin_lock_init(&amp;queuedata-&gt;cmd_hash_lock);
+-+
+-+	INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_req);
+-+	spin_lock_init(&amp;queuedata-&gt;cmd_req_lock);
+-+	INIT_WORK(&amp;queuedata-&gt;uspace_send_work, scsi_tgt_uspace_send_fn, q);
+-+	mutex_init(&amp;queuedata-&gt;cmd_req_mutex);
+-+
+- 	return 0;
+- 
+--free_data:
+--	kfree(queuedata);
+- cleanup_queue:
+- 	blk_cleanup_queue(q);
+- 	return err;
+-@@ -212,17 +247,35 @@ EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
+-  * @scsilun:	scsi lun
+-  * @noblock:	set to nonzero if the command should be queued
+-  **/
+--void scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+--			    int noblock)
+-+int scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+-+			   u64 tag)
+- {
+-+	struct request_queue *q = cmd-&gt;request-&gt;q;
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	unsigned long flags;
+-+	struct scsi_tgt_cmd *tcmd;
+-+
+- 	/*
+--	 * For now this just calls the request_fn from this context.
+--	 * For HW llds though we do not want to execute from here so
+--	 * the elevator code needs something like a REQ_TGT_CMD or
+--	 * REQ_MSG_DONT_UNPLUG_IMMED_BECUASE_WE_WILL_HANDLE_IT
+-+	 * It would be better to allocate scsi_tgt_cmd structure in
+-+	 * scsi_host_get_command and not to fail due to OOM.
+- 	 */
+--	cmd-&gt;request-&gt;end_io_data = scsilun;
+--	elv_add_request(cmd-&gt;request-&gt;q, cmd-&gt;request, ELEVATOR_INSERT_BACK, 1);
+-+	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+-+	if (!tcmd)
+-+		return -ENOMEM;
+-+	cmd-&gt;request-&gt;end_io_data = tcmd;
+-+
+-+	bio_list_init(&amp;tcmd-&gt;xfer_list);
+-+	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+-+	tcmd-&gt;lun = scsilun;
+-+	tcmd-&gt;tag = tag;
+-+	tcmd-&gt;rq = cmd-&gt;request;
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_req_lock, flags);
+-+	list_add_tail(&amp;cmd-&gt;request-&gt;queuelist, &amp;qdata-&gt;cmd_req);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_req_lock, flags);
+-+
+-+	queue_work(scsi_tgtd, &amp;qdata-&gt;uspace_send_work);
+-+	return 0;
+- }
+- EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+- 
+-@@ -236,12 +289,7 @@ static void scsi_tgt_cmd_done(struct scs
+- 
+- 	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+- 
+--	/* don't we have to call this if result is set or not */
+--	if (cmd-&gt;result) {
+--		scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+--		return;
+--	}
+--
+-+	scsi_tgt_uspace_send_status(cmd, GFP_ATOMIC);
+- 	INIT_WORK(&amp;tcmd-&gt;work, scsi_tgt_cmd_destroy, cmd);
+- 	queue_work(scsi_tgtd, &amp;tcmd-&gt;work);
+- }
+-@@ -315,7 +363,7 @@ static int scsi_map_user_pages(struct sc
+- 
+- 	while (len &gt; 0) {
+- 		dprintk(&quot;%lx %u\n&quot;, (unsigned long) uaddr, len);
+--		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw, 1);
+-+		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw);
+- 		if (IS_ERR(bio)) {
+- 			err = PTR_ERR(bio);
+- 			dprintk(&quot;fail to map %lx %u %d %x\n&quot;,
+-@@ -438,16 +486,49 @@ static int scsi_tgt_copy_sense(struct sc
+- 	return 0;
+- }
+- 
+--int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len, u64 offset,
+--			 unsigned long uaddr, u8 rw, u8 try_map)
+-+static int scsi_tgt_abort_cmd(struct Scsi_Host *host, struct scsi_cmnd *cmd)
+-+{
+-+	int err;
+-+
+-+	err = host-&gt;hostt-&gt;eh_abort_handler(cmd);
+-+	if (err)
+-+		eprintk(&quot;fail to abort %p\n&quot;, cmd);
+-+
+-+	scsi_tgt_cmd_destroy(cmd);
+-+	return err;
+-+}
+-+
+-+static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u32 cid)
+-+{
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	struct request *rq = NULL;
+-+	struct list_head *head;
+-+	struct scsi_tgt_cmd *tcmd;
+-+	unsigned long flags;
+-+
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(cid)];
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_for_each_entry(tcmd, head, hash_list) {
+-+		if (tcmd-&gt;rq-&gt;tag == cid) {
+-+			rq = tcmd-&gt;rq;
+-+			break;
+-+		}
+-+	}
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+
+-+	return rq;
+-+}
+-+
+-+int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+-+			 unsigned long uaddr, u8 rw)
+- {
+- 	struct Scsi_Host *shost;
+- 	struct scsi_cmnd *cmd;
+- 	struct request *rq;
+- 	int err = 0;
+- 
+--	dprintk(&quot;%d %u %d %u %llu %lx %u %u\n&quot;, host_no, cid, result,
+--		len, (unsigned long long) offset, uaddr, rw, try_map);
+-+	dprintk(&quot;%d %u %d %u %lx %u\n&quot;, host_no, cid, result,
+-+		len, uaddr, rw);
+- 
+- 	/* TODO: replace with a O(1) alg */
+- 	shost = scsi_host_lookup(host_no);
+-@@ -456,7 +537,7 @@ int scsi_tgt_kspace_exec(int host_no, u3
+- 		return -EINVAL;
+- 	}
+- 
+--	rq = blk_queue_find_tag(shost-&gt;uspace_req_q, cid);
+-+	rq = tgt_cmd_hash_lookup(shost-&gt;uspace_req_q, cid);
+- 	if (!rq) {
+- 		printk(KERN_ERR &quot;Could not find cid %u\n&quot;, cid);
+- 		err = -EINVAL;
+-@@ -467,6 +548,10 @@ int scsi_tgt_kspace_exec(int host_no, u3
+- 	dprintk(&quot;cmd %p result %d len %d bufflen %u %lu %x\n&quot;, cmd,
+- 		result, len, cmd-&gt;request_bufflen, rq_data_dir(rq), cmd-&gt;cmnd[0]);
+- 
+-+	if (result == TASK_ABORTED) {
+-+		scsi_tgt_abort_cmd(shost, cmd);
+-+		goto done;
+-+	}
+- 	/*
+- 	 * store the userspace values here, the working values are
+- 	 * in the request_* values
+-@@ -507,6 +592,38 @@ done:
+- 	return err;
+- }
+- 
+-+int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *shost, int function, u64 tag,
+-+			      struct scsi_lun *scsilun, void *data)
+-+{
+-+	int err;
+-+
+-+	/* TODO: need to retry if this fails. */
+-+	err = scsi_tgt_uspace_send_tsk_mgmt(shost-&gt;host_no, function,
+-+					    tag, scsilun, data);
+-+	if (err &lt; 0)
+-+		eprintk(&quot;The task management request lost!\n&quot;);
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_tsk_mgmt_request);
+-+
+-+int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result)
+-+{
+-+	struct Scsi_Host *shost;
+-+	int err;
+-+
+-+	dprintk(&quot;%d %d %llx\n&quot;, host_no, result, (unsigned long long) mid);
+-+
+-+	shost = scsi_host_lookup(host_no);
+-+	if (IS_ERR(shost)) {
+-+		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
+-+		return -EINVAL;
+-+	}
+-+	err = shost-&gt;hostt-&gt;tsk_mgmt_response(mid, result);
+-+	scsi_host_put(shost);
+-+
+-+	return err;
+-+}
+-+
+- static int __init scsi_tgt_init(void)
+- {
+- 	int err;
+-diff --git a/drivers/scsi/scsi_tgt_priv.h b/drivers/scsi/scsi_tgt_priv.h
+-index 4236e50..77a1d06 100644
+---- a/drivers/scsi/scsi_tgt_priv.h
+-+++ b/drivers/scsi/scsi_tgt_priv.h
+-@@ -4,22 +4,21 @@ struct Scsi_Host;
+- struct task_struct;
+- 
+- /* tmp - will replace with SCSI logging stuff */
+--#define dprintk(fmt, args...)					\
+-+#define eprintk(fmt, args...)					\
+- do {								\
+- 	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+- } while (0)
+- 
+--#define eprintk dprintk
+--
+--struct scsi_tgt_queuedata {
+--	struct Scsi_Host *shost;
+--};
+-+#define dprintk eprintk
+- 
+- extern void scsi_tgt_if_exit(void);
+- extern int scsi_tgt_if_init(void);
+- 
+--extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t flags);
+-+extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun,
+-+				u64 tag, gfp_t flags);
+- extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+- extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+--				u64 offset, unsigned long uaddr, u8 rw,
+--				u8 try_map);
+-+				unsigned long uaddr, u8 rw);
+-+extern int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+					 struct scsi_lun *scsilun, void *data);
+-+extern int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result);
+-diff --git a/fs/bio.c b/fs/bio.c
+-index 3e940c9..f51a873 100644
+---- a/fs/bio.c
+-+++ b/fs/bio.c
+-@@ -718,21 +718,19 @@ static struct bio *__bio_map_user_iov(re
+-  *	@uaddr: start of user address
+-  *	@len: length in bytes
+-  *	@write_to_vm: bool indicating writing to pages or not
+-- *	@support_partial: support partial mappings
+-  *
+-  *	Map the user space address into a bio suitable for io to a block
+-  *	device. Returns an error pointer in case of error.
+-  */
+- struct bio *bio_map_user(request_queue_t *q, struct block_device *bdev,
+--			 unsigned long uaddr, unsigned int len, int write_to_vm,
+--			 int support_partial)
+-+			 unsigned long uaddr, unsigned int len, int write_to_vm)
+- {
+- 	struct sg_iovec iov;
+- 
+- 	iov.iov_base = (void __user *)uaddr;
+- 	iov.iov_len = len;
+- 
+--	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm, support_partial);
+-+	return bio_map_user_iov(q, bdev, &amp;iov, 1, write_to_vm);
+- }
+- 
+- /**
+-@@ -742,17 +740,15 @@ struct bio *bio_map_user(request_queue_t
+-  *	@iov:	the iovec.
+-  *	@iov_count: number of elements in the iovec
+-  *	@write_to_vm: bool indicating writing to pages or not
+-- *	@support_partial: support partial mappings
+-  *
+-  *	Map the user space address into a bio suitable for io to a block
+-  *	device. Returns an error pointer in case of error.
+-  */
+- struct bio *bio_map_user_iov(request_queue_t *q, struct block_device *bdev,
+- 			     struct sg_iovec *iov, int iov_count,
+--			     int write_to_vm, int support_partial)
+-+			     int write_to_vm)
+- {
+- 	struct bio *bio;
+--	int len = 0, i;
+- 
+- 	bio = __bio_map_user_iov(q, bdev, iov, iov_count, write_to_vm);
+- 
+-@@ -767,18 +763,7 @@ struct bio *bio_map_user_iov(request_que
+- 	 */
+- 	bio_get(bio);
+- 
+--	for (i = 0; i &lt; iov_count; i++)
+--		len += iov[i].iov_len;
+--
+--	if (bio-&gt;bi_size == len || support_partial)
+--		return bio;
+--
+--	/*
+--	 * don't support partial mappings
+--	 */
+--	bio_endio(bio, bio-&gt;bi_size, 0);
+--	bio_unmap_user(bio);
+--	return ERR_PTR(-EINVAL);
+-+	return bio;
+- }
+- 
+- static void __bio_unmap_user(struct bio *bio)
+-diff --git a/include/linux/bio.h b/include/linux/bio.h
+-index fc0906c..b60ffe3 100644
+---- a/include/linux/bio.h
+-+++ b/include/linux/bio.h
+-@@ -295,13 +295,12 @@ extern int bio_add_page(struct bio *, st
+- extern int bio_add_pc_page(struct request_queue *, struct bio *, struct page *,
+- 			   unsigned int, unsigned int);
+- extern int bio_get_nr_vecs(struct block_device *);
+--extern int __bio_get_nr_vecs(struct request_queue *);
+- extern struct bio *bio_map_user(struct request_queue *, struct block_device *,
+--				unsigned long, unsigned int, int, int);
+-+				unsigned long, unsigned int, int);
+- struct sg_iovec;
+- extern struct bio *bio_map_user_iov(struct request_queue *,
+- 				    struct block_device *,
+--				    struct sg_iovec *, int, int, int);
+-+				    struct sg_iovec *, int, int);
+- extern void bio_unmap_user(struct bio *);
+- extern struct bio *bio_map_kern(struct request_queue *, void *, unsigned int,
+- 				gfp_t);
+-diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+-index 860e7a4..619ef1d 100644
+---- a/include/linux/blkdev.h
+-+++ b/include/linux/blkdev.h
+-@@ -611,7 +611,8 @@ extern void blk_queue_activity_fn(reques
+- extern int blk_rq_map_user(request_queue_t *, struct request *, void __user *, unsigned int);
+- extern int blk_rq_unmap_user(struct bio *, unsigned int);
+- extern int blk_rq_map_kern(request_queue_t *, struct request *, void *, unsigned int, gfp_t);
+--extern int blk_rq_map_user_iov(request_queue_t *, struct request *, struct sg_iovec *, int);
+-+extern int blk_rq_map_user_iov(request_queue_t *, struct request *,
+-+			       struct sg_iovec *, int, unsigned int);
+- extern int blk_execute_rq(request_queue_t *, struct gendisk *,
+- 			  struct request *, int);
+- extern void blk_execute_rq_nowait(request_queue_t *, struct gendisk *,
+-diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
+-index 8b799db..eca5721 100644
+---- a/include/scsi/scsi_host.h
+-+++ b/include/scsi/scsi_host.h
+-@@ -153,6 +153,9 @@ struct scsi_host_template {
+- 	int (* transfer_data)(struct scsi_cmnd *,
+- 			      void (*done)(struct scsi_cmnd *));
+- 
+-+	/* Used as callback for the completion of task management request. */
+-+	int (* tsk_mgmt_response)(u64 mid, int result);
+-+
+- 	/*
+- 	 * This is an error handling strategy routine.  You don't need to
+- 	 * define one of these if you don't want to - there is a default
+-diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
+-index 91ad6bc..2d65be7 100644
+---- a/include/scsi/scsi_tgt.h
+-+++ b/include/scsi/scsi_tgt.h
+-@@ -6,6 +6,8 @@ struct Scsi_Host;
+- struct scsi_cmnd;
+- struct scsi_lun;
+- 
+--extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd);
+-+extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *);
+- extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+--extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, int);
+-+extern int scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, u64);
+-+extern int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *, int, u64, struct scsi_lun *,
+-+				     void *);
+-diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
+-index da3a808..63b2e3a 100644
+---- a/include/scsi/scsi_tgt_if.h
+-+++ b/include/scsi/scsi_tgt_if.h
+-@@ -24,65 +24,66 @@
+- 
+- enum tgt_event_type {
+- 	/* user -&gt; kernel */
+--	TGT_UEVENT_TGTD_BIND,
+--	TGT_UEVENT_TARGET_SETUP,
+--	TGT_UEVENT_CMD_RES,
+-+	TGT_UEVENT_REQ,
+-+	TGT_UEVENT_CMD_RSP,
+-+	TGT_UEVENT_TSK_MGMT_RSP,
+- 
+- 	/* kernel -&gt; user */
+--	TGT_KEVENT_RESPONSE,
+-+	TGT_KEVENT_RSP,
+- 	TGT_KEVENT_CMD_REQ,
+- 	TGT_KEVENT_CMD_DONE,
+-+	TGT_KEVENT_TSK_MGMT_REQ,
+- };
+- 
+- struct tgt_event {
+- 	/* user-&gt; kernel */
+- 	union {
+- 		struct {
+--			int pk_fd;
+--		} tgtd_bind;
+-+			int type;
+-+			int host_no;
+-+		} event_req;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			uint32_t len;
+- 			int result;
+- 			uint64_t uaddr;
+--			uint64_t offset;
+- 			uint8_t rw;
+--			uint8_t try_map;
+--		} cmd_res;
+-+		} cmd_rsp;
+-+		struct {
+-+			int host_no;
+-+			uint64_t mid;
+-+			int result;
+-+		} tsk_mgmt_rsp;
+- 	} u;
+- 
+- 	/* kernel -&gt; user */
+- 	union {
+- 		struct {
+- 			int err;
+--		} event_res;
+-+		} event_rsp;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			uint32_t data_len;
+--			uint64_t dev_id;
+-+			uint8_t scb[16];
+-+			uint8_t lun[8];
+-+			int attribute;
+-+			uint64_t tag;
+- 		} cmd_req;
+- 		struct {
+- 			int host_no;
+- 			uint32_t cid;
+- 			int result;
+- 		} cmd_done;
+-+		struct {
+-+			int host_no;
+-+			int function;
+-+			uint64_t tag;
+-+			uint8_t lun[8];
+-+			uint64_t mid;
+-+		} tsk_mgmt_req;
+- 	} k;
+- 
+--	/*
+--	 * I think a pointer is a unsigned long but this struct
+--	 * gets passed around from the kernel to userspace and
+--	 * back again so to handle some ppc64 setups where userspace is
+--	 * 32 bits but the kernel is 64 we do this odd thing
+--	 */
+--	uint64_t data[0];
+--} __attribute__ ((aligned (sizeof(uint64_t))));
+--
+--struct tgt_cmd {
+--	uint8_t scb[16];
+--	uint8_t lun[8];
+--	int tags;
+- } __attribute__ ((aligned (sizeof(uint64_t))));
+--
+- #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000388.html">[Stgt-svn] r401 - branches/use-scsi-ml/ibmvstgt
+</A></li>
+	<LI>Next message: <A HREF="000390.html">[Stgt-svn] r403 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#389">[ date ]</a>
+              <a href="thread.html#389">[ thread ]</a>
+              <a href="subject.html#389">[ subject ]</a>
+              <a href="author.html#389">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

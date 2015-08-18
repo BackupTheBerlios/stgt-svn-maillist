@@ -1,0 +1,675 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r173 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r173%20-%20trunk/kernel&In-Reply-To=%3C200511170518.jAH5IfwP031222%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000166.html">
+   <LINK REL="Next"  HREF="000168.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r173 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r173%20-%20trunk/kernel&In-Reply-To=%3C200511170518.jAH5IfwP031222%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r173 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Nov 17 06:18:41 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000166.html">[Stgt-svn] r172 - in trunk: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000168.html">[Stgt-svn] r178 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#167">[ date ]</a>
+              <a href="thread.html#167">[ thread ]</a>
+              <a href="subject.html#167">[ subject ]</a>
+              <a href="author.html#167">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-17 06:18:38 +0100 (Thu, 17 Nov 2005)
+New Revision: 173
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+Log:
+Rewrite the SCSI command ordering code by using the request_queue support.
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-11-16 05:12:40 UTC (rev 172)
++++ trunk/kernel/tgt.c	2005-11-17 05:18:38 UTC (rev 173)
+@@ -175,8 +175,6 @@
+ 		if (blk_queue_tagged(q) &amp;&amp; blk_queue_start_tag(q, rq))
+ 			break;
+ 
+-		blkdev_dequeue_request(rq);
+-
+ 		spin_unlock_irq(q-&gt;queue_lock);
+ 
+ 		/*
+@@ -199,15 +197,28 @@
+ 	}
+ }
+ 
+-static int tgt_queue_setup(struct request_queue **queue, int depth)
++static void tgt_queue_destroy(struct request_queue *q)
+ {
++	kfree(q-&gt;queuedata);
++	blk_cleanup_queue(q);
++}
++
++static int tgt_queue_create(struct tgt_protocol *proto, int depth,
++			    struct request_queue **queue)
++{
+ 	struct request_queue *q;
+-	int err;
++	int err = -ENOMEM;
+ 
+-	q = blk_init_queue(tgt_request_fn, NULL);
++	*queue = q = blk_init_queue(tgt_request_fn, NULL);
+ 	if (!q)
+ 		return -ENOMEM;
+ 
++	if (proto-&gt;priv_queuedata_size) {
++		q-&gt;queuedata = kzalloc(proto-&gt;priv_queuedata_size, GFP_KERNEL);
++		if (!q-&gt;queuedata)
++			goto out;
++	}
++
+ 	/*
+ 	 * this is a tmp hack: we do not register this queue
+ 	 * becuase we do not have a proper parent. We can remove
+@@ -220,20 +231,24 @@
+ 	 * devs we do noop for now (do we need to since the initiator does
+ 	 * ioscheduling)
+ 	 */
+-	err = elevator_init(q, &quot;noop&quot;);
++	err = elevator_init(q, proto-&gt;elevator ? : &quot;noop&quot;);
+ 	if (err)
+-		goto cleanup_queue;
++		goto out;
+ 
+ 	/* who should set this limit ? */
+ 	err = blk_queue_init_tags(q, depth, NULL);
+ 	if (err)
+-		goto cleanup_queue;
++		goto out;
+ 
+-	*queue = q;
+-	return 0;
++	if (proto-&gt;queue_create) {
++		err = proto-&gt;queue_create(q-&gt;queuedata);
++		if (err)
++			goto out;
++	}
+ 
+-cleanup_queue:
+-	blk_cleanup_queue(q);
++	return 0;
++out:
++	tgt_queue_destroy(q);
+ 	return err;
+ }
+ 
+@@ -293,7 +308,8 @@
+ 		if (target-&gt;tt-&gt;target_create(target))
+ 			goto free_priv_tt_data;
+ 
+-	if (tgt_queue_setup(&amp;target-&gt;q, queued_cmds ? : TGT_QUEUE_DEPTH))
++	if (tgt_queue_create(target-&gt;proto, queued_cmds ? : TGT_QUEUE_DEPTH,
++			     &amp;target-&gt;q))
+ 		goto tt_destroy;
+ 
+ 	if (tgt_sysfs_register_target(target))
+@@ -305,7 +321,7 @@
+ 	return target;
+ 
+ queue_destroy:
+-	blk_cleanup_queue(target-&gt;q);
++	tgt_queue_destroy(target-&gt;q);
+ tt_destroy:
+ 	if (target-&gt;tt-&gt;target_destroy)
+ 		target-&gt;tt-&gt;target_destroy(target);
+@@ -336,7 +352,7 @@
+ 		target-&gt;tt-&gt;target_destroy(target);
+ 
+ 	destroy_workqueue(target-&gt;twq);
+-	blk_cleanup_queue(target-&gt;q);
++	tgt_queue_destroy(target-&gt;q);
+ 	target_template_put(target-&gt;tt);
+ 	tgt_sysfs_unregister_target(target);
+ 
+@@ -550,15 +566,9 @@
+ {
+ 	struct io_restrictions *limits = &amp;device-&gt;limits;
+ 	struct tgt_target_template *tt = device-&gt;target-&gt;tt;
+-	struct request_queue *q;
+-	int err;
++	struct request_queue *q = device-&gt;q;
+ 
+-	err = tgt_queue_setup(&amp;q, TGT_QUEUE_DEPTH);
+-	if (err)
+-		return err;
+-
+ 	device-&gt;q = q;
+-	q-&gt;queuedata = device;
+ 
+ 	blk_queue_max_sectors(q, min_not_zero(tt-&gt;max_sectors,
+ 					limits-&gt;max_sectors));
+@@ -624,23 +634,16 @@
+ 	if (!device-&gt;dt_data)
+ 		goto put_template;
+ 
+-	device-&gt;pt_data =
+-		kzalloc(target-&gt;proto-&gt;priv_dev_data_size, GFP_KERNEL);
+-	if (!device-&gt;pt_data)
+-		goto free_priv_dt_data;
+-
+ 	if (device-&gt;dt-&gt;create)
+ 		if (device-&gt;dt-&gt;create(device))
+-			goto free_priv_pt_data;
++			goto free_priv_dt_data;
+ 
+-	if (target-&gt;proto-&gt;attach_device)
+-		target-&gt;proto-&gt;attach_device(device-&gt;pt_data);
+-
+-	if (tgt_device_queue_setup(device))
++	if (tgt_queue_create(target-&gt;proto, TGT_QUEUE_DEPTH, &amp;device-&gt;q))
+ 		goto dt_destroy;
++	tgt_device_queue_setup(device);
+ 
+ 	if (tgt_sysfs_register_device(device))
+-		goto cleaup_queue;
++		goto queue_destroy;
+ 
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	list_add(&amp;device-&gt;dlist, &amp;target-&gt;device_list);
+@@ -648,13 +651,11 @@
+ 
+ 	return 0;
+ 
+-cleaup_queue:
+-	blk_cleanup_queue(device-&gt;q);
++queue_destroy:
++	tgt_queue_destroy(device-&gt;q);
+ dt_destroy:
+ 	if (device-&gt;dt-&gt;destroy)
+ 		device-&gt;dt-&gt;destroy(device);
+-free_priv_pt_data:
+-	kfree(device-&gt;pt_data);
+ free_priv_dt_data:
+ 	kfree(device-&gt;dt_data);
+ put_template:
+@@ -668,20 +669,14 @@
+ 
+ void tgt_device_free(struct tgt_device *device)
+ {
+-	struct tgt_target *target = device-&gt;target;
+-
+ 	if (device-&gt;dt-&gt;destroy)
+ 		device-&gt;dt-&gt;destroy(device);
+ 
+-	if (target-&gt;proto-&gt;detach_device)
+-		target-&gt;proto-&gt;detach_device(device-&gt;pt_data);
+-
+-	blk_cleanup_queue(device-&gt;q);
++	tgt_queue_destroy(device-&gt;q);
+ 	fput(device-&gt;file);
+ 	device_template_put(device-&gt;dt);
+ 
+ 	kfree(device-&gt;dt_data);
+-	kfree(device-&gt;pt_data);
+ 	kfree(device);
+ }
+ 
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-11-16 05:12:40 UTC (rev 172)
++++ trunk/kernel/tgt_device.h	2005-11-17 05:18:38 UTC (rev 173)
+@@ -64,7 +64,6 @@
+ struct tgt_device {
+ 	struct tgt_device_template *dt;
+ 	void *dt_data;
+-	void *pt_data;
+ 
+ 	struct class_device cdev;
+ 
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-11-16 05:12:40 UTC (rev 172)
++++ trunk/kernel/tgt_protocol.h	2005-11-17 05:18:38 UTC (rev 173)
+@@ -26,8 +26,9 @@
+ 
+ 	kmem_cache_t *cmd_cache;
+ 	unsigned uspace_pdu_size;
+-	unsigned priv_dev_data_size;
++	unsigned priv_queuedata_size;
+ 
++	char *elevator;
+ 	/*
+ 	 * Create a command and allocate a buffer of size data_len for
+ 	 * for transfer. The buffer will be allocated with GFP_KERNEL
+@@ -51,10 +52,9 @@
+ 
+ 	void (* uspace_cmd_complete)(struct tgt_cmd *cmd);
+ 	/*
+-	 * Initialize protocol specific data per device
++	 * Initialize protocol specific data per queue
+ 	 */
+-	void (* attach_device)(void *data);
+-	void (* detach_device)(void *data);
++	int (* queue_create)(void *data);
+ };
+ 
+ extern void tgt_protocol_init(void);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-11-16 05:12:40 UTC (rev 172)
++++ trunk/kernel/tgt_scsi.c	2005-11-17 05:18:38 UTC (rev 173)
+@@ -17,24 +17,118 @@
+ #include &lt;tgt_protocol.h&gt;
+ #include &lt;tgt_target.h&gt;
+ 
+-enum scsi_tgt_device_state_bit {
+-	STDEV_ORDERED,
+-	STDEV_HEAD,
++static kmem_cache_t *scsi_tgt_cmd_cache;
++
++struct tgt_scsi_queuedata {
++	int nr_active; /* Can we use q-&gt;in_flight? */
++	int blocked;
+ };
+ 
+-/*
+- * The ordering stuff can be generic for all protocols. If so, should
+- * these be moved into struct tgt_device?
+- */
+-struct scsi_tgt_device {
+-	spinlock_t lock;
+-	struct list_head pending_cmds;
+-	unsigned long state;
+-	unsigned active_cmds;
++static struct request *elevator_tgt_scsi_next_request(request_queue_t *q)
++{
++	struct request *rq;
++	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
++	struct scsi_tgt_cmd *scmd;
++	int enabled = 0;
++
++	if (list_empty(&amp;q-&gt;queue_head))
++		return NULL;
++
++	rq = list_entry_rq(q-&gt;queue_head.next);
++
++	scmd = tgt_cmd_to_scsi(rq-&gt;special);
++	dprintk(&quot;%p %x %x %d %d\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
++		sqdata-&gt;blocked, sqdata-&gt;nr_active);
++	switch (scmd-&gt;tags) {
++	case MSG_SIMPLE_TAG:
++		if (!sqdata-&gt;blocked)
++			enabled = 1;
++	case MSG_ORDERED_TAG:
++		if (!sqdata-&gt;blocked &amp;&amp; !sqdata-&gt;nr_active)
++			enabled = 1;
++		break;
++	case MSG_HEAD_TAG:
++		enabled = 1;
++		break;
++	default:
++		BUG();
++	}
++
++	return enabled ? rq : NULL;
++}
++
++static void elevator_tgt_scsi_add_request(request_queue_t *q,
++					  struct request *rq, int where)
++{
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(rq-&gt;special);
++
++	switch (scmd-&gt;tags) {
++	case MSG_SIMPLE_TAG:
++	case MSG_ORDERED_TAG:
++		list_add_tail(&amp;rq-&gt;queuelist, &amp;q-&gt;queue_head);
++		break;
++	case MSG_HEAD_TAG:
++		list_add(&amp;rq-&gt;queuelist, &amp;q-&gt;queue_head);
++		break;
++	default:
++		eprintk(&quot;unknown scsi tag %p %x %x\n&quot;,
++			rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0]);
++
++		scmd-&gt;tags = MSG_SIMPLE_TAG;
++		list_add_tail(&amp;rq-&gt;queuelist, &amp;q-&gt;queue_head);
++	}
++}
++
++static void elevator_tgt_scsi_remove_request(request_queue_t *q,
++					     struct request *rq)
++{
++	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
++	struct tgt_cmd *cmd = rq-&gt;special;
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
++
++	sqdata-&gt;nr_active++;
++
++	dprintk(&quot;%p %x %x %d %d %llu\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
++		sqdata-&gt;blocked, sqdata-&gt;nr_active,
++		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
++
++	if (scmd-&gt;tags == MSG_ORDERED_TAG || scmd-&gt;tags == MSG_HEAD_TAG)
++		sqdata-&gt;blocked = 1;
++}
++
++static struct elevator_type elevator_tgt_scsi = {
++	.ops = {
++		.elevator_next_req_fn = elevator_tgt_scsi_next_request,
++		.elevator_add_req_fn = elevator_tgt_scsi_add_request,
++		.elevator_remove_req_fn = elevator_tgt_scsi_remove_request,
++	},
++	.elevator_name = __stringify(KBUILD_MODNAME),
++	.elevator_owner = THIS_MODULE,
+ };
+ 
+-static kmem_cache_t *scsi_tgt_cmd_cache;
++static void scsi_tgt_complete_cmd(struct tgt_cmd *cmd)
++{
++	struct request_queue *q = cmd-&gt;rq-&gt;q;
++	struct tgt_scsi_queuedata *sqdata = q-&gt;queuedata;
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
++	unsigned long flags;
+ 
++	dprintk(&quot;%p %x %x %d %d %llu\n&quot;, cmd, scmd-&gt;tags, scmd-&gt;scb[0],
++		sqdata-&gt;blocked, sqdata-&gt;nr_active,
++		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
++
++	spin_lock_irqsave(q-&gt;queue_lock, flags);
++
++	sqdata-&gt;nr_active--;
++
++	if (scmd-&gt;tags == MSG_ORDERED_TAG || scmd-&gt;tags == MSG_HEAD_TAG)
++		sqdata-&gt;blocked = 0;
++
++	blk_plug_device(q);
++
++	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
++}
++
+ /*
+  * we should be able to use scsi-ml's functions for this
+  */
+@@ -82,8 +176,7 @@
+ 
+ 	/* translate target driver LUN to device id */
+ 	cmd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
+-	device = tgt_device_find(session-&gt;target, cmd-&gt;dev_id);
+-	cmd-&gt;device = device;
++	cmd-&gt;device = device = tgt_device_find(session-&gt;target, cmd-&gt;dev_id);
+ 
+ 	/* is this device specific */
+ 	cmd-&gt;data_dir = data_dir;
+@@ -141,116 +234,6 @@
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_sense_copy);
+ 
+-#define	device_blocked(x)	((x)-&gt;state &amp; (1 &lt;&lt; STDEV_ORDERED | 1 &lt;&lt; STDEV_HEAD))
+-
+-static int scsi_tgt_task_state(struct tgt_cmd *cmd, int queue, int *more)
+-{
+-	struct tgt_device *device = cmd-&gt;device;
+-	struct scsi_tgt_device *stdev = device-&gt;pt_data;
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	int enabled = 0;
+-
+-	*more = 0;
+-	switch (scmd-&gt;tags) {
+-	case MSG_SIMPLE_TAG:
+-		if (!device_blocked(stdev) &amp;&amp;
+-		    queue ? list_empty(&amp;stdev-&gt;pending_cmds) : 1) {
+-			enabled = 1;
+-			*more = 1;
+-		}
+-
+-		break;
+-	case MSG_ORDERED_TAG:
+-		if (!device_blocked(stdev) &amp;&amp;
+-		    !stdev-&gt;active_cmds &amp;&amp;
+-		    queue ? list_empty(&amp;stdev-&gt;pending_cmds) : 1) {
+-			enabled = 1;
+-			stdev-&gt;state |= 1 &lt;&lt; STDEV_ORDERED;
+-		}
+-		break;
+-	case MSG_HEAD_TAG:
+-		BUG_ON(!queue);
+-		stdev-&gt;state |= 1 &lt;&lt; STDEV_HEAD;
+-		enabled = 1;
+-		break;
+-	default:
+-		printk(&quot;unknown scsi tag %x\n&quot;, scmd-&gt;tags);
+-		enabled = 1;
+-		*more = 1;
+-		break;
+-	}
+-
+-	return enabled;
+-}
+-
+-static void device_queue_cmd(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-	cmd-&gt;device-&gt;dt-&gt;execute_cmd(cmd);
+-}
+-
+-static void scsi_tgt_execute_pending_cmds(struct tgt_device *device)
+-{
+-	struct scsi_tgt_device *stdev = device-&gt;pt_data;
+-	struct tgt_cmd *cmd, *tmp;
+-	struct scsi_tgt_cmd *scmd;
+-	int enabled, more;
+-
+-	list_for_each_entry_safe(cmd, tmp, &amp;stdev-&gt;pending_cmds, clist) {
+-		scmd = tgt_cmd_to_scsi(cmd);
+-
+-		enabled = scsi_tgt_task_state(cmd, 0, &amp;more);
+-		BUG_ON(!enabled &amp;&amp; more);
+-
+-		if (enabled) {
+-			list_del(&amp;cmd-&gt;clist);
+-			stdev-&gt;active_cmds++;
+-			INIT_WORK(&amp;cmd-&gt;work, device_queue_cmd, cmd);
+-			queue_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-		}
+-
+-		if (!more)
+-			break;
+-	}
+-}
+-
+-static void scsi_tgt_complete_cmd(struct tgt_cmd *cmd)
+-{
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	struct tgt_device *device;
+-	struct scsi_tgt_device *stdev;
+-	unsigned long flags;
+-
+-	device = cmd-&gt;device;
+-	if (!device)
+-		return;
+-
+-	stdev = device-&gt;pt_data;
+-	spin_lock_irqsave(&amp;stdev-&gt;lock, flags);
+-
+-	stdev-&gt;active_cmds--;
+-
+-	switch (scmd-&gt;tags) {
+-	case MSG_SIMPLE_TAG:
+-		break;
+-	case MSG_ORDERED_TAG:
+-		stdev-&gt;state &amp;= ~(1 &lt;&lt; STDEV_ORDERED);
+-		break;
+-	case MSG_HEAD_TAG:
+-		stdev-&gt;state &amp;= ~(1 &lt;&lt; STDEV_HEAD);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	if (!list_empty(&amp;stdev-&gt;pending_cmds))
+-		scsi_tgt_execute_pending_cmds(device);
+-
+-	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
+-}
+-
+-/* TODO: reimplement SCSI ordering by using the queuest_queue */
+-
+ static void __tgt_uspace_cmd_send(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+@@ -266,39 +249,14 @@
+ 
+ static int scsi_tgt_execute_cmd(struct tgt_cmd *cmd)
+ {
+-	struct tgt_device *device = cmd-&gt;device;
+-	struct scsi_tgt_device *stdev;
+-	unsigned long flags;
+-	int err, enabled, more;
+-
+ 	dprintk(&quot;%p %x\n&quot;, cmd, tgt_cmd_to_scsi(cmd)-&gt;scb[0]);
+ 
+-	if (!device) {
++	if (!cmd-&gt;device) {
+ 		INIT_WORK(&amp;cmd-&gt;work, __tgt_uspace_cmd_send, cmd);
+ 		queue_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+ 		return TGT_CMD_KERN_QUEUED;
+-	}
+-
+-	stdev = device-&gt;pt_data;
+-	spin_lock_irqsave(&amp;stdev-&gt;lock, flags);
+-
+-	/* Do we need our own list_head? */
+-	BUG_ON(!list_empty(&amp;cmd-&gt;clist));
+-
+-	enabled = scsi_tgt_task_state(cmd, 1, &amp;more);
+-	if (enabled)
+-		stdev-&gt;active_cmds++;
+-	else
+-		list_add_tail(&amp;cmd-&gt;clist, &amp;stdev-&gt;pending_cmds);
+-
+-	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
+-
+-	if (enabled)
+-		err = device-&gt;dt-&gt;execute_cmd(cmd);
+-	else
+-		err = TGT_CMD_KERN_QUEUED;
+-
+-	return err;
++	} else
++		return cmd-&gt;device-&gt;dt-&gt;execute_cmd(cmd);
+ }
+ 
+ static void scsi_tgt_uspace_pdu_build(struct tgt_cmd *cmd, void *data)
+@@ -314,34 +272,16 @@
+ 		scsi_tgt_sense_copy(cmd);
+ }
+ 
+-static void scsi_tgt_attach_device(void *data)
+-{
+-	struct scsi_tgt_device *stdev = data;
+-
+-	spin_lock_init(&amp;stdev-&gt;lock);
+-	INIT_LIST_HEAD(&amp;stdev-&gt;pending_cmds);
+-	stdev-&gt;active_cmds = 0;
+-}
+-
+-static void scsi_tgt_detach_device(void *data)
+-{
+-	struct scsi_tgt_device *stdev = data;
+-
+-	/* TODO */
+-	BUG_ON(!list_empty(&amp;stdev-&gt;pending_cmds));
+-}
+-
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
++	.elevator = elevator_tgt_scsi.elevator_name,
+ 	.create_cmd = scsi_tgt_create_cmd,
+ 	.uspace_pdu_build = scsi_tgt_uspace_pdu_build,
+ 	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
+ 	.execute_cmd = scsi_tgt_execute_cmd,
+ 	.complete_cmd = scsi_tgt_complete_cmd,
+-	.attach_device = scsi_tgt_attach_device,
+-	.detach_device = scsi_tgt_detach_device,
+-	.priv_dev_data_size = sizeof(struct scsi_tgt_device),
++	.priv_queuedata_size = sizeof(struct tgt_scsi_queuedata),
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+ 
+@@ -360,13 +300,24 @@
+ 
+ 	err = tgt_protocol_register(&amp;scsi_tgt_proto);
+ 	if (err)
+-		kmem_cache_destroy(scsi_tgt_cmd_cache);
++		goto protocol_unregister;
+ 
++	err = elv_register(&amp;elevator_tgt_scsi);
++	if (err)
++		goto cache_destroy;
++
++	return 0;
++cache_destroy:
++	kmem_cache_destroy(scsi_tgt_cmd_cache);
++protocol_unregister:
++	tgt_protocol_unregister(&amp;scsi_tgt_proto);
++
+ 	return err;
+ }
+ 
+ static void __exit scsi_tgt_exit(void)
+ {
++	elv_unregister(&amp;elevator_tgt_scsi);
+ 	kmem_cache_destroy(scsi_tgt_cmd_cache);
+ 	tgt_protocol_unregister(&amp;scsi_tgt_proto);
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000166.html">[Stgt-svn] r172 - in trunk: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000168.html">[Stgt-svn] r178 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#167">[ date ]</a>
+              <a href="thread.html#167">[ thread ]</a>
+              <a href="subject.html#167">[ subject ]</a>
+              <a href="author.html#167">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,553 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r669 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r669%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611230929.kAN9TTvq016529%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000655.html">
+   <LINK REL="Next"  HREF="000657.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r669 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r669%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611230929.kAN9TTvq016529%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r669 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Nov 23 10:29:29 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000655.html">[Stgt-svn] r668 - trunk/patch
+</A></li>
+        <LI>Next message: <A HREF="000657.html">[Stgt-svn] r670 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#656">[ date ]</a>
+              <a href="thread.html#656">[ thread ]</a>
+              <a href="subject.html#656">[ subject ]</a>
+              <a href="author.html#656">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-23 10:29:28 +0100 (Thu, 23 Nov 2006)
+New Revision: 669
+
+Added:
+   trunk/usr/bd_sg.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Add passthrough mode support that uses the Jens' bsg tree. sg3 can't
+handle transport commands so now it can handle only SCSI
+commands. Needs to work on sg4.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/Makefile	2006-11-23 09:29:28 UTC (rev 669)
+@@ -1,7 +1,7 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE \
+ 	-I$(KERNELSRC)/include -I../include -I.
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o
++TGTD_OBJS = tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o bd_sg.o
+ LIBS += -laio
+ 
+ ifneq ($(IBMVIO),)
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/bd_aio.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -89,8 +89,8 @@
+ 	free(dev);
+ }
+ 
+-static int bd_aio_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+-			     unsigned long *uaddr,
++static int bd_aio_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
++			     uint32_t datalen, unsigned long *uaddr,
+ 			     uint64_t offset, int *async, void *key)
+ {
+ 	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/bd_mmap.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -55,9 +55,9 @@
+ 	free(dev);
+ }
+ 
+-static int bd_mmap_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+-			      unsigned long *uaddr, uint64_t offset, int *async,
+-			      void *key)
++static int bd_mmap_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
++			      uint32_t datalen, unsigned long *uaddr,
++			      uint64_t offset, int *async, void *key)
+ {
+ 	int fd = dev-&gt;fd;
+ 	void *p;
+
+Added: trunk/usr/bd_sg.c
+===================================================================
+--- trunk/usr/bd_sg.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/bd_sg.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -0,0 +1,207 @@
++/*
++ * rawio routine
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;scsi/sg.h&gt;
++#include &lt;sys/epoll.h&gt;
++#include &lt;limits.h&gt;
++#include &lt;sys/ioctl.h&gt;
++#include &lt;sys/stat.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++
++/*
++ * this uses sg4, so you need to Jens' bsg tree now.
++ */
++
++static void sg_handler(int fd, int events, void *data)
++{
++	int i, err;
++	struct sg_io_hdr hdrs[64];
++	struct tgt_device *dev = data;
++
++	err = read(dev-&gt;fd, hdrs, sizeof(hdrs));
++	if (err &lt; 0)
++		return;
++
++	for (i = 0; i &lt; err / sizeof(hdrs[0]); i++) {
++		struct cmd *cmd = (void *) hdrs[i].usr_ptr;
++		dprintf(&quot;%d %p %u %u %x\n&quot;, i, hdrs[i].usr_ptr,
++			hdrs[i].status, hdrs[i].resid,
++			hdrs[i].info);
++		if (hdrs[i].resid)
++			cmd-&gt;len = hdrs[i].resid;
++		target_cmd_io_done(hdrs[i].usr_ptr, 0);
++	}
++}
++
++static struct tgt_device *bd_sg_open(char *path, int *fd, uint64_t *size)
++{
++	int err, maj, min;
++	char *sd, *bsgdev, buf[128];
++	struct stat64 st;
++	struct tgt_device *dev;
++
++	/* we assume something like /dev/sda */
++
++	*fd = backed_file_open(path, 0, size);
++	if (*fd &lt; 0)
++		return NULL;
++
++	err = fstat64(*fd, &amp;st);
++	if (err &lt; 0) {
++		eprintf(&quot;can't get stat %d, %m\n&quot;, *fd);
++		goto close_fd;
++	}
++
++	if(!S_ISBLK(st.st_mode)) {
++		eprintf(&quot;only scsi devices are supported %s\n&quot;, path);
++		goto close_fd;
++	}
++
++	close(*fd);
++
++	sd = strrchr(path, '/');
++	if (!sd) {
++		eprintf(&quot;invalid path %s\n&quot;, path);
++		return NULL;
++	}
++
++	snprintf(buf, sizeof(buf), &quot;/sys/class/bsg%s/dev&quot;, sd);
++	*fd = open(buf, O_RDONLY);
++	if (*fd &lt; 0) {
++		eprintf(&quot;can't open %s, %m\n&quot;, buf);
++		return NULL;
++	}
++
++	err = read(*fd, buf, sizeof(buf));
++	if (err &lt; 0) {
++		eprintf(&quot;can't open %s, %m\n&quot;, buf);
++		goto close_fd;
++	}
++
++	err = sscanf(buf, &quot;%u:%u&quot;, &amp;maj, &amp;min);
++	if (err &lt; 0) {
++		eprintf(&quot;can't get bsg major/minor number %s, %m\n&quot;, buf);
++		goto close_fd;
++	}
++
++	dprintf(&quot;%s's bsg device number: %d %d\n&quot;, path, maj, min);
++	close(*fd);
++
++	bsgdev = tempnam(&quot;/tmp&quot;, NULL);
++	if (!bsgdev) {
++		eprintf(&quot;can't get temporary name for bsg device, %m\n&quot;);
++		return NULL;
++	}
++
++	err = mknod(bsgdev, S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
++		    maj &lt;&lt; 8 | min);
++	if (err &lt; 0) {
++		eprintf(&quot;can't create the bsg device %s, %m\n&quot;, bsgdev);
++		return NULL;
++	}
++
++	*fd = open(bsgdev, O_RDWR | O_NONBLOCK);
++
++	dprintf(&quot;%d %s\n&quot;, *fd, bsgdev);
++	unlink(bsgdev);
++	free(bsgdev);
++
++	if (*fd &lt; 0) {
++		eprintf(&quot;can't open the bsg device %s, %m\n&quot;, bsgdev);
++		return NULL;
++	}
++
++	dev = zalloc(sizeof(*dev));
++	if (!dev)
++		goto close_fd;
++
++	err = tgt_event_add(*fd, EPOLLIN, sg_handler, dev);
++	if (err) {
++		free(dev);
++		goto close_fd;
++	}
++
++	return dev;
++close_fd:
++	close(*fd);
++	return NULL;
++}
++
++static void bd_sg_close(struct tgt_device *dev)
++{
++	tgt_event_del(dev-&gt;fd);
++	close(dev-&gt;fd);
++	free(dev);
++}
++
++static int bd_sg_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	return 0;
++}
++
++static int bd_sg_cmd_submit(struct tgt_device *dev, uint8_t *scb,
++			    int rw, uint32_t datalen, unsigned long *uaddr,
++			    uint64_t offset, int *async, void *key)
++{
++	int err;
++	struct sg_io_hdr hdr;
++
++	/* TODO sense */
++
++	dprintf(&quot;%x %d %u %lx\n&quot;, scb[0], rw, datalen, *uaddr);
++	memset(&amp;hdr, 0, sizeof(hdr));
++	hdr.interface_id = 'S';
++	hdr.cmd_len = 16;
++	hdr.cmdp = scb;
++	hdr.dxfer_direction = rw ? SG_DXFER_TO_DEV : SG_DXFER_FROM_DEV;
++	hdr.dxfer_len = datalen;
++	hdr.dxferp = (void *) *uaddr;
++/* 	hdr.mx_sb_len = sizeof(sense); */
++/* 	hdr.sbp = sense; */
++	hdr.timeout = 30000;
++	hdr.usr_ptr = key;
++
++	*async = 1;
++
++	err = write(dev-&gt;fd, &amp;hdr, sizeof(hdr));
++	if (err != sizeof(hdr))
++		eprintf(&quot;%d %m\n&quot;, err);
++	else
++		err = 0;
++	return err;
++}
++
++struct backedio_template sg_bdt = {
++	.bd_open		= bd_sg_open,
++	.bd_close		= bd_sg_close,
++	.bd_cmd_submit		= bd_sg_cmd_submit,
++	.bd_cmd_done		= bd_sg_cmd_done,
++};
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/driver.h	2006-11-23 09:29:28 UTC (rev 669)
+@@ -1,4 +1,4 @@
+-extern struct backedio_template mmap_bdt, aio_bdt;
++extern struct backedio_template mmap_bdt, aio_bdt, sg_bdt;
+ 
+ struct tgt_driver {
+ 	const char *name;
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/iscsi/iscsid.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -950,11 +950,13 @@
+ 				list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 		} else
+ 			err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
++					       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+ 					       uaddr, req-&gt;lun,
+ 					       ntohl(req-&gt;data_length),
+ 					       cmd_attr(task), req-&gt;itt);
+ 	} else
+ 		err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
++				       req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE,
+ 				       uaddr, req-&gt;lun, ntohl(req-&gt;data_length),
+ 				       cmd_attr(task), req-&gt;itt);
+ 
+@@ -1194,7 +1196,7 @@
+ 
+ 	len = ntohl(req-&gt;data_length);
+ 	if (len) {
+-		task-&gt;c_buffer = malloc(len);
++		task-&gt;c_buffer = valloc(len);
+ 		if (!task-&gt;c_buffer) {
+ 			iscsi_free_task(task);
+ 			return -ENOMEM;
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/scsi.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -536,7 +536,7 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = submit(dev, *rw, datalen, uaddr, *offset, async, key);
++		result = submit(dev, scb, *rw, datalen, uaddr, *offset, async, key);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/target.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -254,16 +254,17 @@
+ 	}
+ }
+ 
+-int target_cmd_queue(int host_no, uint8_t *scb, unsigned long uaddr,
++int target_cmd_queue(int host_no, uint8_t *scb, uint8_t rw,
++		     unsigned long uaddr,
+ 		     uint8_t *lun, uint32_t data_len,
+ 		     int attribute, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+ 	struct cmd *cmd;
+-	int result, enabled, async, len = 0;
++	int result, enabled = 0, async, len = 0;
+ 	uint64_t offset, dev_id;
+-	uint8_t rw = 0, mmapped = 0;
++	uint8_t mmapped = 0;
+ 
+ 	target = host_to_target(host_no);
+ 	if (!target) {
+@@ -286,12 +287,32 @@
+ 	dprintf(&quot;%x %&quot; PRIx64 &quot;\n&quot;, scb[0], dev_id);
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
++
++	/* FIXME */
++	if (target-&gt;target_iotype == SCSI_TARGET_RAWIO) {
++		memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
++		dprintf(&quot;%u %s\n&quot;, scb[0], cmd-&gt;dev ? &quot;do sg&quot; : &quot;fake&quot;);
++
++		/* we can't pass through REPORT_LUNS. */
++		if (cmd-&gt;dev &amp;&amp; scb[0] != REPORT_LUNS) {
++			target-&gt;bdt-&gt;bd_cmd_submit(cmd-&gt;dev, cmd-&gt;scb, rw,
++						   data_len, &amp;uaddr, offset,
++						   &amp;async, (void *) cmd);
++			cmd-&gt;len = data_len;
++			cmd-&gt;uaddr = uaddr;
++			goto out;
++		} else
++			enabled = 1;
++	}
++
+ 	if (cmd-&gt;dev)
+ 		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
+ 	else
+ 		q = &amp;target-&gt;cmd_queue;
+ 
+-	enabled = cmd_enabled(q, cmd);
++	if (!enabled)
++		enabled = cmd_enabled(q, cmd);
++
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(target-&gt;lid,
+ 					  host_no, scb,
+@@ -323,7 +344,7 @@
+ 		cmd-&gt;uaddr = uaddr;
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
+-
++out:
+ 	return 0;
+ }
+ 
+@@ -648,16 +669,6 @@
+ 	return name;
+ }
+ 
+-enum scsi_target_state tgt_get_target_state(int tid)
+-{
+-	struct target *target;
+-
+-	target = target_lookup(tid);
+-	if (!target)
+-		return -ENOENT;
+-	return target-&gt;target_state;
+-}
+-
+ int tgt_set_target_iotype(int tid, char *str)
+ {
+ 	int i, err = -EINVAL;
+@@ -671,6 +682,10 @@
+ 		if (!strcmp(target_iotype[i].name, str)) {
+ 			target-&gt;target_iotype = target_iotype[i].value;
+ 			err = 0;
++
++			/* FIXME */
++			if (target-&gt;target_iotype == SCSI_TARGET_RAWIO)
++				target-&gt;bdt = &amp;sg_bdt;
+ 			break;
+ 		}
+ 	}
+@@ -678,7 +693,16 @@
+ 	return err;
+ }
+ 
++enum scsi_target_state tgt_get_target_state(int tid)
++{
++	struct target *target;
+ 
++	target = target_lookup(tid);
++	if (!target)
++		return -ENOENT;
++	return target-&gt;target_state;
++}
++
+ static struct {
+ 	enum scsi_target_state value;
+ 	char *name;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/tgtd.h	2006-11-23 09:29:28 UTC (rev 669)
+@@ -37,9 +37,9 @@
+ 	unsigned long bddata[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
+-typedef int (bkio_submit_t) (struct tgt_device *dev, int rw, uint32_t datalen,
+-			     unsigned long *uaddr, uint64_t offset, int *async,
+-			     void *key);
++typedef int (bkio_submit_t) (struct tgt_device *dev, uint8_t *scb,
++			     int rw, uint32_t datalen, unsigned long *uaddr,
++			     uint64_t offset, int *async, void *key);
+ 
+ struct backedio_template {
+ 	struct tgt_device *(*bd_open)(char *path, int *fd, uint64_t *size);
+@@ -73,7 +73,8 @@
+ extern void tgt_event_del(int fd);
+ extern int tgt_event_modify(int fd, int events);
+ 
+-extern int target_cmd_queue(int host_no, uint8_t *scb, unsigned long uaddr,
++extern int target_cmd_queue(int host_no, uint8_t *scb, uint8_t rw,
++			    unsigned long uaddr,
+ 			    uint8_t *lun, uint32_t data_len,
+ 			    int attribute, uint64_t tag);
+ extern void target_cmd_done(int host_no, uint64_t tag);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-11-22 16:14:56 UTC (rev 668)
++++ trunk/usr/tgtif.c	2006-11-23 09:29:28 UTC (rev 669)
+@@ -130,7 +130,7 @@
+ 	switch (ev-&gt;hdr.type) {
+ 	case TGT_KEVENT_CMD_REQ:
+ 		target_cmd_queue(ev-&gt;p.cmd_req.host_no, ev-&gt;p.cmd_req.scb,
+-				 0,
++				 0, 0,
+ /* 				 ev-&gt;k.cmd_req.uaddr, */
+ 				 ev-&gt;p.cmd_req.lun, ev-&gt;p.cmd_req.data_len,
+ 				 ev-&gt;p.cmd_req.attribute, ev-&gt;p.cmd_req.tag);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000655.html">[Stgt-svn] r668 - trunk/patch
+</A></li>
+	<LI>Next message: <A HREF="000657.html">[Stgt-svn] r670 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#656">[ date ]</a>
+              <a href="thread.html#656">[ thread ]</a>
+              <a href="subject.html#656">[ subject ]</a>
+              <a href="author.html#656">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

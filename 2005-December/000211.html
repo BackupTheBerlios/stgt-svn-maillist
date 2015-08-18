@@ -1,0 +1,851 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r224 - in trunk: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r224%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200512301551.jBUFppWs029334%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000210.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r224 - in trunk: include kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r224%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200512301551.jBUFppWs029334%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r224 - in trunk: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Dec 30 16:51:51 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000210.html">[Stgt-svn] r223 - in trunk: include kernel
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#211">[ date ]</a>
+              <a href="thread.html#211">[ thread ]</a>
+              <a href="subject.html#211">[ subject ]</a>
+              <a href="author.html#211">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-30 16:51:50 +0100 (Fri, 30 Dec 2005)
+New Revision: 224
+
+Added:
+   trunk/usr/tgt_device.c
+Removed:
+   trunk/kernel/tgt_device.h
+Modified:
+   trunk/include/tgt_if.h
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_priv.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sysfs.c
+   trunk/kernel/tgt_target.h
+   trunk/usr/Makefile
+   trunk/usr/mgmt.c
+   trunk/usr/tgt_sysfs.h
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Kill tgt_device stuff in kernel. Now tgtd creates /var/run/tgt_device directroy and works in the same way. This is a makeshift solution and should be replaced soon.
+
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/include/tgt_if.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -13,8 +13,6 @@
+ 	TGT_UEVENT_TARGET_CREATE,
+ 	TGT_UEVENT_TARGET_DESTROY,
+ 	TGT_UEVENT_TARGET_PASSTHRU,
+-	TGT_UEVENT_DEVICE_CREATE,
+-	TGT_UEVENT_DEVICE_DESTROY,
+ 	TGT_UEVENT_CMD_RES,
+ 
+ 	/* kernel -&gt; user */
+@@ -40,17 +38,6 @@
+ 		} tgt_passthru;
+ 		struct {
+ 			int tid;
+-			uint64_t dev_id;
+-			uint32_t flags;
+-			char type[32];
+-			int fd;
+-		} c_device;
+-		struct {
+-			int tid;
+-			uint64_t dev_id;
+-		} d_device;
+-		struct {
+-			int tid;
+ 			uint64_t cid;
+ 			uint32_t len;
+ 			int result;
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -19,7 +19,6 @@
+ 
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
+-#include &lt;tgt_device.h&gt;
+ #include &lt;tgt_if.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
+@@ -35,9 +34,6 @@
+ static spinlock_t target_tmpl_lock;
+ static LIST_HEAD(target_tmpl_list);
+ 
+-static spinlock_t device_tmpl_lock;
+-static LIST_HEAD(device_tmpl_list);
+-
+ static struct target_type_internal *target_template_get(const char *name)
+ {
+ 	unsigned long flags;
+@@ -225,7 +221,6 @@
+ 	init_MUTEX(&amp;target-&gt;uspace_sem);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;session_list);
+-	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hlist); i++)
+ 		INIT_LIST_HEAD(&amp;target-&gt;cmd_hlist[i]);
+ 	INIT_LIST_HEAD(&amp;target-&gt;uspace_cmd_queue);
+@@ -277,10 +272,6 @@
+ 	dprintk(&quot;%p\n&quot;, target);
+ 
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	if (!list_empty(&amp;target-&gt;device_list)) {
+-		spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-		return -EBUSY;
+-	}
+ 	/* userspace and maybe a hotunplug are racing (TODO refcounts) */
+ 	if (target-&gt;state == TGT_DESTROYED)
+ 		return -ENODEV;
+@@ -380,126 +371,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_session_destroy);
+ 
+-/*
+- * TODO: use a hash or any better alg/ds
+- */
+-static struct tgt_device *
+-tgt_device_find_nolock(struct tgt_target *target, uint64_t dev_id)
+-{
+-	struct tgt_device *device;
+-
+-	list_for_each_entry(device, &amp;target-&gt;device_list, dlist)
+-		if (device-&gt;dev_id == dev_id)
+-			return device;
+-
+-	return NULL;
+-}
+-
+-int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+-		      int fd, unsigned long dflags)
+-{
+-	struct tgt_target *target;
+-	struct tgt_device *device;
+-	unsigned long flags;
+-	struct inode *inode;
+-
+-	dprintk(&quot;tid %d dev_id %&quot; PRIu64 &quot; type %s fd %d\n&quot;,
+-		tid, dev_id, device_type, fd);
+-
+-	target = target_find(tid);
+-	if (!target)
+-		return -EINVAL;
+-
+-	device = kzalloc(sizeof(*device), GFP_KERNEL);
+-	if (!device)
+-		return -ENOMEM;
+-
+-	device-&gt;dev_id = dev_id;
+-	device-&gt;target = target;
+-	device-&gt;fd = fd;
+-
+-	device-&gt;file = fget(fd);
+-	if (!device-&gt;file) {
+-		eprintk(&quot;Could not get fd %d\n&quot;, fd);
+-		goto free_device;
+-	}
+-
+-	/* TODO: kill me */
+-	inode = device-&gt;file-&gt;f_dentry-&gt;d_inode;
+-	if (S_ISREG(inode-&gt;i_mode))
+-		;
+-	else if (S_ISBLK(inode-&gt;i_mode))
+-		inode = inode-&gt;i_bdev-&gt;bd_inode;
+-
+-	device-&gt;size = inode-&gt;i_size;
+-
+-	if (tgt_sysfs_register_device(device))
+-		goto put_fd;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	list_add(&amp;device-&gt;dlist, &amp;target-&gt;device_list);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	return 0;
+-
+-put_fd:
+-	fput(device-&gt;file);
+-free_device:
+-	kfree(device);
+-	return -EINVAL;
+-}
+-
+-void tgt_device_free(struct tgt_device *device)
+-{
+-	struct tgt_target *target = device-&gt;target;
+-	unsigned long flags;
+-
+-	dprintk(&quot;%d %lld\n&quot;, target-&gt;tid, (unsigned long long) device-&gt;dev_id);
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	list_del(&amp;device-&gt;dlist);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	fput(device-&gt;file);
+-
+-	kfree(device);
+-}
+-
+-int tgt_device_destroy(int tid, uint64_t dev_id)
+-{
+-	struct tgt_device *device;
+-	struct tgt_target *target;
+-	unsigned long flags;
+-	int err = 0;
+-
+-	target = target_find(tid);
+-	if (!target)
+-		return -ENOENT;
+-
+-	/*
+-	 * We cannot delete the device from the list because
+-	 * uspace_cmd_done would use it later.
+-	 */
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	device = tgt_device_find_nolock(target, dev_id);
+-	if (device)
+-		err = test_and_set_bit(TGT_DEV_DEL, &amp;device-&gt;state);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	if (!device)
+-		return -ENOENT;
+-
+-	if (err) {
+-		eprintk(&quot;the device is being removed %d %lld\n&quot;,
+-			tid, (unsigned long long) dev_id);
+-		return -EBUSY;
+-	} else {
+-		/* TODO: revoke commands in the devece queue here. */
+-		tgt_sysfs_unregister_device(device);
+-		return 0;
+-	}
+-}
+-
+ static void tgt_unmap_user_pages(struct tgt_cmd *cmd)
+ {
+ 	struct page *page;
+@@ -846,7 +717,6 @@
+ 
+ 	spin_lock_init(&amp;all_targets_lock);
+ 	spin_lock_init(&amp;target_tmpl_lock);
+-	spin_lock_init(&amp;device_tmpl_lock);
+ 
+ 	tgt_protocol_init();
+ 
+
+Deleted: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_device.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -1,58 +0,0 @@
+-/*
+- * Target Framework Device definitions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#ifndef __TGT_DEVICE_H
+-#define __TGT_DEVICE_H
+-
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/device-mapper.h&gt;
+-#include &lt;linux/device.h&gt;
+-#include &lt;linux/list.h&gt;
+-
+-struct tgt_device;
+-struct tgt_cmd;
+-
+-enum {
+-	TGT_CMD_COMPLETED,
+-	TGT_CMD_FAILED,
+-	/*
+-	 * if the device has queued the command it is responsible for
+-	 * for completing it
+-	 */
+-	TGT_CMD_USPACE_QUEUED,
+-	TGT_CMD_KERN_QUEUED,
+-	TGT_DEV_DEL = 0,
+-};
+-
+-/*
+- * TODO: we could do a queue per target instead of per device and kill
+- * all the tgt_device code
+- */
+-struct tgt_device {
+-	struct class_device cdev;
+-
+-	int fd;
+-	struct file *file;
+-	uint64_t dev_id;
+-	uint32_t blk_shift;
+-	uint64_t size;
+-
+-	unsigned long state;
+-
+-	struct tgt_target *target;
+-	struct list_head dlist;
+-};
+-
+-#define cdev_to_tgt_device(cdev) \
+-        container_of(cdev, struct tgt_device, cdev)
+-
+-extern void tgt_device_free(struct tgt_device *device);
+-
+-extern int tgt_sysfs_register_device(struct tgt_device *device);
+-extern void tgt_sysfs_unregister_device(struct tgt_device *device);
+-
+-#endif
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_nl.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -11,7 +11,6 @@
+ 
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
+-#include &lt;tgt_device.h&gt;
+ #include &lt;tgt_if.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ #include &quot;tgt_priv.h&quot;
+@@ -146,17 +145,6 @@
+ 		err = target-&gt;tt-&gt;msg_recv(target, ev-&gt;u.tgt_passthru.len,
+ 					   ev-&gt;data);
+ 		break;
+-	case TGT_UEVENT_DEVICE_CREATE:
+-		err = tgt_device_create(ev-&gt;u.c_device.tid,
+-					ev-&gt;u.c_device.dev_id,
+-					ev-&gt;u.c_device.type,
+-					ev-&gt;u.c_device.fd,
+-					ev-&gt;u.c_device.flags);
+-		break;
+-	case TGT_UEVENT_DEVICE_DESTROY:
+-		err = tgt_device_destroy(ev-&gt;u.d_device.tid,
+-					 ev-&gt;u.d_device.dev_id);
+-		break;
+ 	case TGT_UEVENT_CMD_RES:
+ 		err = uspace_cmd_done(ev-&gt;u.cmd_res.tid,
+ 				      ev-&gt;u.cmd_res.cid,
+
+Modified: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_priv.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -5,9 +5,6 @@
+ 
+ /* tgt core */
+ extern struct tgt_target *target_find(int tid);
+-extern int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+-			     int fd, unsigned long dflags);
+-extern int tgt_device_destroy(int tid, uint64_t dev_id);
+ extern int uspace_cmd_done(int tid, uint64_t cid,
+ 			   int result, uint32_t len, uint64_t offset,
+ 			   unsigned long addr,
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_scsi.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -10,7 +10,6 @@
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+-#include &lt;tgt_device.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ #include &lt;tgt_target.h&gt;
+ #include &lt;tgt_scsi_if.h&gt;
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_sysfs.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -7,7 +7,6 @@
+  */
+ #include &lt;tgt_types.h&gt;
+ #include &lt;tgt_target.h&gt;
+-#include &lt;tgt_device.h&gt;
+ 
+ #include &quot;tgt_priv.h&quot;
+ 
+@@ -199,85 +198,6 @@
+ 	class_device_unregister(&amp;target-&gt;cdev);
+ }
+ 
+-/*
+- * Device files
+- */
+-#define tgt_device_show_fn(field, format_string)			\
+-static ssize_t								\
+-show_##field (struct class_device *cdev, char *buf)			\
+-{									\
+-	struct tgt_device *device = cdev_to_tgt_device(cdev);		\
+-	return sprintf(buf, format_string, device-&gt;field);	\
+-}
+-
+-#define tgt_device_rd_attr(field, format_string)		\
+-	tgt_device_show_fn(field, format_string)		\
+-static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+-
+-tgt_device_rd_attr(fd, &quot;%d\n&quot;);
+-tgt_device_rd_attr(size, &quot;%&quot; PRIu64 &quot;\n&quot;);
+-
+-static struct class_device_attribute *tgt_device_attrs[] = {
+-	&amp;class_device_attr_fd,
+-	&amp;class_device_attr_size,
+-	NULL,
+-};
+-
+-static void tgt_device_class_release(struct class_device *cdev)
+-{
+-	struct tgt_device *device = cdev_to_tgt_device(cdev);
+-	struct class_device *parent = &amp;device-&gt;target-&gt;cdev;
+-
+-	tgt_device_free(device);
+-	class_device_put(parent);
+-}
+-
+-static struct class tgt_device_class = {
+-	.name = &quot;tgt_device&quot;,
+-	.release = tgt_device_class_release,
+-};
+-
+-int tgt_sysfs_register_device(struct tgt_device *device)
+-{
+-	struct tgt_target *target = device-&gt;target;
+-	struct class_device *cdev = &amp;device-&gt;cdev;
+-	int err, i;
+-
+-	cdev-&gt;class = &amp;tgt_device_class;
+-	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;device%d:%&quot; PRIu64,
+-		 target-&gt;tid, device-&gt;dev_id);
+-	err = class_device_register(cdev);
+-	if (err)
+-		return err;
+-
+-	/*
+-	 * get handle to target so our parent is never released before
+-	 * us
+-	 */
+-	if (!class_device_get(&amp;target-&gt;cdev))
+-		return -EINVAL;
+-
+-	for (i = 0; tgt_device_attrs[i]; i++) {
+-		err = class_device_create_file(&amp;device-&gt;cdev,
+-					       tgt_device_attrs[i]);
+-		if (err)
+-			goto cleanup;
+-	}
+-
+-	return 0;
+-
+-cleanup:
+-	class_device_put(&amp;target-&gt;cdev);
+-	class_device_unregister(cdev);
+-	return err;
+-
+-}
+-
+-void tgt_sysfs_unregister_device(struct tgt_device *device)
+-{
+-	class_device_unregister(&amp;device-&gt;cdev);
+-}
+-
+ int tgt_sysfs_init(void)
+ {
+ 	int err;
+@@ -290,14 +210,8 @@
+ 	if (err)
+ 		goto unregister_type;
+ 
+-	err = class_register(&amp;tgt_device_class);
+-	if (err)
+-		goto unregister_target;
+-
+ 	return 0;
+ 
+-unregister_target:
+-	class_unregister(&amp;tgt_target_class);
+ unregister_type:
+ 	class_unregister(&amp;tgt_type_class);
+ 
+@@ -308,5 +222,4 @@
+ {
+ 	class_unregister(&amp;tgt_type_class);
+ 	class_unregister(&amp;tgt_target_class);
+-	class_unregister(&amp;tgt_device_class);
+ }
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/kernel/tgt_target.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -109,14 +109,13 @@
+ 	int queued_cmds;
+ 	int state;
+ 
+-	/* Protects session_list, device_list, cmd_hlist, and state */
++	/* Protects session_list, cmd_hlist, and state */
+ 	spinlock_t lock;
+ 
+ 	/* Serializes commands going to user space */
+ 	struct semaphore uspace_sem;
+ 	struct list_head tlist;
+ 
+-	struct list_head device_list;
+ 	struct list_head session_list;
+ 	struct list_head cmd_hlist[1 &lt;&lt; TGT_CMD_HASH_ORDER];
+ 
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/Makefile	2005-12-30 15:51:50 UTC (rev 224)
+@@ -3,7 +3,7 @@
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o netlink.o ipc.o dl.o mgmt.o log.o
++tgtd: tgtd.o tgt_device.o netlink.o ipc.o dl.o mgmt.o log.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+ tgtadm: tgtadm.o
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/mgmt.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -98,23 +98,6 @@
+ 				 __ktarget_destroy);
+ }
+ 
+-struct kdevice_create_info {
+-	int fd;
+-	char devtype[256];
+-};
+-
+-static void __kdevice_create(struct tgt_event *ev, struct tgtadm_req *req)
+-{
+-	struct kdevice_create_info *info =
+-		(struct kdevice_create_info *) ((char *) req + sizeof(*req));
+-
+-	ev-&gt;u.c_device.tid = req-&gt;tid;
+-	ev-&gt;u.c_device.dev_id = req-&gt;lun;
+-	ev-&gt;u.c_device.fd = info-&gt;fd;
+-	strncpy(ev-&gt;u.c_device.type, info-&gt;devtype,
+-		sizeof(ev-&gt;u.c_device.type));
+-}
+-
+ void kdevice_create_parser(char *args, char **path, char **devtype)
+ {
+ 	char *p, *q;
+@@ -141,46 +124,28 @@
+ 
+ int kdevice_create(int tid, uint64_t devid, char *path, char *devtype)
+ {
+-	int fd;
+-	char buf[sizeof(struct tgtadm_req) + sizeof(struct kdevice_create_info)];
+-	struct tgtadm_req *req;
+-	struct kdevice_create_info *info;
++	int fd, err;
+ 
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot; %s %s\n&quot;, tid, devid, path, devtype);
+ 
+-	req = (struct tgtadm_req *) buf;
+-	info = (struct kdevice_create_info *) (buf + sizeof(*req));
+-
+-	req-&gt;tid = tid;
+-	req-&gt;lun = devid;
+-
+ 	fd = open(path, O_RDWR | O_LARGEFILE);
+ 	if (fd &lt; 0) {
+ 		eprintf(&quot;Could not open %s errno %d\n&quot;, path, errno);
+ 		return -errno;
+ 	}
+-	info-&gt;fd = fd;
+-	strncpy(info-&gt;devtype, devtype, sizeof(info-&gt;devtype));
+ 
+-	return tgt_event_execute(req, TGT_UEVENT_DEVICE_CREATE,
+-				 __kdevice_create);
+-}
++	err = tgt_device_create(tid, devid, fd);
++	if (err &lt; 0)
++		close(fd);
+ 
+-static void __kdevice_destroy(struct tgt_event *ev, struct tgtadm_req *req)
+-{
+-	ev-&gt;u.d_device.tid = req-&gt;tid;
+-	ev-&gt;u.d_device.dev_id = req-&gt;lun;
++	return err;
+ }
+ 
+ int kdevice_destroy(int tid, uint64_t devid)
+ {
+ 	int fd, err;
+-	struct tgtadm_req req;
+ 	char path[PATH_MAX], buf[PATH_MAX];
+ 
+-	req.tid = tid;
+-	req.lun = devid;
+-
+ 	dprintf(&quot;%u %&quot; PRIu64 &quot;\n&quot;, tid, devid);
+ 
+ 	snprintf(path, sizeof(path),
+@@ -199,8 +164,8 @@
+ 	}
+ 	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+ 
+-	err = tgt_event_execute(&amp;req, TGT_UEVENT_DEVICE_DESTROY,
+-				__kdevice_destroy);
++	err = tgt_device_destroy(tid, devid);
++
+ 	if (!err)
+ 		close(fd);
+ 
+
+Added: trunk/usr/tgt_device.c
+===================================================================
+--- trunk/usr/tgt_device.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/tgt_device.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -0,0 +1,140 @@
++/*
++ * target framework Device
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++/*
++ * This is just makeshift for removing device stuff in kernel space
++ * and should be replaced soon.
++ */
++
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;asm/byteorder.h&gt;
++#include &lt;asm/page.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/ioctl.h&gt;
++#include &lt;sys/types.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;linux/fs.h&gt;
++
++#include &quot;tgtd.h&quot;
++#include &quot;tgt_sysfs.h&quot;
++
++static mode_t dmode = S_IRUSR|S_IWUSR|S_IXUSR|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH;
++static mode_t fmode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
++
++int tgt_device_create(int tid, uint64_t lun, int dfd)
++{
++	int err, fd;
++	struct stat st;
++	char path[PATH_MAX], buf[32];
++	uint64_t size;
++
++	err = ioctl(dfd, BLKGETSIZE64, &amp;size);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot get size %d\n&quot;, dfd);
++		return err;
++	}
++
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
++	err = stat(path, &amp;st);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot find target %d\n&quot;, tid);
++		return err;
++	}
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64,
++		 tid, lun);
++
++	err = mkdir(path, dmode);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot create %s\n&quot;, path);
++		return err;
++	}
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;,
++		 tid, lun);
++	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot create %s\n&quot;, path);
++		return err;
++	}
++	snprintf(buf, sizeof(buf), &quot;%d&quot;, dfd);
++	err = write(fd, buf, strlen(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot write %s\n&quot;, path);
++		return err;
++	}
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;,
++		 tid, lun);
++	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++	if (fd &lt; 0) {
++		eprintf(&quot;Cannot create %s\n&quot;, path);
++		return err;
++	}
++	snprintf(buf, sizeof(buf), &quot;%&quot; PRIu64, size);
++	err = write(fd, buf, strlen(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot write %s\n&quot;, path);
++		return err;
++	}
++
++	return 0;
++}
++
++int tgt_device_destroy(int tid, uint64_t lun)
++{
++	char path[PATH_MAX];
++	int err;
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;,
++		 tid, lun);
++	err = unlink(path);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot unlink %s\n&quot;, path);
++		goto out;
++	}
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/size&quot;,
++		 tid, lun);
++	err = unlink(path);
++	if (err &lt; 0) {
++		eprintf(&quot;Cannot unlink %s\n&quot;, path);
++		goto out;
++	}
++
++	snprintf(path, sizeof(path), TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64,
++		 tid, lun);
++	err = rmdir(path);
++	if (err &lt; 0)
++		eprintf(&quot;Cannot unlink %s\n&quot;, path);
++
++out:
++	return err;
++}
++
++int tgt_device_init(void)
++{
++	int err;
++
++	rmdir(TGT_DEVICE_SYSFSDIR);
++	err = mkdir(TGT_DEVICE_SYSFSDIR, dmode);
++	if (err &lt; 0)
++		perror(&quot;Cannot create&quot;);
++
++	return err;
++}
+
+Modified: trunk/usr/tgt_sysfs.h
+===================================================================
+--- trunk/usr/tgt_sysfs.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/tgt_sysfs.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -3,6 +3,6 @@
+ 
+ #define	TGT_TYPE_SYSFSDIR	&quot;/sys/class/tgt_type&quot;
+ #define	TGT_TARGET_SYSFSDIR	&quot;/sys/class/tgt_target&quot;
+-#define	TGT_DEVICE_SYSFSDIR	&quot;/sys/class/tgt_device&quot;
++#define	TGT_DEVICE_SYSFSDIR	&quot;/var/run/tgt_device&quot;
+ 
+ #endif
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/tgtd.c	2005-12-30 15:51:50 UTC (rev 224)
+@@ -197,6 +197,9 @@
+ 		setsid();
+ 	}
+ 
++	if (tgt_device_init() &lt; 0)
++		exit(0);
++
+ 	nl_fd = nl_open();
+ 	if (nl_fd &lt; 0)
+ 		exit(nl_fd);
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2005-12-30 13:26:51 UTC (rev 223)
++++ trunk/usr/tgtd.h	2005-12-30 15:51:50 UTC (rev 224)
+@@ -12,4 +12,8 @@
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+ 
++extern int tgt_device_init(void);
++extern int tgt_device_create(int tid, uint64_t lun, int dfd);
++extern int tgt_device_destroy(int tid, uint64_t lun);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000210.html">[Stgt-svn] r223 - in trunk: include kernel
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#211">[ date ]</a>
+              <a href="thread.html#211">[ thread ]</a>
+              <a href="subject.html#211">[ subject ]</a>
+              <a href="author.html#211">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

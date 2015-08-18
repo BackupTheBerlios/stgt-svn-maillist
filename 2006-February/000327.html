@@ -1,0 +1,212 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r340 - branches/use-scsi-ml
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r340%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602271343.k1RDhsFD021451%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000326.html">
+   <LINK REL="Next"  HREF="000328.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r340 - branches/use-scsi-ml</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r340%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602271343.k1RDhsFD021451%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r340 - branches/use-scsi-ml">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 27 14:43:54 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000326.html">[Stgt-svn] r339 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000328.html">[Stgt-svn] r341 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#327">[ date ]</a>
+              <a href="thread.html#327">[ thread ]</a>
+              <a href="subject.html#327">[ subject ]</a>
+              <a href="author.html#327">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-27 14:43:53 +0100 (Mon, 27 Feb 2006)
+New Revision: 340
+
+Modified:
+   branches/use-scsi-ml/README
+Log:
+Update README.
+
+Modified: branches/use-scsi-ml/README
+===================================================================
+--- branches/use-scsi-ml/README	2006-02-27 13:43:17 UTC (rev 339)
++++ branches/use-scsi-ml/README	2006-02-27 13:43:53 UTC (rev 340)
+@@ -1,92 +1,80 @@
+ Introduction
+ -------------
+-Note that linux target framework software (tgt) is under active
++Note that linux target framework (tgt) is under active
+ development. Don't play with important data.
+ 
+-Currently, tgt supports two SCSI targets, iSCSI software target
+-(istgt) and IBM virtual SCSI target (ibmvstgt).
++Currently, tgt supports only one low level driver, IBM VIO server
++(ibmvstgt).
+ 
+ 
+ Starting
+ -------------
+ The software consists of kernel modules and user-space tools (daemon,
+-management tool, dynamic libraries). The compilation of the kernel
+-modules require the path to above kernel sources:
++management tool, dynamic libraries).
+ 
+-host:~/tgt$ make KERNELSRC=&lt;kernel-src&gt;
++First, get kernel sources from James's scsi-rc-fixes-2.6 git tree.
+ 
+-Make sure that everything is built successfully. Now you can start tgt
+-by type the followings.
++The kernel itself requires the patches in the patchset
++directory. Apply all the patches except the 6th patch, rebuild the
++kernel, and reboot with the new kernel.
+ 
+-host:~/tgt$ su
+-host:~/tgt# ./initd start
++The compilation of the kernel modules require the path to above kernel
++source:
+ 
+-You need to be in the tgt source code directory to execute the script
+-correctly.
++host:~/use-scsi-ml$ make KERNELSRC=&lt;kernel-src&gt;
+ 
+-You can see /sys/class/tgt_type directory to make sure kernel modules
+-loaded.
++Make sure that everything is built successfully. Now you can load the
++kernel modules by typing the followings.
+ 
+-host:~/tgt# cat /sys/class/tgt_type/driver1/name
+-istgt
+-host:~/tgt# cat /sys/class/tgt_type/driver1/protocol
+-scsi
++host:~/use-scsi-ml$ su
++host:~/use-scsi-ml# ./initd start
+ 
+-The number in the directory path is driver id. The istgt driver id is
+-1 in the above example.
++See /var/log/kern.log (your Linux distributions may use the different
++log file name) to make sure that the kernel modules are loaded
++properly. You should see messages like the followings:
+ 
+-By defaults, tgt generates logs of debug messages. Please see
+-/var/log/kern.log and /var/log/daemon.log (your Linux distributions
+-may use the different log file names).
++Feb 27 19:37:52 lilac kernel: IBM eServer i/pSeries Virtual SCSI Target Driver
++Feb 27 19:37:52 lilac kernel: vio_register_driver: driver ibmvscsi registering
++Feb 27 19:37:52 lilac kernel: scsi1 : ibmvstgt
+ 
++You need the scsi host number (it is 1 in this example) in the next
++stage (configuration).
+ 
++
+ Configuration
+ -------------
++
+ Everyting is configured via the tgtadm management tool. Currenlty, tgt
+-does not support persistent configurations. The tgtadm alayws requires
+-you to specify the driver name like the following examples.
++does not support persistent configurations. You can use a makeshift
++script, 'ibmv' to do the necessary job.
+ 
+-host:~/tgt# ./usr/tgtadm --driver istgt --help
+-host:~/tgt# ./usr/tgtadm --driver ibmvstgt --help
++Note that the ibmv script exports /dev/sdb1 to initiators as LUN 0 by
++defaults. You MUST change the device path if your /dev/sdb1 stores
++important data or your box does not have /dev/sdb1.
+ 
+-First, you need to create a target.
++host:~/use-scsi-ml# ./ibmv 1
+ 
+-host:~/tgt# ./usr/tgtadm --driver istgt --op new --tid 0 \
+---params Name=iqn.2001-04.com.example:storage.disk1.sys1.xyz
++You need to specify the scsi host number as the first argument.
+ 
+-If you use ibmvstgt, you don't need to create a target because they
+-are created automatically. A target is created per virtual bus.
++Please see /var/log/daemon.log (your Linux distributions may use the
++different log file name again) to make sure that everything is
++fine. You should see something like the followings:
+ 
+-You can see /sys/class/tgt_target directory to make sure the target is
+-ready.
++Feb 27 22:36:40 lilac tgtd: dl_init(71) istgt library is not loaded.
++Feb 27 22:36:40 lilac tgtd: dl_init(71) ibmvstgt library is not loaded.
++Feb 27 22:37:08 lilac tgtd: tgt_target_create(572) Succeed to create a new target 1
++Feb 27 22:37:08 lilac tgtd: tgt_target_bind(517) Succeed to bind the target 1 to the scsi host 1
++Feb 27 22:37:08 lilac tgtd: tgt_device_create(238) Succeed to add a logical unit 0 to the target 1
+ 
+-host:~/tgt# cat /sys/class/tgt_target/target0/typeid
+-1
+ 
+-This number is the driver id. That is, this target (tid 0) belongs to
+-the driver id 1.
++Now you are ready. Boot up VIO clients.
+ 
+-The number in the directory path is target id (tid). tid is 0 in the
+-above example.
++Note that the tgt kernel modules enable the debug option by
++defaults. We are not ready for improving performance.
+ 
+-Then, you need to add a device to the target (tid 0).
+ 
+-host:~/tgt# ./usr/tgtadm --driver istgt --op new --tid 0 --lun 0 \
+---params Path=/dev/sdb1,Type=tgt_vsd
+-
+-You can see /sys/class/tgt_device directory to make sure the device
+-was added successfully.
+-
+-host:~/tgt# cat /sys/class/tgt_device/device0\:0/size
+-9006649344
+-
+-Note that every target must need a device whose lun is zero. Now the
+-target is ready for accepting accesses from initiators.
+-
+-
+ Stopping
+ -------------
+ Simply execute:
+ 
+-host:~/tgt# ./initd stop
+-
++host:~/use-scsi-ml# ./initd stop
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000326.html">[Stgt-svn] r339 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000328.html">[Stgt-svn] r341 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#327">[ date ]</a>
+              <a href="thread.html#327">[ thread ]</a>
+              <a href="subject.html#327">[ subject ]</a>
+              <a href="author.html#327">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

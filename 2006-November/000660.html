@@ -1,0 +1,154 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r673 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r673%20-%20trunk/usr&In-Reply-To=%3C200611260415.kAQ4FCks013244%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000659.html">
+   <LINK REL="Next"  HREF="000661.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r673 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r673%20-%20trunk/usr&In-Reply-To=%3C200611260415.kAQ4FCks013244%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r673 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 26 05:15:12 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000659.html">[Stgt-svn] r672 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000661.html">[Stgt-svn] r674 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#660">[ date ]</a>
+              <a href="thread.html#660">[ thread ]</a>
+              <a href="subject.html#660">[ subject ]</a>
+              <a href="author.html#660">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-26 05:15:11 +0100 (Sun, 26 Nov 2006)
+New Revision: 673
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+Log:
+Add device show option:
+
+lily:/home/fujita/tgt# ./usr/tgtadm --lld iscsi --op show --mode logicalunit --tid 1 --lun 0
+path=/dev/hdc1
+scsi_id=deadbeaf1:0
+scsi_sn=
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-26 02:54:52 UTC (rev 672)
++++ trunk/usr/mgmt.c	2006-11-26 04:15:11 UTC (rev 673)
+@@ -149,12 +149,20 @@
+ 	case OP_DELETE:
+ 		err = tgt_device_destroy(req-&gt;tid, req-&gt;lun);
+ 		break;
++	case OP_SHOW:
++		err = tgt_device_show(req-&gt;tid, req-&gt;lun, (char *) res-&gt;data,
++				      *rlen - sizeof(*res));
++		break;
+ 	default:
+ 		break;
+ 	}
+ 
+-	res-&gt;err = err;
+-	res-&gt;len = sizeof(*res);
++	if (req-&gt;op == OP_SHOW)
++		set_show_results(res, &amp;err);
++	else {
++		res-&gt;err = err;
++		res-&gt;len = sizeof(*res);
++	}
+ 
+ 	return err;
+ }
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-26 02:54:52 UTC (rev 672)
++++ trunk/usr/target.c	2006-11-26 04:15:11 UTC (rev 673)
+@@ -208,6 +208,43 @@
+ 	return 0;
+ }
+ 
++#define buffer_check(buf, total, len, rest)	\
++({						\
++	buf += len;				\
++	total += len;				\
++	rest -= len;				\
++	!rest;					\
++})
++
++int tgt_device_show(int tid, uint64_t dev_id, char *buf, int rest)
++{
++	int len, total = 0;
++	struct target *target;
++	struct tgt_device *device;
++
++	target = target_lookup(tid);
++	if (!target)
++		return -ENOENT;
++
++	device = device_lookup(target, dev_id);
++	if (!device) {
++		eprintf(&quot;device %&quot; PRIu64 &quot; not found\n&quot;, dev_id);
++		return -EINVAL;
++	}
++
++	len = snprintf(buf, rest, &quot;path=%s\n&quot;, device-&gt;path);
++	if (buffer_check(buf, total, len, rest))
++		goto out;
++	len = snprintf(buf, rest, &quot;scsi_id=%s\n&quot;, device-&gt;scsi_id);
++	if (buffer_check(buf, total, len, rest))
++		goto out;
++	len = snprintf(buf, rest, &quot;scsi_sn=%s\n&quot;, device-&gt;scsi_sn);
++	if (buffer_check(buf, total, len, rest))
++		goto out;
++out:
++	return rest;
++}
++
+ static int cmd_enabled(struct tgt_cmd_queue *q, struct cmd *cmd)
+ {
+ 	int enabled = 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000659.html">[Stgt-svn] r672 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000661.html">[Stgt-svn] r674 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#660">[ date ]</a>
+              <a href="thread.html#660">[ thread ]</a>
+              <a href="subject.html#660">[ subject ]</a>
+              <a href="author.html#660">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

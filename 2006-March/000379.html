@@ -1,0 +1,639 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r392 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r392%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200603270436.k2R4aLCv030790%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000378.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r392 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r392%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200603270436.k2R4aLCv030790%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r392 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Mon Mar 27 06:36:21 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000378.html">[Stgt-svn] r391 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#379">[ date ]</a>
+              <a href="thread.html#379">[ thread ]</a>
+              <a href="subject.html#379">[ subject ]</a>
+              <a href="author.html#379">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-27 06:36:17 +0200 (Mon, 27 Mar 2006)
+New Revision: 392
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Convert the ibmstgt driver to use include/scsi/srp.h. This needs the
+following patch:
+
+<A HREF="http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114331321129541&amp;w=2">http://marc.theaimsgroup.com/?l=linux-scsi&amp;m=114331321129541&amp;w=2</A>
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-03-15 00:59:30 UTC (rev 391)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-03-27 04:36:17 UTC (rev 392)
+@@ -75,15 +75,6 @@
+ #define dprintk eprintk
+ /* #define dprintk(fmt, args...) */
+ 
+-/* TODO: use include/scsi/srp.h instead of drivers/scsi/ibmvscsi/srp.h */
+-enum {
+-	SRP_TSK_ABORT_TASK	= 0x01,
+-	SRP_TSK_ABORT_TASK_SET	= 0x02,
+-	SRP_TSK_CLEAR_TASK_SET	= 0x04,
+-	SRP_TSK_LUN_RESET	= 0x08,
+-	SRP_TSK_CLEAR_ACA	= 0x40
+-};
+-
+ /*
+  * an RPA command/response transport queue.  This is our structure
+  * that points to the actual queue (not architected by firmware)
+@@ -181,7 +172,7 @@
+ 	crq.cooked.reserved = 0x00;
+ 	crq.cooked.timeout = 0x00;
+ 	crq.cooked.IU_length = length;
+-	crq.cooked.IU_data_ptr = vio_iu(iue)-&gt;srp.generic.tag;
++	crq.cooked.IU_data_ptr = vio_iu(iue)-&gt;srp.rsp.tag;
+ 
+ 	if (rc == 0)
+ 		crq.cooked.status = 0x99;	/* Just needs to be non-zero */
+@@ -199,12 +190,14 @@
+ 	return rc;
+ }
+ 
++#define SRP_RSP_SENSE_DATA_LEN	18
++
+ static int send_rsp(struct iu_entry *iue, unsigned char status,
+ 		    unsigned char asc)
+ {
+ 	union viosrp_iu *iu = vio_iu(iue);
+-	uint8_t *sense = iu-&gt;srp.rsp.sense_and_response_data;
+-	uint64_t tag = iu-&gt;srp.generic.tag;
++	uint8_t *sense = iu-&gt;srp.rsp.data;
++	uint64_t tag = iu-&gt;srp.rsp.tag;
+ 	unsigned long flags;
+ 
+ 	/* If the linked bit is on and status is good */
+@@ -212,26 +205,27 @@
+ 		status = 0x10;
+ 
+ 	memset(iu, 0, sizeof(struct srp_rsp));
+-	iu-&gt;srp.rsp.type = SRP_RSP_TYPE;
++	iu-&gt;srp.rsp.opcode = SRP_RSP;
+ 	spin_lock_irqsave(&amp;iue-&gt;adapter-&gt;lock, flags);
+-	iu-&gt;srp.rsp.request_limit_delta = 1 + iue-&gt;adapter-&gt;next_rsp_delta;
++	iu-&gt;srp.rsp.req_lim_delta = 1 + iue-&gt;adapter-&gt;next_rsp_delta;
+ 	iue-&gt;adapter-&gt;next_rsp_delta = 0;
+ 	spin_unlock_irqrestore(&amp;iue-&gt;adapter-&gt;lock, flags);
+ 	iu-&gt;srp.rsp.tag = tag;
+ 
+-	iu-&gt;srp.rsp.diover = test_bit(V_DIOVER, &amp;iue-&gt;req.flags) ? 1 : 0;
++	if (test_bit(V_DIOVER, &amp;iue-&gt;req.flags))
++		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_DIOVER;
+ 
+-	iu-&gt;srp.rsp.data_in_residual_count = iue-&gt;req.data_in_residual_count;
+-	iu-&gt;srp.rsp.data_out_residual_count = iue-&gt;req.data_out_residual_count;
++	iu-&gt;srp.rsp.data_in_res_cnt = iue-&gt;req.data_in_residual_count;
++	iu-&gt;srp.rsp.data_out_res_cnt = iue-&gt;req.data_out_residual_count;
+ 
+-	iu-&gt;srp.rsp.rspvalid = 0;
++	iu-&gt;srp.rsp.flags &amp;= ~SRP_RSP_FLAG_RSPVALID;
+ 
+-	iu-&gt;srp.rsp.response_data_list_length = 0;
++	iu-&gt;srp.rsp.resp_data_len = 0;
+ 
+ 	if (status &amp;&amp; !iue-&gt;req.sense) {
+ 		iu-&gt;srp.rsp.status = SAM_STAT_CHECK_CONDITION;
+-		iu-&gt;srp.rsp.snsvalid = 1;
+-		iu-&gt;srp.rsp.sense_data_list_length = 18;
++		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
++		iu-&gt;srp.rsp.sense_data_len = SRP_RSP_SENSE_DATA_LEN;
+ 
+ 		/* Valid bit and 'current errors' */
+ 		sense[0] = (0x1 &lt;&lt; 7 | 0x70);
+@@ -246,15 +240,15 @@
+ 		sense[12] = asc;
+ 	} else {
+ 		if (iue-&gt;req.sense) {
+-			iu-&gt;srp.rsp.snsvalid = 1;
+-			iu-&gt;srp.rsp.sense_data_list_length =
+-							SCSI_SENSE_BUFFERSIZE;
++			iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
++			iu-&gt;srp.rsp.sense_data_len = SCSI_SENSE_BUFFERSIZE;
+ 			memcpy(sense, iue-&gt;req.sense, SCSI_SENSE_BUFFERSIZE);
+ 		}
+ 		iu-&gt;srp.rsp.status = status;
+ 	}
+ 
+-	send_iu(iue, sizeof(iu-&gt;srp.rsp), VIOSRP_SRP_FORMAT);
++	send_iu(iue, sizeof(iu-&gt;srp.rsp) + SRP_RSP_SENSE_DATA_LEN,
++		VIOSRP_SRP_FORMAT);
+ 
+ 	return 0;
+ }
+@@ -262,52 +256,52 @@
+ static int data_out_desc_size(struct srp_cmd *cmd)
+ {
+ 	int size = 0;
+-	switch (cmd-&gt;data_out_format) {
+-	case SRP_NO_BUFFER:
++	u8 fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
++
++	switch (fmt) {
++	case SRP_NO_DATA_DESC:
+ 		break;
+-	case SRP_DIRECT_BUFFER:
+-		size = sizeof(struct memory_descriptor);
++	case SRP_DATA_DESC_DIRECT:
++		size = sizeof(struct srp_direct_buf);
+ 		break;
+-	case SRP_INDIRECT_BUFFER:
+-		size = sizeof(struct indirect_descriptor) +
+-			sizeof(struct memory_descriptor) * (cmd-&gt;data_out_count - 1);
++	case SRP_DATA_DESC_INDIRECT:
++		size = sizeof(struct srp_indirect_buf) +
++			sizeof(struct srp_direct_buf) * (cmd-&gt;data_out_desc_cnt - 1);
+ 		break;
+ 	default:
+-		eprintk(&quot;client error. Invalid data_out_format %d\n&quot;,
+-			cmd-&gt;data_out_format);
++		eprintk(&quot;client error. Invalid data_out_format %x\n&quot;, fmt);
+ 		break;
+ 	}
+ 	return size;
+ }
+ 
+-static int vscsis_data_length(struct srp_cmd *cmd, int out)
++static int vscsis_data_length(struct srp_cmd *cmd, enum dma_data_direction dir)
+ {
+-	struct memory_descriptor *md;
+-	struct indirect_descriptor *id;
+-	int format, len = 0, offset = cmd-&gt;additional_cdb_len * 4;
++	struct srp_direct_buf *md;
++	struct srp_indirect_buf *id;
++	int len = 0, offset = cmd-&gt;add_cdb_len * 4;
++	u8 fmt;
+ 
+-	if (out)
+-		format = cmd-&gt;data_out_format;
++	if (dir == DMA_TO_DEVICE)
++		fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
+ 	else {
+-		format = cmd-&gt;data_in_format;
++		fmt = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
+ 		offset += data_out_desc_size(cmd);
+ 	}
+ 
+-	switch (format) {
+-	case SRP_NO_BUFFER:
++	switch (fmt) {
++	case SRP_NO_DATA_DESC:
+ 		break;
+-	case SRP_DIRECT_BUFFER:
+-		md = (struct memory_descriptor *)
+-			(cmd-&gt;additional_data + offset);
+-		len = md-&gt;length;
++	case SRP_DATA_DESC_DIRECT:
++		md = (struct srp_direct_buf *) (cmd-&gt;add_data + offset);
++		len = md-&gt;len;
+ 		break;
+-	case SRP_INDIRECT_BUFFER:
+-		id = (struct indirect_descriptor *)
+-			(cmd-&gt;additional_data + offset);
+-		len = id-&gt;total_length;
++	case SRP_DATA_DESC_INDIRECT:
++		id = (struct srp_indirect_buf *) (cmd-&gt;add_data + offset);
++		len = id-&gt;len;
+ 		break;
+ 	default:
+-		eprintk(&quot;invalid data format %d\n&quot;, format);
++		eprintk(&quot;invalid data format %x\n&quot;, fmt);
+ 		break;
+ 	}
+ 	return len;
+@@ -338,7 +332,7 @@
+ 
+ 	tag = MSG_SIMPLE_TAG;
+ 
+-	switch (iu-&gt;srp.cmd.task_attribute) {
++	switch (iu-&gt;srp.cmd.task_attr) {
+ 	case SRP_SIMPLE_TASK:
+ 		tag = MSG_SIMPLE_TAG;
+ 		break;
+@@ -350,7 +344,7 @@
+ 		break;
+ 	default:
+ 		eprintk(&quot;Task attribute %d not supported, assuming barrier\n&quot;,
+-			iu-&gt;srp.cmd.task_attribute);
++			iu-&gt;srp.cmd.task_attr);
+ 		tag = MSG_ORDERED_TAG;
+ 	}
+ 
+@@ -363,13 +357,11 @@
+ 		__set_bit(V_WRITE, &amp;iue-&gt;req.flags);
+ 	}
+ 
+-	if (iu-&gt;srp.cmd.data_out_format) {
++	if (iu-&gt;srp.cmd.buf_fmt &gt;&gt; 4)
+ 		data_dir = DMA_TO_DEVICE;
+-		len = vscsis_data_length(&amp;iu-&gt;srp.cmd, 1);
+-	} else {
++	else
+ 		data_dir = DMA_FROM_DEVICE;
+-		len = vscsis_data_length(&amp;iu-&gt;srp.cmd, 0);
+-	}
++	len = vscsis_data_length(&amp;iu-&gt;srp.cmd, data_dir);
+ 
+ 	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;,
+ 		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag,
+@@ -411,11 +403,8 @@
+ 	spin_unlock_irqrestore(&amp;adapter-&gt;lock, flags);
+ }
+ 
+-#define SEND	0
+-#define RECV	1
+-
+-static int direct_data(struct scsi_cmnd *scmd, struct memory_descriptor *md,
+-		       int op)
++static int direct_data(struct scsi_cmnd *scmd, struct srp_direct_buf *md,
++		       enum dma_data_direction dir)
+ {
+ 	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+@@ -426,7 +415,7 @@
+ 	dma_addr_t token;
+ 
+ 	dprintk(&quot;%p %u %u %u %d\n&quot;, iue, scmd-&gt;request_bufflen, scmd-&gt;bufflen,
+-		md-&gt;length, scmd-&gt;use_sg);
++		md-&gt;len, scmd-&gt;use_sg);
+ 
+ 	nsg = dma_map_sg(adapter-&gt;dev, sg, scmd-&gt;use_sg, DMA_BIDIRECTIONAL);
+ 	if (!nsg) {
+@@ -434,25 +423,25 @@
+ 		return 0;
+ 	}
+ 
+-	rest = min(scmd-&gt;request_bufflen, md-&gt;length);
++	rest = min(scmd-&gt;request_bufflen, md-&gt;len);
+ 
+ 	for (i = 0, done = 0; i &lt; nsg &amp;&amp; rest; i++) {
+ 		token = sg_dma_address(sg + i);
+ 		len = min(sg_dma_len(sg + i), rest);
+ 
+-		if (op == SEND)
+-			err = h_copy_rdma(len, adapter-&gt;liobn,
+-					  token,
+-					  adapter-&gt;riobn,
+-					  md-&gt;virtual_address + done);
+-		else
++		if (dir == DMA_TO_DEVICE)
+ 			err = h_copy_rdma(len, adapter-&gt;riobn,
+-					  md-&gt;virtual_address + done,
++					  md-&gt;va + done,
+ 					  adapter-&gt;liobn,
+ 					  token);
++		else
++			err = h_copy_rdma(len, adapter-&gt;liobn,
++					  token,
++					  adapter-&gt;riobn,
++					  md-&gt;va + done);
+ 
+ 		if (err != H_Success) {
+-			eprintk(&quot;rdma error %d %d %ld\n&quot;, op, i, err);
++			eprintk(&quot;rdma error %d %d %ld\n&quot;, dir, i, err);
+ 			break;
+ 		}
+ 
+@@ -465,41 +454,41 @@
+ 	return done;
+ }
+ 
+-static int indirect_data(struct scsi_cmnd *scmd, struct indirect_descriptor *id,
+-			 int op)
++static int indirect_data(struct scsi_cmnd *scmd, struct srp_indirect_buf *id,
++			 enum dma_data_direction dir)
+ {
+ 	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+ 	struct srp_cmd *cmd = &amp;vio_iu(iue)-&gt;srp.cmd;
+-	struct memory_descriptor *mds;
++	struct srp_direct_buf *mds;
+ 	struct scatterlist *sg = scmd-&gt;request_buffer;
+ 	dma_addr_t token, itoken = 0;
+ 	long err;
+ 	unsigned int rest, done = 0;
+ 	int i, nmd, nsg, sidx, soff;
+ 
+-	nmd = id-&gt;head.length / sizeof(struct memory_descriptor);
++	nmd = id-&gt;table_desc.len / sizeof(struct srp_direct_buf);
+ 
+ 	dprintk(&quot;%p %u %u %u %u %d %d %d\n&quot;,
+ 		iue, scmd-&gt;request_bufflen, scmd-&gt;bufflen,
+-		id-&gt;total_length, scmd-&gt;offset, nmd,
+-		cmd-&gt;data_in_count, cmd-&gt;data_out_count);
++		id-&gt;len, scmd-&gt;offset, nmd,
++		cmd-&gt;data_in_desc_cnt, cmd-&gt;data_out_desc_cnt);
+ 
+-	if ((op == SEND &amp;&amp; nmd == cmd-&gt;data_in_count) ||
+-	    (op == RECV &amp;&amp; nmd == cmd-&gt;data_out_count)) {
+-		mds = &amp;id-&gt;list[0];
++	if ((dir == DMA_FROM_DEVICE &amp;&amp; nmd == cmd-&gt;data_in_desc_cnt) ||
++	    (dir == DMA_TO_DEVICE &amp;&amp; nmd == cmd-&gt;data_out_desc_cnt)) {
++		mds = &amp;id-&gt;desc_list[0];
+ 		goto rdma;
+ 	}
+ 
+-	mds = dma_alloc_coherent(adapter-&gt;dev, id-&gt;head.length,
++	mds = dma_alloc_coherent(adapter-&gt;dev, id-&gt;table_desc.len,
+ 				 &amp;itoken, GFP_KERNEL);
+ 	if (!mds) {
+-		eprintk(&quot;Can't get dma memory %d\n&quot;, id-&gt;head.length);
++		eprintk(&quot;Can't get dma memory %u\n&quot;, id-&gt;table_desc.len);
+ 		return 0;
+ 	}
+ 
+-	err = h_copy_rdma(id-&gt;head.length, adapter-&gt;riobn,
+-			  id-&gt;head.virtual_address, adapter-&gt;liobn, itoken);
++	err = h_copy_rdma(id-&gt;table_desc.len, adapter-&gt;riobn,
++			  id-&gt;table_desc.va, adapter-&gt;liobn, itoken);
+ 	if (err != H_Success) {
+ 		eprintk(&quot;Error copying indirect table %ld\n&quot;, err);
+ 		goto free_mem;
+@@ -514,29 +503,29 @@
+ 
+ 	sidx = soff = 0;
+ 	token = sg_dma_address(sg + sidx);
+-	rest = min(scmd-&gt;request_bufflen, id-&gt;total_length);
++	rest = min(scmd-&gt;request_bufflen, id-&gt;len);
+ 	for (i = 0; i &lt; nmd &amp;&amp; rest; i++) {
+ 		unsigned int mdone, mlen;
+ 
+-		mlen = min(rest, mds[i].length);
++		mlen = min(rest, mds[i].len);
+ 		for (mdone = 0; mlen;) {
+ 			int slen = min(sg_dma_len(sg + sidx) - soff, mlen);
+ 
+-			if (op == SEND)
++			if (dir == DMA_TO_DEVICE)
+ 				err = h_copy_rdma(slen,
+-						  adapter-&gt;liobn,
+-						  token + soff,
+ 						  adapter-&gt;riobn,
+-						  mds[i].virtual_address + mdone);
++						  mds[i].va + mdone,
++						  adapter-&gt;liobn,
++						  token + soff);
+ 			else
+ 				err = h_copy_rdma(slen,
+-						  adapter-&gt;riobn,
+-						  mds[i].virtual_address + mdone,
+ 						  adapter-&gt;liobn,
+-						  token + soff);
++						  token + soff,
++						  adapter-&gt;riobn,
++						  mds[i].va + mdone);
+ 
+ 			if (err != H_Success) {
+-				eprintk(&quot;rdma error %d %d\n&quot;, op, slen);
++				eprintk(&quot;rdma error %d %d\n&quot;, dir, slen);
+ 				goto unmap_sg;
+ 			}
+ 
+@@ -566,41 +555,44 @@
+ 
+ free_mem:
+ 	if (itoken)
+-		dma_free_coherent(adapter-&gt;dev, id-&gt;head.length, mds, itoken);
++		dma_free_coherent(adapter-&gt;dev, id-&gt;table_desc.len, mds, itoken);
+ 
+ 	return done;
+ }
+ 
+-static int handle_cmd_data(struct scsi_cmnd *scmd, int op)
++static int handle_cmd_data(struct scsi_cmnd *scmd, enum dma_data_direction dir)
+ {
+ 	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct srp_cmd *cmd = &amp;vio_iu(iue)-&gt;srp.cmd;
+-	struct memory_descriptor *md;
+-	struct indirect_descriptor *id;
++	struct srp_direct_buf *md;
++	struct srp_indirect_buf *id;
+ 	int offset, err = 0;
+-	uint8_t format;
++	u8 format;
+ 
+-	offset = cmd-&gt;additional_cdb_len * 4;
+-	if (op == SEND)
++	offset = cmd-&gt;add_cdb_len * 4;
++	if (dir == DMA_FROM_DEVICE)
+ 		offset += data_out_desc_size(cmd);
+ 
+-	format = (op == SEND) ? cmd-&gt;data_in_format : cmd-&gt;data_out_format;
++	if (dir == DMA_TO_DEVICE)
++		format = cmd-&gt;buf_fmt &gt;&gt; 4;
++	else
++		format = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
+ 
+ 	switch (format) {
+-	case SRP_NO_BUFFER:
++	case SRP_NO_DATA_DESC:
+ 		break;
+-	case SRP_DIRECT_BUFFER:
+-		md = (struct memory_descriptor *)
+-			(cmd-&gt;additional_data + offset);
+-		err = direct_data(scmd, md, op);
++	case SRP_DATA_DESC_DIRECT:
++		md = (struct srp_direct_buf *)
++			(cmd-&gt;add_data + offset);
++		err = direct_data(scmd, md, dir);
+ 		break;
+-	case SRP_INDIRECT_BUFFER:
+-		id = (struct indirect_descriptor *)
+-			(cmd-&gt;additional_data + offset);
+-		err = indirect_data(scmd, id, op);
++	case SRP_DATA_DESC_INDIRECT:
++		id = (struct srp_indirect_buf *)
++			(cmd-&gt;add_data + offset);
++		err = indirect_data(scmd, id, dir);
+ 		break;
+ 	default:
+-		eprintk(&quot;Unknown format %d %d\n&quot;, op, format);
++		eprintk(&quot;Unknown format %d %x\n&quot;, dir, format);
+ 		break;
+ 	}
+ 
+@@ -612,10 +604,13 @@
+ 			 void (*done)(struct scsi_cmnd *))
+ {
+ 	struct iu_entry	*iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+-	int rw;
++	enum dma_data_direction dir;
+ 
+-	rw = test_bit(V_WRITE, &amp;iue-&gt;req.flags) ? RECV : SEND;
+-	handle_cmd_data(scmd, rw);
++	if (test_bit(V_WRITE, &amp;iue-&gt;req.flags))
++		dir = DMA_TO_DEVICE;
++	else
++		dir = DMA_FROM_DEVICE;
++	handle_cmd_data(scmd, dir);
+ 	done(scmd);
+ 	return 0;
+ }
+@@ -734,20 +729,19 @@
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	struct srp_login_rsp *rsp = &amp;iu-&gt;srp.login_rsp;
+ 
+-	uint64_t tag = iu-&gt;srp.generic.tag;
++	uint64_t tag = iu-&gt;srp.rsp.tag;
+ 
+ 	/* TODO handle case that requested size is wrong and
+ 	 * buffer format is wrong
+ 	 */
+ 	memset(iu, 0, sizeof(struct srp_login_rsp));
+-	rsp-&gt;type = SRP_LOGIN_RSP_TYPE;
+-	rsp-&gt;request_limit_delta = INITIAL_SRP_LIMIT;
++	rsp-&gt;opcode = SRP_LOGIN_RSP;
++	rsp-&gt;req_lim_delta = INITIAL_SRP_LIMIT;
+ 	rsp-&gt;tag = tag;
+-	rsp-&gt;max_initiator_to_target_iulen = sizeof(union srp_iu);
+-	rsp-&gt;max_target_to_initiator_iulen = sizeof(union srp_iu);
++	rsp-&gt;max_it_iu_len = sizeof(union srp_iu);
++	rsp-&gt;max_ti_iu_len = sizeof(union srp_iu);
+ 	/* direct and indirect */
+-	rsp-&gt;supported_buffer_formats = 0x0006;
+-	rsp-&gt;multi_channel_result = 0x00;
++	rsp-&gt;buf_fmt = SRP_BUF_FORMAT_DIRECT | SRP_BUF_FORMAT_INDIRECT;
+ 
+ 	send_iu(iue, sizeof(*rsp), VIOSRP_SRP_FORMAT);
+ }
+@@ -768,9 +762,9 @@
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	int fn;
+ 
+-	eprintk(&quot;%p %d\n&quot;, iue, iu-&gt;srp.tsk_mgmt.task_mgmt_flags);
++	eprintk(&quot;%p %u\n&quot;, iue, iu-&gt;srp.tsk_mgmt.tsk_mgmt_func);
+ 
+-	switch (iu-&gt;srp.tsk_mgmt.task_mgmt_flags) {
++	switch (iu-&gt;srp.tsk_mgmt.tsk_mgmt_func) {
+ 	case SRP_TSK_ABORT_TASK:
+ 		fn = ABORT_TASK;
+ 		break;
+@@ -791,7 +785,7 @@
+ 	}
+ 	if (fn)
+ 		scsi_tgt_tsk_mgmt_request(iue-&gt;adapter-&gt;shost, fn,
+-					  iu-&gt;srp.tsk_mgmt.managed_task_tag,
++					  iu-&gt;srp.tsk_mgmt.task_tag,
+ 					  (struct scsi_lun *) &amp;iu-&gt;srp.tsk_mgmt.lun,
+ 					  iue);
+ 	else
+@@ -831,7 +825,7 @@
+ 		send_iu(iue, sizeof(*conf), VIOSRP_MAD_FORMAT);
+ 		break;
+ 	default:
+-		eprintk(&quot;Unknown type %d\n&quot;, iu-&gt;srp.generic.type);
++		eprintk(&quot;Unknown type %u\n&quot;, iu-&gt;srp.rsp.opcode);
+ 	}
+ 
+ 	return 1;
+@@ -841,32 +835,33 @@
+ {
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	int done = 1;
++	u8 opcode = iu-&gt;srp.rsp.opcode;
+ 
+-	dprintk(&quot;%p %d\n&quot;, iue, iu-&gt;srp.generic.type);
++	dprintk(&quot;%p %u\n&quot;, iue, opcode);
+ 
+-	switch (iu-&gt;srp.generic.type) {
+-	case SRP_LOGIN_REQ_TYPE:
++	switch (opcode) {
++	case SRP_LOGIN_REQ:
+ 		process_login(iue);
+ 		break;
+-	case SRP_TSK_MGMT_TYPE:
++	case SRP_TSK_MGMT:
+ 		done = process_tsk_mgmt(iue);
+ 		break;
+-	case SRP_CMD_TYPE:
++	case SRP_CMD:
+ 		queue_cmd(iue);
+ 		done = 0;
+ 		break;
+-	case SRP_LOGIN_RSP_TYPE:
+-	case SRP_I_LOGOUT_TYPE:
+-	case SRP_T_LOGOUT_TYPE:
+-	case SRP_RSP_TYPE:
+-	case SRP_CRED_REQ_TYPE:
+-	case SRP_CRED_RSP_TYPE:
+-	case SRP_AER_REQ_TYPE:
+-	case SRP_AER_RSP_TYPE:
+-		eprintk(&quot;Unsupported type %d\n&quot;, iu-&gt;srp.generic.type);
++	case SRP_LOGIN_RSP:
++	case SRP_I_LOGOUT:
++	case SRP_T_LOGOUT:
++	case SRP_RSP:
++	case SRP_CRED_REQ:
++	case SRP_CRED_RSP:
++	case SRP_AER_REQ:
++	case SRP_AER_RSP:
++		eprintk(&quot;Unsupported type %u\n&quot;, opcode);
+ 		break;
+ 	default:
+-		eprintk(&quot;Unknown type %d\n&quot;, iu-&gt;srp.generic.type);
++		eprintk(&quot;Unknown type %u\n&quot;, opcode);
+ 	}
+ 
+ 	return done;
+@@ -1110,7 +1105,7 @@
+ 	status = NO_SENSE;
+ 	asc = 0;
+ 
+-	switch (iu-&gt;srp.tsk_mgmt.task_mgmt_flags) {
++	switch (iu-&gt;srp.tsk_mgmt.tsk_mgmt_func) {
+ 	case SRP_TSK_ABORT_TASK:
+ 		asc = 0x14;
+ 		if (result)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000378.html">[Stgt-svn] r391 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#379">[ date ]</a>
+              <a href="thread.html#379">[ thread ]</a>
+              <a href="subject.html#379">[ subject ]</a>
+              <a href="author.html#379">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,94 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r780 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r780%20-%20trunk&In-Reply-To=%3C200702231612.l1NGC7Z8020273%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000766.html">
+   <LINK REL="Next"  HREF="000768.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r780 - trunk</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r780%20-%20trunk&In-Reply-To=%3C200702231612.l1NGC7Z8020273%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r780 - trunk">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Feb 23 17:12:07 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000766.html">[Stgt-svn] r779 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000768.html">[Stgt-svn] r781 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#767">[ date ]</a>
+              <a href="thread.html#767">[ thread ]</a>
+              <a href="subject.html#767">[ subject ]</a>
+              <a href="author.html#767">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-23 17:12:06 +0100 (Fri, 23 Feb 2007)
+New Revision: 780
+
+Modified:
+   trunk/README
+Log:
+Remove EPOLL_WAIT patch description in README.
+
+
+Modified: trunk/README
+===================================================================
+--- trunk/README	2007-02-23 16:09:08 UTC (rev 779)
++++ trunk/README	2007-02-23 16:12:06 UTC (rev 780)
+@@ -19,14 +19,10 @@
+ 
+ Preparation
+ -------------
+-First, get kernel version 2.6.20.
++Get kernel version 2.6.20, rebuild the kernel, and reboot with the new
++kernel. Note you need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS
++kernel options in order to use the IBM VIO target driver,
+ 
+-Second, apply aioepoll-2.6.20.diff in the patches directory.
+-
+-Third, rebuild the kernel and reboot with the new kernel. Note you
+-need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS kernel options
+-in order to use the IBM VIO target driver, 
+-
+ Now you are ready to build target drivers. If you like to use the
+ iSCSI target driver:
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000766.html">[Stgt-svn] r779 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000768.html">[Stgt-svn] r781 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#767">[ date ]</a>
+              <a href="thread.html#767">[ thread ]</a>
+              <a href="subject.html#767">[ subject ]</a>
+              <a href="author.html#767">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

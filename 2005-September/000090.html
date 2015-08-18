@@ -1,0 +1,86 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r89%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C43346A80.7050702%40redhat.com%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000082.html">
+   <LINK REL="Next"  HREF="000083.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r89 - in trunk: iscsi/kernel kernel</H1>
+    <B>Mike Christie</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r89%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C43346A80.7050702%40redhat.com%3E"
+       TITLE="[Stgt-svn] r89 - in trunk: iscsi/kernel kernel">mchristi at redhat.com
+       </A><BR>
+    <I>Fri Sep 23 22:50:08 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000082.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000083.html">[Stgt-svn] r90 - in trunk: . iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#90">[ date ]</a>
+              <a href="thread.html#90">[ thread ]</a>
+              <a href="subject.html#90">[ subject ]</a>
+              <a href="author.html#90">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>sorry to post on this but I must ammend the log:
+
+
+Mike Christie at BerliOS wrote:
+&gt;<i> Author: mnc
+</I>&gt;<i> Date: 2005-09-23 22:36:38 +0200 (Fri, 23 Sep 2005)
+</I>&gt;<i> New Revision: 89
+</I>&gt;<i> 
+</I>&gt;<i> Modified:
+</I>&gt;<i>    trunk/iscsi/kernel/iscsi.c
+</I>&gt;<i>    trunk/kernel/tgt.c
+</I>&gt;<i>    trunk/kernel/tgt.h
+</I>&gt;<i>    trunk/kernel/tgt_device.h
+</I>&gt;<i>    trunk/kernel/tgt_protocol.h
+</I>&gt;<i>    trunk/kernel/tgt_scsi.c
+</I>&gt;<i>    trunk/kernel/tgt_vsd.c
+</I>&gt;<i> Log:
+</I>&gt;<i> create buffer from create cmnd; for now trust expected transfer length. This allows us to have a vsd or
+</I>sd get a buffer for the transfer without completely parsing the command (can we completely trust this value,
+HW cards have something similar). This is needed to make passthrough very simple. Target drivers should
+konw when they have to allocate or not allocate a buffer since it should not know if the command is going
+
+This should state that target drivers should _not_ know when they have to allocate or allocate a buffer.
+They should jsut get one when they need it. I just mean that they should not have to check the
+scb/cdb to know anything about this. TGT should just do all this for it.
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000082.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000083.html">[Stgt-svn] r90 - in trunk: . iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#90">[ date ]</a>
+              <a href="thread.html#90">[ thread ]</a>
+              <a href="subject.html#90">[ subject ]</a>
+              <a href="author.html#90">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

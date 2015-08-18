@@ -1,0 +1,434 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r126 - in trunk: istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r126%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510280209.j9S29tvV002316%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000119.html">
+   <LINK REL="Next"  HREF="000121.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r126 - in trunk: istgt/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r126%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510280209.j9S29tvV002316%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r126 - in trunk: istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 04:09:55 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000119.html">[Stgt-svn] r125 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000121.html">[Stgt-svn] r127 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#120">[ date ]</a>
+              <a href="thread.html#120">[ thread ]</a>
+              <a href="subject.html#120">[ subject ]</a>
+              <a href="author.html#120">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 04:09:53 +0200 (Fri, 28 Oct 2005)
+New Revision: 126
+
+Modified:
+   trunk/istgt/kernel/conn.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/nthread.c
+   trunk/istgt/kernel/session.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_types.h
+Log:
+Move eprintk and dprintk to tgt_types.h (more appropriate header file name ?).
+
+
+Modified: trunk/istgt/kernel/conn.c
+===================================================================
+--- trunk/istgt/kernel/conn.c	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/istgt/kernel/conn.c	2005-10-28 02:09:53 UTC (rev 126)
+@@ -51,7 +51,7 @@
+ 	struct iscsi_session *session = conn-&gt;session;
+ 	struct iscsi_target *target = session-&gt;target;
+ 
+-	dprintk(D_GENERIC, &quot;%llu\n&quot;, (unsigned long long) session-&gt;sid);
++	dprintk(&quot;%llu\n&quot;, (unsigned long long) session-&gt;sid);
+ 
+ 	conn-&gt;sock = SOCKET_I(conn-&gt;file-&gt;f_dentry-&gt;d_inode);
+ 	conn-&gt;sock-&gt;sk-&gt;sk_user_data = conn;
+@@ -73,7 +73,7 @@
+ 
+ int conn_free(struct iscsi_conn *conn)
+ {
+-	dprintk(D_GENERIC, &quot;%p %#Lx %u\n&quot;, conn-&gt;session,
++	dprintk(&quot;%p %#Lx %u\n&quot;, conn-&gt;session,
+ 		(unsigned long long) conn-&gt;session-&gt;sid, conn-&gt;cid);
+ 
+ 	BUG_ON(atomic_read(&amp;conn-&gt;nr_cmnds));
+@@ -101,8 +101,7 @@
+ {
+ 	struct iscsi_conn *conn;
+ 
+-	dprintk(D_SETUP, &quot;%#Lx:%u\n&quot;,
+-		(unsigned long long) session-&gt;sid, info-&gt;cid);
++	dprintk(&quot;%#Lx:%u\n&quot;, (unsigned long long) session-&gt;sid, info-&gt;cid);
+ 
+ 	conn = conn_lookup(session, info-&gt;cid);
+ 	if (conn)
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/istgt/kernel/iscsi.c	2005-10-28 02:09:53 UTC (rev 126)
+@@ -12,10 +12,6 @@
+ #include &lt;linux/mempool.h&gt;
+ 
+ #include &lt;iscsi.h&gt;
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_scsi.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+ 
+ unsigned long debug_enable_flags;
+ 
+@@ -83,7 +79,7 @@
+ 		BUG_ON(!conn-&gt;session-&gt;ts);
+ 	}
+ 
+-	dprintk(D_GENERIC, &quot;%p:%p\n&quot;, conn, cmnd);
++	dprintk(&quot;%p:%p\n&quot;, conn, cmnd);
+ 
+ 	return cmnd;
+ }
+@@ -124,7 +120,7 @@
+ 	list_for_each_safe(pos, next, send) {
+ 		cmnd = list_entry(pos, struct iscsi_cmnd, list);
+ 
+-		dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++		dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+ 
+ 		list_del_init(&amp;cmnd-&gt;list);
+ 		BUG_ON(conn != cmnd-&gt;conn);
+@@ -165,7 +161,7 @@
+ 	u32 pdusize, expsize, scsisize, size, offset, sn;
+ 	LIST_HEAD(send);
+ 
+-	dprintk(D_GENERIC, &quot;%p\n&quot;, cmnd);
++	dprintk(&quot;%p\n&quot;, cmnd);
+ 	pdusize = conn-&gt;session-&gt;param.max_xmit_data_length;
+ 	expsize = cmnd_read_size(cmnd);
+ 	BUG_ON(!cmnd-&gt;tc);
+@@ -343,7 +339,7 @@
+ 
+ 	if (!cmnd)
+ 		return;
+-	dprintk(D_GENERIC, &quot;%p\n&quot;, cmnd);
++	dprintk(&quot;%p\n&quot;, cmnd);
+ 	conn = cmnd-&gt;conn;
+ 	kfree(cmnd-&gt;pdu.ahs);
+ 
+@@ -453,7 +449,7 @@
+ 	u32 exp_stat_sn;
+ 
+ 	cmnd-&gt;pdu.bhs.exp_statsn = exp_stat_sn = be32_to_cpu(cmnd-&gt;pdu.bhs.exp_statsn);
+-	dprintk(D_GENERIC, &quot;%x,%x\n&quot;, cmnd_opcode(cmnd), exp_stat_sn);
++	dprintk(&quot;%x,%x\n&quot;, cmnd_opcode(cmnd), exp_stat_sn);
+ 	if ((int)(exp_stat_sn - conn-&gt;exp_stat_sn) &gt; 0 &amp;&amp;
+ 	    (int)(exp_stat_sn - conn-&gt;stat_sn) &lt;= 0) {
+ 		// free pdu resources
+@@ -467,7 +463,7 @@
+ 	u32 cmd_sn;
+ 
+ 	cmnd-&gt;pdu.bhs.statsn = cmd_sn = be32_to_cpu(cmnd-&gt;pdu.bhs.statsn);
+-	dprintk(D_GENERIC, &quot;%d(%d)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
++	dprintk(&quot;%d(%d)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
+ 	if ((s32)(cmd_sn - session-&gt;exp_cmd_sn) &gt;= 0)
+ 		return 0;
+ 	eprintk(&quot;sequence error (%x,%x)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
+@@ -513,7 +509,7 @@
+ 	int err = 0;
+ 	u32 itt = cmnd-&gt;pdu.bhs.itt;
+ 
+-	dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, itt);
++	dprintk(&quot;%p:%x\n&quot;, cmnd, itt);
+ 	if (itt == ISCSI_RESERVED_TAG) {
+ 		err = -ISCSI_PROTOCOL_ERROR;
+ 		goto out;
+@@ -604,7 +600,7 @@
+ 	char *addr;
+ 	struct scatterlist *sg;
+ 
+-	dprintk(D_GENERIC, &quot;%u,%u\n&quot;, offset, size);
++	dprintk(&quot;%u,%u\n&quot;, offset, size);
+ 
+ 	BUG_ON(!tc);
+ 	BUG_ON(!tc-&gt;sg);
+@@ -687,7 +683,7 @@
+ 			length = 0;
+ 		}
+ 
+-		dprintk(D_WRITE, &quot;%x %u %u %u %u\n&quot;, cmnd_itt(req),
++		dprintk(&quot;%x %u %u %u %u\n&quot;, cmnd_itt(req),
+ 			be32_to_cpu(rsp_hdr-&gt;data_length),
+ 			be32_to_cpu(rsp_hdr-&gt;data_offset),
+ 			be32_to_cpu(rsp_hdr-&gt;r2tsn), req-&gt;outstanding_r2t);
+@@ -911,7 +907,7 @@
+ {
+ 	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
+ 
+-	dprintk(D_GENERIC, &quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
++	dprintk(&quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+ 	switch (req_hdr-&gt;cdb[0]) {
+ 	case SERVICE_ACTION_IN:
+@@ -1032,7 +1028,7 @@
+ 		}
+ 	}
+ 
+-	dprintk(D_WRITE, &quot;%u %p %p %u %u\n&quot;, req-&gt;ttt, cmnd, scsi_cmnd,
++	dprintk(&quot;%u %p %p %u %u\n&quot;, req-&gt;ttt, cmnd, scsi_cmnd,
+ 		offset, cmnd-&gt;pdu.datasize);
+ 
+ 	if (cmnd_recv_pdu(conn, scsi_cmnd-&gt;tc, offset, cmnd-&gt;pdu.datasize) &lt; 0)
+@@ -1271,7 +1267,7 @@
+ 
+ static void iscsi_cmnd_exec(struct iscsi_cmnd *cmnd)
+ {
+-	dprintk(D_GENERIC, &quot;%p,%x,%u\n&quot;, cmnd, cmnd_opcode(cmnd),
++	dprintk(&quot;%p,%x,%u\n&quot;, cmnd, cmnd_opcode(cmnd),
+ 		cmnd-&gt;pdu.bhs.statsn);
+ 
+ 	switch (cmnd_opcode(cmnd)) {
+@@ -1377,7 +1373,7 @@
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 	struct iovec *iop;
+ 
+-	dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+ 	BUG_ON(!cmnd);
+ 	iscsi_cmnd_set_length(&amp;cmnd-&gt;pdu);
+ 
+@@ -1444,7 +1440,7 @@
+ {
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 
+-	dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+ 	switch (cmnd_opcode(cmnd)) {
+ 	case ISCSI_OP_NOOP_IN:
+ 	case ISCSI_OP_SCSI_CMD_RSP:
+@@ -1484,7 +1480,7 @@
+ 	struct list_head *entry;
+ 	u32 cmd_sn;
+ 
+-	dprintk(D_GENERIC, &quot;%p:%x %u,%u\n&quot;,
++	dprintk(&quot;%p:%x %u,%u\n&quot;,
+ 		cmnd, cmnd_opcode(cmnd), cmnd-&gt;pdu.bhs.statsn,
+ 		session-&gt;exp_cmd_sn);
+ 
+@@ -1594,7 +1590,7 @@
+ {
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 
+-	dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+ 	switch (cmnd_opcode(cmnd)) {
+ 	case ISCSI_OP_SCSI_REJECT:
+ 	case ISCSI_OP_NOOP_OUT:
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/istgt/kernel/iscsi.h	2005-10-28 02:09:53 UTC (rev 126)
+@@ -16,6 +16,11 @@
+ #include &lt;iscsi_proto.h&gt;
+ #include &lt;istgt_u.h&gt;
+ 
++#include &lt;tgt.h&gt;
++#include &lt;tgt_target.h&gt;
++#include &lt;tgt_scsi.h&gt;
++#include &lt;tgt_protocol.h&gt;
++
+ struct iscsi_sess_param {
+ 	int initial_r2t;
+ 	int immediate_data;
+@@ -284,33 +289,6 @@
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-
+-#define D_SETUP		(1UL &lt;&lt; 0)
+-#define D_EXIT		(1UL &lt;&lt; 1)
+-#define D_GENERIC	(1UL &lt;&lt; 2)
+-#define D_READ		(1UL &lt;&lt; 3)
+-#define D_WRITE 	(1UL &lt;&lt; 4)
+-#define D_IOD		(1UL &lt;&lt; 5)
+-#define D_THREAD	(1UL &lt;&lt; 6)
+-#define D_TASK_MGT	(1UL &lt;&lt; 7)
+-#define D_IOMODE	(1UL &lt;&lt; 8)
+-
+-#define D_DATA		(D_READ | D_WRITE)
+-
+-extern unsigned long debug_enable_flags;
+-
+-#define dprintk(debug, fmt, args...)					\
+-do {									\
+-	if ((debug) &amp; debug_enable_flags) {				\
+-		printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+-	}								\
+-} while (0)
+-
+-#define eprintk(fmt, args...)					\
+-do {								\
+-	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+-} while (0)
+-
+ #define show_param(param)\
+ {\
+ 	eprintk(&quot;%d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n&quot;,\
+
+Modified: trunk/istgt/kernel/nthread.c
+===================================================================
+--- trunk/istgt/kernel/nthread.c	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/istgt/kernel/nthread.c	2005-10-28 02:09:53 UTC (rev 126)
+@@ -134,7 +134,7 @@
+ 	}
+ 
+ out:
+-	dprintk(D_IOD, &quot;%d\n&quot;, res);
++	dprintk(&quot;%d\n&quot;, res);
+ 
+ 	return res;
+ }
+@@ -315,7 +315,7 @@
+ 		set_fs(KERNEL_DS);
+ 		res = vfs_writev(file, (struct iovec __user *) iop, count, &amp;off);
+ 		set_fs(oldfs);
+-		dprintk(D_DATA, &quot;%#Lx:%u: %d(%ld)\n&quot;,
++		dprintk(&quot;%#Lx:%u: %d(%ld)\n&quot;,
+ 			(unsigned long long) conn-&gt;session-&gt;sid, conn-&gt;cid,
+ 			res, (long) iop-&gt;iov_len);
+ 		if (unlikely(res &lt;= 0)) {
+@@ -359,7 +359,7 @@
+ 		sendsize = PAGE_CACHE_SIZE - offset;
+ 		if (size &lt;= sendsize) {
+ 			res = sendpage(sock, sg[idx].page, offset, size, flags);
+-			dprintk(D_DATA, &quot;%s %#Lx:%u: %d(%lu,%u,%u)\n&quot;,
++			dprintk(&quot;%s %#Lx:%u: %d(%lu,%u,%u)\n&quot;,
+ 				sock-&gt;ops-&gt;sendpage ? &quot;sendpage&quot; : &quot;writepage&quot;,
+ 				(unsigned long long ) conn-&gt;session-&gt;sid, conn-&gt;cid,
+ 				res, sg[idx].page-&gt;index, offset, size);
+@@ -380,7 +380,7 @@
+ 		}
+ 
+ 		res = sendpage(sock, sg[idx].page, offset, sendsize, flags | MSG_MORE);
+-		dprintk(D_DATA, &quot;%s %#Lx:%u: %d(%lu,%u,%u)\n&quot;,
++		dprintk(&quot;%s %#Lx:%u: %d(%lu,%u,%u)\n&quot;,
+ 			sock-&gt;ops-&gt;sendpage ? &quot;sendpage&quot; : &quot;writepage&quot;,
+ 			(unsigned long long ) conn-&gt;session-&gt;sid, conn-&gt;cid,
+ 			res, sg[idx].page-&gt;index, offset, sendsize);
+
+Modified: trunk/istgt/kernel/session.c
+===================================================================
+--- trunk/istgt/kernel/session.c	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/istgt/kernel/session.c	2005-10-28 02:09:53 UTC (rev 126)
+@@ -25,7 +25,7 @@
+ 	struct iscsi_session *session;
+ 	int i;
+ 
+-	dprintk(D_SETUP, &quot;%p %u %#Lx\n&quot;, target, target-&gt;tid,
++	dprintk(&quot;%p %u %#Lx\n&quot;, target, target-&gt;tid,
+ 		(unsigned long long) info-&gt;sid);
+ 
+ 	session = session_lookup(target, info-&gt;sid);
+@@ -69,7 +69,7 @@
+ 	if (!session)
+ 		return -ENOENT;
+ 
+-	dprintk(D_SETUP, &quot;%#Lx\n&quot;, (unsigned long long) session-&gt;sid);
++	dprintk(&quot;%#Lx\n&quot;, (unsigned long long) session-&gt;sid);
+ 
+ 	if (!list_empty(&amp;session-&gt;conn_list)) {
+ 		eprintk(&quot;%llu still have connections\n&quot;,
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/kernel/tgt.c	2005-10-28 02:09:53 UTC (rev 126)
+@@ -24,19 +24,6 @@
+ #include &lt;tgt_if.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
+-#define DEBUG_TGT
+-
+-#define eprintk(fmt, args...)					\
+-do {								\
+-	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+-} while (0)
+-
+-#ifdef DEBUG_TGT
+-#define dprintk eprintk
+-#else
+-#define dprintk(fmt, args...)
+-#endif
+-
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
+ static spinlock_t all_targets_lock;
+
+Modified: trunk/kernel/tgt_types.h
+===================================================================
+--- trunk/kernel/tgt_types.h	2005-10-28 01:52:12 UTC (rev 125)
++++ trunk/kernel/tgt_types.h	2005-10-28 02:09:53 UTC (rev 126)
+@@ -15,4 +15,18 @@
+ # define PRIu64		__PRI64_PREFIX &quot;u&quot;
+ # define PRIx64		__PRI64_PREFIX &quot;x&quot;
+ 
++
++#define DEBUG_TGT
++
++#define eprintk(fmt, args...)					\
++do {								\
++	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
++} while (0)
++
++#ifdef DEBUG_TGT
++#define dprintk eprintk
++#else
++#define dprintk(fmt, args...)
+ #endif
++
++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000119.html">[Stgt-svn] r125 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000121.html">[Stgt-svn] r127 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#120">[ date ]</a>
+              <a href="thread.html#120">[ thread ]</a>
+              <a href="subject.html#120">[ subject ]</a>
+              <a href="author.html#120">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

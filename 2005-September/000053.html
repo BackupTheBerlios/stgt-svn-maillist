@@ -1,0 +1,1339 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r60 - trunk/iscsi/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r60%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509090707.j8977LwA031797%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000052.html">
+   <LINK REL="Next"  HREF="000054.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r60 - trunk/iscsi/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r60%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509090707.j8977LwA031797%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r60 - trunk/iscsi/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Sep  9 09:07:21 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000052.html">[Stgt-svn] r59 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000054.html">[Stgt-svn] r61 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#53">[ date ]</a>
+              <a href="thread.html#53">[ thread ]</a>
+              <a href="subject.html#53">[ subject ]</a>
+              <a href="author.html#53">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-09 09:07:20 +0200 (Fri, 09 Sep 2005)
+New Revision: 60
+
+Removed:
+   trunk/iscsi/usr/isns.c
+   trunk/iscsi/usr/isns.h
+Modified:
+   trunk/iscsi/usr/Makefile
+   trunk/iscsi/usr/ietd.c
+   trunk/iscsi/usr/iscsid.h
+Log:
+Kill iSNS code in IET.
+
+Modified: trunk/iscsi/usr/Makefile
+===================================================================
+--- trunk/iscsi/usr/Makefile	2005-09-09 06:58:13 UTC (rev 59)
++++ trunk/iscsi/usr/Makefile	2005-09-09 07:07:20 UTC (rev 60)
+@@ -4,7 +4,7 @@
+ 
+ all: $(PROGRAMS)
+ 
+-ietd: ietd.o iscsid.o conn.o session.o target.o message.o ctldev.o log.o isns.o chap.o event.o param.o plain.o
++ietd: ietd.o iscsid.o conn.o session.o target.o message.o ctldev.o log.o chap.o event.o param.o plain.o
+ 
+ 	$(CC) $^ -o $@ $(LIBS)
+ 
+
+Modified: trunk/iscsi/usr/ietd.c
+===================================================================
+--- trunk/iscsi/usr/ietd.c	2005-09-09 06:58:13 UTC (rev 59)
++++ trunk/iscsi/usr/ietd.c	2005-09-09 07:07:20 UTC (rev 60)
+@@ -51,7 +51,6 @@
+ 	{&quot;config&quot;, required_argument, 0, 'c'},
+ 	{&quot;foreground&quot;, no_argument, 0, 'f'},
+ 	{&quot;debug&quot;, required_argument, 0, 'd'},
+-	{&quot;isns&quot;, required_argument, 0, 's'},
+ 	{&quot;uid&quot;, required_argument, 0, 'u'},
+ 	{&quot;gid&quot;, required_argument, 0, 'g'},
+ 	{&quot;version&quot;, no_argument, 0, 'v'},
+@@ -75,7 +74,6 @@
+ 		printf(&quot;\
+   -f, --foreground        make the program run in the foreground\n\
+   -d, --debug debuglevel  print debugging information\n\
+-  -s, --isns=[ip]         work with isns server, default is disabled\n\
+   -u, --uid=uid           run as uid, default is current user\n\
+   -g, --gid=gid           run as gid, default is current user group\n\
+   -h, --help              display this help and exit\n\
+@@ -376,11 +374,10 @@
+ {
+ 	int ch, longindex;
+ 	char *config = NULL;
+-	char isns_ip[32];
+ 	uid_t uid = 0;
+ 	gid_t gid = 0;
+ 
+-	while ((ch = getopt_long(argc, argv, &quot;c:fd:s:u:g:vh&quot;, long_options, &amp;longindex)) &gt;= 0) {
++	while ((ch = getopt_long(argc, argv, &quot;c:fd:u:g:vh&quot;, long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'c':
+ 			config = optarg;
+@@ -391,11 +388,6 @@
+ 		case 'd':
+ 			log_level = atoi(optarg);
+ 			break;
+-		case 's':
+-			memset(isns_ip, 0, sizeof(isns_ip));
+-			strncpy(isns_ip, optarg, sizeof(isns_ip));
+-			use_isns = 1;
+-			break;
+ 		case 'u':
+ 			uid = strtoul(optarg, NULL, 10);
+ 			break;
+@@ -464,12 +456,6 @@
+ 		setsid();
+ 	}
+ 
+-	if (use_isns) {
+-		if (initialize_iet_isns(isns_ip,
+-					ISCSI_LISTEN_PORT) &lt; 0)
+-			use_isns = 0;
+-	}
+-
+ 	cops-&gt;init(config);
+ 
+ 	if (uid &amp;&amp; setuid(uid) &lt; 0)
+@@ -480,9 +466,5 @@
+ 
+ 	event_loop();
+ 
+-	if (use_isns) {
+-		cleanup_iet_isns();
+-	}
+-
+ 	return 0;
+ }
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-09-09 06:58:13 UTC (rev 59)
++++ trunk/iscsi/usr/iscsid.h	2005-09-09 07:07:20 UTC (rev 60)
+@@ -131,9 +131,6 @@
+ 
+ #define INCOMING_BUFSIZE	8192
+ 
+-/* isns */
+-struct storage_node;
+-
+ struct target {
+ 	struct qelem tlist;
+ 
+@@ -220,20 +217,6 @@
+ extern int session_conns_close(u32 tid, u64 sid);
+ extern int server_stop(void);
+ 
+-
+-/* isns.c */
+-struct tag_len_val;
+-struct network_entity;
+-extern int initialize_iet_isns(char *isnsip, int port);
+-extern void cleanup_iet_isns(void);
+-extern struct storage_node *initialize_storage_node(char *name, char *alias);
+-extern void cleanup_storage_node(struct storage_node *node);
+-extern int RegNode(struct storage_node *node);
+-extern int DeRegNode(struct storage_node *node);
+-extern int use_isns;
+-extern int get_portal_address(char *ip);
+-extern int DeRegEntity(struct network_entity *entity, struct tag_len_val *name);
+-
+ /* event.c */
+ extern void handle_iscsi_events(int fd);
+ extern int nl_open(void);
+
+Deleted: trunk/iscsi/usr/isns.c
+===================================================================
+--- trunk/iscsi/usr/isns.c	2005-09-09 06:58:13 UTC (rev 59)
++++ trunk/iscsi/usr/isns.c	2005-09-09 07:07:20 UTC (rev 60)
+@@ -1,720 +0,0 @@
+-/*
+- * Implementation for iSCSI iSNS support.
+- * (C) 2004 Ming Zhang &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">mingz at ele.uri.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;errno.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;sys/types.h&gt;
+-#include &lt;sys/socket.h&gt;
+-#include &lt;netinet/in.h&gt;
+-#include &lt;arpa/inet.h&gt;
+-#include &lt;net/if.h&gt;
+-#include &lt;sys/ioctl.h&gt;
+-
+-#include &quot;isns.h&quot;
+-#include &quot;iscsid.h&quot;
+-
+-static int cur_transaction_id = 0;
+-int sock_fd = -1;
+-int use_tcp = 1;
+-int isns_port = ISNS_PORT;
+-int use_isns = 0;
+-
+-struct network_entity *iet_entity = NULL;
+-struct portal *iet_portal = NULL;
+-
+-/*
+- * wrapper to hide the TCP or UDP detail. currently we use TCP only
+- */
+-int send_data(char *buf, int size)
+-{
+-	int i = 0;
+-
+-	if (sock_fd == -1) {
+-		log_error(&quot;Wrong sock.\n&quot;);
+-		return -EINVAL;
+-	}
+-	do {
+-		buf += i;
+-		if ((i = send(sock_fd, buf, size, 0)) == -1) {
+-			log_error(&quot;Send data fail\n&quot;);
+-			return -EIO;
+-		}
+-		size -= i;
+-		if (size &lt; 0) {
+-			log_error(&quot;What's wrong? \n&quot;);
+-			return -EIO;
+-		}
+-	} while (size);
+-	return 0;
+-}
+-
+-/*
+- * wrapper to hide the TCP or UDP detail currently we use TCP only
+- */
+-int recv_data(char *buf, int size)
+-{
+-	int i = 0;
+-
+-	if (sock_fd == -1) {
+-		log_error(&quot;Wrong sock.\n&quot;);
+-		return -EINVAL;
+-	}
+-	if ((i = recv(sock_fd, buf, size, 0)) == -1) {
+-		log_error(&quot;Recv data fail\n&quot;);
+-		return -EIO;
+-	}
+-	return i;
+-}
+-
+-int init_isns_connection(int *fd, char *isnsip)
+-{
+-	struct sockaddr_in isns_addr;
+-	struct in_addr isns_in_addr;
+-
+-	if (use_tcp) {
+-		if ((*fd = socket (AF_INET, SOCK_STREAM, 0)) &lt; 0) {
+-			log_error(&quot;fail to create socket\n&quot;);
+-			return -EIO;
+-		}
+-		isns_addr.sin_family = AF_INET;
+-		isns_addr.sin_port = htons((short)isns_port);
+-		if (!inet_aton(isnsip, &amp;isns_in_addr)) {
+-			log_error(&quot;invalid isns ip\n&quot;);
+-			return -EINVAL;
+-		}
+-		isns_addr.sin_addr.s_addr = isns_in_addr.s_addr;
+-		if (connect(*fd, (struct sockaddr *) &amp;isns_addr, sizeof (isns_addr)) &lt; 0) {
+-			log_error(&quot;fail to connect isns server\n&quot;);
+-			return -EIO;
+-		}
+-	}
+-	else {
+-		log_error(&quot;Unimplemented yet\n&quot;);
+-		return -EINVAL;
+-	}
+-	return 0;
+-}
+-
+-void cleanup_connection(int fd)
+-{
+-	close(fd);
+-}
+-
+-int send_pdu(struct isns_pdu *pdu, int pdu_size)
+-{
+-	/* FIXME: Lock protection */
+-	return send_data((char *)pdu-&gt;hdr, pdu_size);
+-}
+-
+-int send_cmd(struct isns_cmd *cmd)
+-{
+-	return send_pdu(&amp;cmd-&gt;pdu, cmd-&gt;cmd_size);
+-}
+-
+-int recv_resp(struct isns_resp *resp, int function_id)
+-{
+-	int res;
+-
+-	resp-&gt;resp_size = recv_data((char *)resp-&gt;pdu.hdr, MAX_ISNS_RESP_SIZE);
+-	log_debug(1, &quot;recv %d\n&quot;, resp-&gt;resp_size);
+-	if (check_isns_hdr(resp-&gt;pdu.hdr, function_id)) {
+-		log_error(&quot;Invalid pdu hdr\n&quot;);
+-		return -EIO;
+-	}
+-	if ((res = check_isns_resp_status(&amp;resp-&gt;pdu)) != ISNSP_RSP_SUCC) {
+-		log_error(&quot;fail request %d with status code %d\n&quot;, function_id, res);
+-		return -1;
+-	}
+-	return 0;
+-}
+-
+-void init_tvllist(TLVLIST *p, int count)
+-{
+-	int i;
+-
+-	if (count &gt; MAX_TLV_CNT) {
+-		log_error(&quot;Invalid tlv count\n&quot;);
+-		return;
+-	}
+-	for (i = 0; i &lt; count; i++) {
+-		p-&gt;tlv[i].attr_tag = INVALID_TAG;
+-		p-&gt;tlv[i].attr_len = NULL_SIZE;
+-		memset(p-&gt;tlv[i].attr_val, 0, MAX_TLV_VALUE_LEN);
+-	}
+-}
+-
+-char *append_tlv(char *cur_buf, const struct tag_len_val *tlv)
+-{
+-	if (!cur_buf) {
+-		log_error(&quot;Invalid cur_buf in append_tlv\n&quot;);
+-		return cur_buf;
+-	}
+-	if (!tlv) {
+-		log_error(&quot;Invalid NULL tlv in append_tlv\n&quot;);
+-		return cur_buf;
+-	}
+-	if (tlv-&gt;attr_tag == INVALID_TAG)
+-		return cur_buf;
+-
+-	if (tlv-&gt;attr_tag == ATTR_TAG_EID)
+-		log_debug(2, &quot;attach EID: %ld,%s\n&quot;, tlv-&gt;attr_len, tlv-&gt;attr_val);
+-
+-	*((u32 *)cur_buf) = htonl(tlv-&gt;attr_tag);
+-	*((u32 *)cur_buf + 1) = htonl(tlv-&gt;attr_len);
+-	if (tlv-&gt;attr_len)
+-		memcpy(cur_buf + 8, (char *)tlv-&gt;attr_val, tlv-&gt;attr_len);
+-	return (cur_buf + tlv-&gt;attr_len + 8);
+-}
+-
+-int set_tlv_u32_data(struct tag_len_val *tvl, u32 data, u32 tag, long size)
+-{
+-	if (!tvl)
+-		return -EINVAL;
+-
+-	/* keep tag and length in host order while data in network order */
+-	tvl-&gt;attr_tag = tag;
+-	tvl-&gt;attr_len = size;
+-	*(u32 *)tvl-&gt;attr_val = htonl(data);
+-	return 0;
+-}
+-
+-int set_tlv_ip_data(struct tag_len_val *tvl, char *ip, u32 tag, long size)
+-{
+-	struct in_addr portal_ip;
+-
+-	tvl-&gt;attr_tag = tag;
+-	tvl-&gt;attr_len = size;
+-
+-	if (inet_aton(ip, &amp;portal_ip)) {
+-		*((u32 *)tvl-&gt;attr_val) = 0x0;
+-		*((u32 *)tvl-&gt;attr_val + 1) = 0x0;
+-		*((u32 *)tvl-&gt;attr_val + 2) = htonl(0xFFFF);
+-		*((u32 *)tvl-&gt;attr_val + 3) = portal_ip.s_addr;
+-		return 0;
+-	}
+-	else {
+-		log_error(&quot;invalid ip\n&quot;);
+-		return -EINVAL;
+-	}
+-}
+-
+-int set_tlv_string_data(struct tag_len_val *tvl, char *data, u16 tag, int maxlen)
+-{
+-	tvl-&gt;attr_tag = tag;
+-	tvl-&gt;attr_len = (data) ? Four_Bytes_Aligned(strlen(data)) : 0;
+-	if (tvl-&gt;attr_len &gt; maxlen) {
+-		log_error(&quot;Wrong size of string data\n&quot;);
+-		return -EINVAL;
+-	}
+-	else {
+-		if (tvl-&gt;attr_len) {
+-			memset(tvl-&gt;attr_val, 0, tvl-&gt;attr_len);
+-			strcpy(tvl-&gt;attr_val, data);
+-		}
+-		return 0;
+-	}
+-}
+-
+-#define init_network_entity(x) init_tvllist((TLVLIST *)x, 9)
+-#define set_tlv_entity_id(x, y) 		\
+-	set_tlv_string_data(x, y, ATTR_TAG_EID, ATTR_TAG_EID_SIZE)
+-#define set_tlv_entity_proto(x, y)	\
+-	set_tlv_u32_data(x, y, ATTR_TAG_ENTITY_PROTO, ATTR_TAG_ENTITY_PROTO_SIZE)
+-#define set_tlv_manage_ip(x, y)	\
+-	set_tlv_ip_data(x, y, ATTR_TAG_MANA_IP_ADDR, ATTR_TAG_MANA_IP_ADDR_SIZE)
+-
+-#define init_storage_node(x) init_tvllist((TLVLIST *)x, 8)
+-#define set_tlv_iscsi_name(x, y) 		\
+-	set_tlv_string_data(x, y, ATTR_TAG_ISCSI_NAME, ATTR_TAG_ISCSI_NAME_SIZE)
+-#define set_tlv_iscsi_alias(x, y) 		\
+-	set_tlv_string_data(x, y, ATTR_TAG_ISCSI_ALIAS, ATTR_TAG_ISCSI_ALIAS_SIZE)
+-#define set_tlv_iscsi_auth_method(x, y) 		\
+-	set_tlv_string_data(x, y, ATTR_TAG_ISCSI_AUTH_METHOD, ATTR_TAG_ISCSI_AUTH_METHOD_SIZE)
+-#define set_tlv_iscsi_node_type(x, y)	\
+-	set_tlv_u32_data(x, 1UL &lt;&lt; (31 - (y)), ATTR_TAG_NODE_TYPE, ATTR_TAG_NODE_TYPE_SIZE)
+-
+-#define init_portal(x) init_tvllist((TLVLIST *)x, 11)
+-#define set_tlv_portal_ip(x, y)	\
+-	set_tlv_ip_data(x, y, ATTR_TAG_PORTAL_IP_ADDR, ATTR_TAG_PORTAL_IP_ADDR_SIZE)
+-#define set_tlv_portal_port(x, y)	\
+-	set_tlv_u32_data(x, y, ATTR_TAG_PORTAL_PORT, ATTR_TAG_PORTAL_PORT_SIZE)
+-
+-#define init_portal_group(x) init_tvllist((TLVLIST *)x, 5)
+-#define set_tlv_pg_iscsi_name(x, y)	\
+-	set_tlv_string_data(x, y, ATTR_TAG_PG_ISCSI_NAME, ATTR_TAG_PG_ISCSI_NAME_SIZE)
+-#define set_tlv_pg_portal_ip(x, y)	\
+-	set_tlv_ip_data(x, y, ATTR_TAG_PG_PORTAL_IP_ADDR, ATTR_TAG_PG_PORTAL_IP_ADDR_SIZE)
+-#define set_tlv_pg_portal_port(x, y)	\
+-	set_tlv_u32_data(x, y, ATTR_TAG_PG_PORTAL_PORT, ATTR_TAG_PG_PORTAL_PORT_SIZE)
+-#define set_tlv_pg_tag(x, y)	\
+-	set_tlv_u32_data(x, y, ATTR_TAG_PG_TAG, ATTR_TAG_PG_TAG_SIZE)
+-
+-#define init_discovery_domain(x) init_tvllist((TLVLIST *)x, 8)
+-#define init_discovery_domain_set(x) init_tvllist((TLVLIST *)x, 3)
+-
+-int initialize_iet_entity(struct network_entity *entity)
+-{
+-	init_network_entity(entity);
+-	set_tlv_entity_proto(&amp;entity-&gt;entity_proto, EP_ISCSI);
+-	return set_tlv_entity_id(&amp;entity-&gt;eid, NULL);
+-}
+-
+-int initialize_iet_portal(int port)
+-{
+-	int err;
+-	int fd;
+-	struct ifreq ifr;
+-	int i;
+-	struct portal *p;
+-
+-	fd = socket(PF_INET, SOCK_DGRAM, 0);
+-	if (fd &lt; 0) {
+-		log_error(&quot;Can not create socket \n&quot;);
+-		return -EIO;
+-	}
+-
+-	for (i = 0; i &lt; 8; i++) {
+-		sprintf(ifr.ifr_name, &quot;eth%d&quot;, i);
+-		ifr.ifr_addr.sa_family = AF_INET;
+-		if (ioctl(fd, SIOCGIFADDR, &amp;ifr) == 0) {
+-			if (!(p = (struct portal *)malloc(sizeof(struct portal)))) {
+-				log_error(&quot;can not get memory for portal\n&quot;);
+-				err = -ENOMEM;
+-				break;
+-			}
+-			set_tlv_portal_ip(&amp;p-&gt;portal_ip_addr, inet_ntoa(((struct sockaddr_in *)&amp;(ifr.ifr_addr))-&gt;sin_addr));
+-			set_tlv_portal_port(&amp;p-&gt;portal_port, port);
+-			p-&gt;next = iet_portal;
+-			iet_portal = p;
+-		}
+-		else {
+-			log_error(&quot;fail to get ip address for eth%d\n&quot;, i);
+-			break;
+-		}
+-	}
+-	close(fd);
+-	return 0;
+-}
+-
+-int initialize_iet_isns(char *isnsip, int port)
+-{
+-	int err;
+-	struct portal *p;
+-
+-	/*
+-	 * FIXME: currently only support one entity and one portal.
+-	 */
+-	if (!(iet_entity = (struct network_entity *)malloc(sizeof(struct network_entity)))) {
+-		log_error(&quot;can not get memory for iet_entity\n&quot;);
+-		return -ENOMEM;
+-	}
+-	if ((err = initialize_iet_entity(iet_entity)))
+-		goto fail;
+-	if ((err = initialize_iet_portal(port)))
+-		goto fail;
+-	if ((err = init_isns_connection(&amp;sock_fd, isnsip)))
+-		goto fail;
+-	return 0;
+-fail:
+-	if (iet_entity)
+-		free(iet_entity);
+-	while (iet_portal) {
+-		p = iet_portal-&gt;next;
+-		free(iet_portal);
+-		iet_portal = p;
+-	};
+-	return err;
+-}
+-
+-void cleanup_iet_isns(void)
+-{
+-	struct portal *p;
+-
+-	cleanup_connection(sock_fd);
+-	if (iet_entity)
+-		free(iet_entity);
+-	while (iet_portal) {
+-		p = iet_portal-&gt;next;
+-		free(iet_portal);
+-		iet_portal = p;
+-	};
+-}
+-
+-void get_next_transaction_id(u16 *transaction_id)
+-{
+-	/* FIXME: Lock protection */
+-	*transaction_id = cur_transaction_id++;
+-}
+-
+-void get_cur_transaction_id(u16 *transaction_id)
+-{
+-	/* FIXME: Lock protection */
+-	*transaction_id = cur_transaction_id;
+-}
+-
+-struct isns_cmd *allocate_isns_cmd(void)
+-{
+-	struct isns_cmd *cmd;
+-
+-	if (!(cmd = (struct isns_cmd*)malloc(sizeof(struct isns_cmd))))
+-		return NULL;
+-	if (!(cmd-&gt;pdu.hdr = (struct isns_hdr *)malloc(MAX_ISNS_CMD_SIZE))) {
+-		free(cmd);
+-		return NULL;
+-	}
+-	cmd-&gt;pdu.pay_load = (((char *)cmd-&gt;pdu.hdr) + ISNS_HDR_LEN);
+-	cmd-&gt;pdu.authentication_block = NULL;
+-	cmd-&gt;cmd_size = ISNS_HDR_LEN;
+-
+-	return cmd;
+-}
+-
+-void free_isns_cmd(struct isns_cmd *cmd)
+-{
+-	if (cmd-&gt;pdu.authentication_block)
+-		free(cmd-&gt;pdu.authentication_block);
+-	if (cmd-&gt;pdu.hdr)
+-		free(cmd-&gt;pdu.hdr);
+-	free(cmd);
+-}
+-
+-struct isns_resp *allocate_isns_resp(void)
+-{
+-	struct isns_resp *resp;
+-
+-	if (!(resp = (struct isns_resp*)malloc(sizeof(struct isns_resp))))
+-		return NULL;
+-	if (!(resp-&gt;pdu.hdr = (struct isns_hdr *)malloc(MAX_ISNS_RESP_SIZE))) {
+-		free(resp);
+-		return NULL;
+-	}
+-	resp-&gt;pdu.pay_load = (((char *)resp-&gt;pdu.hdr) + ISNS_HDR_LEN);
+-	resp-&gt;pdu.authentication_block = NULL;
+-
+-	return resp;
+-}
+-
+-void free_isns_resp(struct isns_resp *resp)
+-{
+-	if (resp-&gt;pdu.authentication_block)
+-		free(resp-&gt;pdu.authentication_block);
+-	if (resp-&gt;pdu.hdr)
+-		free(resp-&gt;pdu.hdr);
+-	free(resp);
+-}
+-
+-void init_isns_hdr(struct isns_hdr *hdr, int function_id, int replace)
+-{
+-	hdr-&gt;isnsp_version = htons((u16)ISNSP_VERSION);
+-	hdr-&gt;function_id = htons((u16)function_id);
+-	hdr-&gt;pdu_length = 0;
+-	hdr-&gt;flags = 0;
+-	/* always use one PDU for one command we send */
+-	set_bit_first_pdu(hdr-&gt;flags);
+-	set_bit_last_pdu(hdr-&gt;flags);
+-	set_bit_sender_client(hdr-&gt;flags);
+-	if (replace)
+-		set_bit_replace(hdr-&gt;flags);
+-	hdr-&gt;flags = htons((u16)hdr-&gt;flags);
+-	get_next_transaction_id(&amp;hdr-&gt;transaction_id);
+-	hdr-&gt;transaction_id = htons((u16)hdr-&gt;transaction_id);
+-	hdr-&gt;sequence_id = 0;
+-}
+-
+-int check_isns_hdr(struct isns_hdr *hdr, int function_id)
+-{
+-	if (ntohs(hdr-&gt;isnsp_version) != ISNSP_VERSION)
+-		return -EINVAL;
+-	if (ntohs(hdr-&gt;function_id) != function_id)
+-		return -EINVAL;
+-	/* TODO: more check here */
+-	return 0;
+-}
+-
+-int check_isns_resp_status(struct isns_pdu *pdu)
+-{
+-	int status = ntohl(*(u32 *)pdu-&gt;pay_load);
+-
+-	log_debug(1, &quot;return status code %d\n&quot;, status);
+-	return status;
+-}
+-
+-/* DD related functions */
+-int RegDD(void)
+-{
+-	return -EPERM;
+-}
+-
+-int DeRegDD(void)
+-{
+-	return -EPERM;
+-}
+-
+-/* DDS related functions */
+-int RegDDS(void)
+-{
+-	return -EPERM;
+-}
+-
+-int DeRegDDS(void)
+-{
+-	return -EPERM;
+-}
+-
+-/* Entity related functions */
+-int RegEntity(void)
+-{
+-	return -EPERM;
+-}
+-
+-int DeRegEntity(struct network_entity *entity, struct tag_len_val *name)
+-{
+-	struct isns_cmd *cmd;
+-	struct isns_pdu *pdu;
+-	struct isns_resp *resp = NULL;
+-	char *buf;
+-
+-	if (!entity) {
+-		log_error(&quot;Null entity to deregister.\n&quot;);
+-		return -EINVAL;
+-	}
+-
+-	if (!(cmd = allocate_isns_cmd())) {
+-		log_error(&quot;allocate isns cmd fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	pdu = &amp;cmd-&gt;pdu;
+-	init_isns_hdr(pdu-&gt;hdr, FUNC_DevDeReg, NO_REPLACE);
+-	buf = pdu-&gt;pay_load;
+-	buf = append_tlv(buf, name);
+-	buf = append_tlv(buf, &amp;delimiter);
+-	buf = append_tlv(buf, &amp;entity-&gt;eid);
+-
+-	cmd-&gt;cmd_size = buf - (char *)pdu-&gt;hdr;
+-	pdu-&gt;hdr-&gt;pdu_length = htons((u16)(buf - (char *)pdu-&gt;pay_load));
+-
+-	if (send_cmd(cmd)) {
+-		log_error(&quot;fail to send isns cmd\n&quot;);
+-		return -EIO;
+-	}
+-	if (!(resp = allocate_isns_resp())) {
+-		log_error(&quot;allocate isns resp fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	recv_resp(resp, FUNC_DevDeRegRsp);
+-	free_isns_resp(resp);
+-
+-	return 0;
+-}
+-
+-int QryEntity(void)
+-{
+-	return -EPERM;
+-}
+-
+-int UpdateEntity(void)
+-{
+-	return -EPERM;
+-}
+-
+-/* Node related functions */
+-struct storage_node *initialize_storage_node(char *name, char* alias)
+-{
+-	struct storage_node *p;
+-
+-	if (!(p = (struct storage_node *)malloc(sizeof(struct storage_node)))) {
+-		log_error(&quot;fail to get memory for storage node\n&quot;);
+-		return NULL;
+-	}
+-	init_storage_node(p);
+-
+-	set_tlv_iscsi_name(&amp;p-&gt;iscsi_name, name);
+-	set_tlv_iscsi_node_type(&amp;p-&gt;iscsi_node_type, NODE_TYPE_TARGET);
+-	set_tlv_iscsi_alias(&amp;p-&gt;iscsi_alias, alias);
+-	return p;
+-}
+-
+-void cleanup_storage_node(struct storage_node *node)
+-{
+-	free(node);
+-}
+-
+-int RegNode(struct storage_node *node)
+-{
+-	struct isns_cmd *cmd;
+-	struct isns_pdu *pdu;
+-	struct isns_resp *resp = NULL;
+-	char *buf;
+-	struct portal *p;
+-
+-	if (!node) {
+-		log_error(&quot;Null storage node to register.\n&quot;);
+-		return -EINVAL;
+-	}
+-	if (!(cmd = allocate_isns_cmd())) {
+-		log_error(&quot;allocate isns cmd fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	pdu = &amp;cmd-&gt;pdu;
+-	init_isns_hdr(pdu-&gt;hdr, FUNC_DevAttrReg, NO_REPLACE);
+-	buf = pdu-&gt;pay_load;
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_name);
+-	buf = append_tlv(buf, &amp;delimiter);
+-	/* FIXME: assume one entity now */
+-	buf = append_tlv(buf, &amp;iet_entity-&gt;eid);
+-	buf = append_tlv(buf, &amp;iet_entity-&gt;entity_proto);
+-
+-	for (p = iet_portal; p ; p = p-&gt;next) {
+-		buf = append_tlv(buf, &amp;p-&gt;portal_ip_addr);
+-		buf = append_tlv(buf, &amp;p-&gt;portal_port);
+-	}
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_name);
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_node_type);
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_alias);
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_auth_method);
+-
+-	cmd-&gt;cmd_size = buf - (char *)pdu-&gt;hdr;
+-	pdu-&gt;hdr-&gt;pdu_length = htons((u16)(buf - (char *)pdu-&gt;pay_load));
+-
+-	if (send_cmd(cmd)) {
+-		log_error(&quot;fail to send isns cmd\n&quot;);
+-		free_isns_cmd(cmd);
+-		return -EIO;
+-	}
+-	free_isns_cmd(cmd);
+-
+-	if (!(resp = allocate_isns_resp())) {
+-		log_error(&quot;allocate isns resp fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	if (recv_resp(resp, FUNC_DevAttrRegRsp)) {
+-		free_isns_resp(resp);
+-		return -EIO;
+-	}
+-	if ((ntohl(*((u32 *)resp-&gt;pdu.pay_load + 1)) == ATTR_TAG_EID) &amp;&amp;
+-					!iet_entity-&gt;eid.attr_len) {
+-		// get assigned EID from iSNS server
+-		iet_entity-&gt;eid.attr_len = ntohl(*((u32 *)resp-&gt;pdu.pay_load + 2));
+-		memcpy(iet_entity-&gt;eid.attr_val, resp-&gt;pdu.pay_load + 8,
+-					ntohl(*((u32 *)resp-&gt;pdu.pay_load + 2)));
+-		log_debug(1, &quot;new eid info, %ld, %s\n&quot;, iet_entity-&gt;eid.attr_len,
+-					iet_entity-&gt;eid.attr_val);
+-	}
+-	free_isns_resp(resp);
+-	return 0;
+-}
+-
+-int DeRegNode(struct storage_node *node)
+-{
+-	struct isns_cmd *cmd;
+-	struct isns_pdu *pdu;
+-	struct isns_resp *resp = NULL;
+-	char *buf;
+-
+-	if (!node) {
+-		log_error(&quot;Null storage node to deregister.\n&quot;);
+-		return -EINVAL;
+-	}
+-
+-	if (!(cmd = allocate_isns_cmd())) {
+-		log_error(&quot;allocate isns cmd fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	pdu = &amp;cmd-&gt;pdu;
+-	init_isns_hdr(pdu-&gt;hdr, FUNC_DevDeReg, NO_REPLACE);
+-	buf = pdu-&gt;pay_load;
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_name);
+-	buf = append_tlv(buf, &amp;delimiter);
+-	/* iscsi name can be as an operating attr for dereg */
+-	//buf = append_tlv(buf, &amp;iet_entity-&gt;eid);
+-	buf = append_tlv(buf, &amp;node-&gt;iscsi_name);
+-
+-	cmd-&gt;cmd_size = buf - (char *)pdu-&gt;hdr;
+-	pdu-&gt;hdr-&gt;pdu_length = htons((u16)(buf - (char *)pdu-&gt;pay_load));
+-
+-	if (send_cmd(cmd)) {
+-		log_error(&quot;fail to send isns cmd\n&quot;);
+-		return -EIO;
+-	}
+-	if (!(resp = allocate_isns_resp())) {
+-		log_error(&quot;allocate isns resp fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	recv_resp(resp, FUNC_DevDeRegRsp);
+-	free_isns_resp(resp);
+-
+-	return 0;
+-}
+-
+-int QryNode(void)
+-{
+-	return -EPERM;
+-}
+-
+-int UpdateNode(void)
+-{
+-	return -EPERM;
+-}
+-
+-/* Portal related functions */
+-int RegPortal(void)
+-{
+-	return -EPERM;
+-}
+-
+-int DeRegPortal(struct portal *p, struct tag_len_val *name)
+-{
+-	struct isns_cmd *cmd;
+-	struct isns_pdu *pdu;
+-	struct isns_resp *resp = NULL;
+-	char *buf;
+-
+-	if (!p) {
+-		log_error(&quot;Null portal to deregister.\n&quot;);
+-		return -EINVAL;
+-	}
+-
+-	if (!(cmd = allocate_isns_cmd())) {
+-		log_error(&quot;allocate isns cmd fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	pdu = &amp;cmd-&gt;pdu;
+-	init_isns_hdr(pdu-&gt;hdr, FUNC_DevDeReg, NO_REPLACE);
+-	buf = pdu-&gt;pay_load;
+-	buf = append_tlv(buf, name);
+-	buf = append_tlv(buf, &amp;delimiter);
+-	buf = append_tlv(buf, &amp;p-&gt;portal_ip_addr);
+-	buf = append_tlv(buf, &amp;p-&gt;portal_port);
+-
+-	cmd-&gt;cmd_size = buf - (char *)pdu-&gt;hdr;
+-	pdu-&gt;hdr-&gt;pdu_length = htons((u16)(buf - (char *)pdu-&gt;pay_load));
+-
+-	if (send_cmd(cmd)) {
+-		log_error(&quot;fail to send isns cmd\n&quot;);
+-		return -EIO;
+-	}
+-	if (!(resp = allocate_isns_resp())) {
+-		log_error(&quot;allocate isns resp fail\n&quot;);
+-		return -ENOMEM;
+-	}
+-	recv_resp(resp, FUNC_DevDeRegRsp);
+-	free_isns_resp(resp);
+-
+-	return 0;
+-}
+-
+-int QryPortal(void)
+-{
+-	return -EPERM;
+-}
+-
+-int UpdatePortal(void)
+-{
+-	return -EPERM;
+-}
+
+Deleted: trunk/iscsi/usr/isns.h
+===================================================================
+--- trunk/iscsi/usr/isns.h	2005-09-09 06:58:13 UTC (rev 59)
++++ trunk/iscsi/usr/isns.h	2005-09-09 07:07:20 UTC (rev 60)
+@@ -1,413 +0,0 @@
+-/*
+- * Defines for iSCSI iSNS support.
+- * (C) 2004 Ming Zhang &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">mingz at ele.uri.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#ifndef __ISNS__
+-#define __ISNS__
+-
+-#include &quot;types.h&quot;
+-
+-/* iSNSP version */
+-#define ISNSP_VERSION		0x0001
+-
+-#define ISNS_PORT		3205
+-
+-/* Entity Protocol */
+-#define EP_NO_PROTOCOL		1
+-#define EP_ISCSI		2
+-#define EP_IFCP			3
+-
+-/* Node type bit position */
+-#define NODE_TYPE_CONTROL	29
+-#define NODE_TYPE_INI		30
+-#define NODE_TYPE_TARGET	31
+-
+-/* iSCSI Auth Method */
+-#define ISCSI_AUTH_KB5		&quot;KB5&quot;
+-#define ISCSI_AUTH_SPKM1	&quot;SPKM1&quot;
+-#define ISCSI_AUTH_SPKM2	&quot;SPKM2&quot;
+-#define ISCSI_AUTH_SRP		&quot;SRP&quot;
+-#define ISCSI_AUTH_CHAP		&quot;CHAP&quot;
+-
+-/* DDS Status Enable/Disable */
+-#define DDS_STATUS_BIT		31
+-
+-/* DD Feature */
+-#define DDS_BOOT_BIT		31
+-
+-/* iSNSP Function ID */
+-#define FUNC_DevAttrReg		0x0001
+-#define FUNC_DevAttrQry		0x0002
+-#define FUNC_DevGetNext		0x0003
+-#define FUNC_DevDeReg		0x0004
+-#define FUNC_SCNReg		0x0005
+-#define FUNC_SCNDeReg		0x0006
+-#define FUNC_SCNEvent		0x0007
+-#define FUNC_SCN		0x0008
+-#define FUNC_DDReg		0x0009
+-#define FUNC_DDDeReg		0x000A
+-#define FUNC_DDSReg		0x000B
+-#define FUNC_DDSDeReg		0x000C
+-#define FUNC_ESI		0x000D
+-#define FUNC_Heartbeat		0x000E
+-
+-#define FUNC_DevAttrRegRsp	0x8001
+-#define FUNC_DevAttrQryRsp	0x8002
+-#define FUNC_DevGetNextRsp	0x8003
+-#define FUNC_DevDeRegRsp	0x8004
+-#define FUNC_SCNRegRsp		0x8005
+-#define FUNC_SCNDeRegRsp	0x8006
+-#define FUNC_SCNEventRsp	0x8007
+-#define FUNC_SCNRsp		0x8008
+-#define FUNC_DDRegRsp		0x8009
+-#define FUNC_DDDeRegRsp		0x800A
+-#define FUNC_DDSRegRsp		0x800B
+-#define FUNC_DDSDeRegRsp	0x800C
+-#define FUNC_ESIRsp		0x800D
+-
+-/* All iSNSP Flags */
+-#define LSB				31
+-#define ISNSP_FLAGS_SENDER_CLIENT	16
+-#define ISNSP_FLAGS_SENDER_SERVER	17
+-#define ISNSP_FLAGS_AUTHEN_BLOCK	18
+-#define ISNSP_FLAGS_REPLACE		19
+-#define ISNSP_FLAGS_LAST_PDU		20
+-#define ISNSP_FLAGS_FIRST_PDU		21
+-
+-#define set_bit_sender_client(x)	(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_SENDER_CLIENT))
+-#define clear_bit_sender_client(x)	(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_SENDER_CLIENT))
+-#define set_bit_sender_server(x)	(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_SENDER_SERVER))
+-#define clear_bit_sender_server(x)	(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_SENDER_SERVER))
+-#define set_bit_authen_block(x)		(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_AUTHEN_BLOCK))
+-#define clear_bit_authen_block(x)	(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_AUTHEN_BLOCK))
+-#define set_bit_replace(x)		(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_REPLACE))
+-#define clear_bit_replace(x)		(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_REPLACE))
+-#define set_bit_last_pdu(x)		(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_LAST_PDU))
+-#define clear_bit_last_pdu(x)		(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_LAST_PDU))
+-#define set_bit_first_pdu(x)		(x) |= (1 &lt;&lt; (LSB - ISNSP_FLAGS_FIRST_PDU))
+-#define clear_bit_first_pdu(x)		(x) &amp;= ~(1 &lt;&lt; (LSB - ISNSP_FLAGS_FIRST_PDU))
+-
+-/* ALL iSNSP Response Status Code */
+-#define ISNSP_RSP_SUCC				0
+-#define ISNSP_RSP_UNKNOWN			1
+-#define ISNSP_RSP_MSG_FORMAT_ERR 		2
+-#define ISNSP_RSP_INVAL_REG			3
+-#define ISNSP_RSP_INVAL_QRY			5
+-#define ISNSP_RSP_SRC_UNKNOWN			6
+-#define ISNSP_RSP_SRC_ABSENT			7
+-#define ISNSP_RSP_SRC_UNAUTH			8
+-#define ISNSP_RSP_NO_SUCH_ENTRY			9
+-#define ISNSP_RSP_VERSION_NOT_SUP		10
+-#define ISNSP_RSP_INTERNAL_ERR			11
+-#define ISNSP_RSP_BUSY				12
+-#define ISNSP_RSP_OPT_NOT_UNDERSTOOD		13
+-#define ISNSP_RSP_INVAL_UPDATE			14
+-#define ISNSP_RSP_MSG_NOT_SUP			15
+-#define ISNSP_RSP_SCN_EVENT_REJ			16
+-#define ISNSP_RSP_SCN_REG_REJ			17
+-#define ISNSP_RSP_ATTR_UNIMPL			18
+-#define ISNSP_RSP_FC_DOMAIN_ID_NOT_AVA		19
+-#define ISNSP_RSP_FC_DOMAIN_ID_NOT_ALL		20
+-#define ISNSP_RSP_ESI_NOT_AVA			21
+-#define ISNSP_RSP_INVAL_DEREG			22
+-#define ISNSP_RSP_REG_FEAT_NOT_SUP		23
+-
+-/* attribute tag */
+-#define INVALID_TAG				0xFFFF
+-#define ATTR_TAG_DELIMITER			0
+-#define ATTR_TAG_EID				1
+-#define ATTR_TAG_ENTITY_PROTO			2
+-#define ATTR_TAG_MANA_IP_ADDR			3
+-#define ATTR_TAG_TIMESTAMP			4
+-#define ATTR_TAG_PROTO_VER_RANGE		5
+-#define ATTR_TAG_REG_PERIOD			6
+-#define ATTR_TAG_ENTITY_INDEX			7
+-#define ATTR_TAG_ENTITY_NEXT_INDEX		8
+-#define ATTR_TAG_ENTITY_ISAKMP_PHASE		11
+-#define ATTR_TAG_ENTITY_CERT			12
+-#define ATTR_TAG_PORTAL_IP_ADDR			16
+-#define ATTR_TAG_PORTAL_PORT			17
+-#define ATTR_TAG_PORTAL_SYM_NAME		18
+-#define ATTR_TAG_ESI_INTERVAL			19
+-#define ATTR_TAG_ESI_PORT			20
+-#define ATTR_TAG_PORTAL_INDEX			22
+-#define ATTR_TAG_SCN_PORT			23
+-#define ATTR_TAG_PORTAL_NEXT_INDEX		24
+-#define ATTR_TAG_PORTAL_SEC_BITM		27
+-#define ATTR_TAG_PORTAL_ISAKMP_PHASE1		28
+-#define ATTR_TAG_PORTAL_ISAKMP_PHASE2		29
+-#define ATTR_TAG_PORTAL_CERT			31
+-#define ATTR_TAG_ISCSI_NAME			32
+-#define ATTR_TAG_NODE_TYPE			33
+-#define ATTR_TAG_ISCSI_ALIAS			34
+-#define ATTR_TAG_ISCSI_SCN_BITM			35
+-#define ATTR_TAG_ISCSI_NODE_INDEX		36
+-#define ATTR_TAG_WWNN_TOKEN			37
+-#define ATTR_TAG_ISCSI_NODE_NEXT_INDEX		38
+-#define ATTR_TAG_ISCSI_AUTH_METHOD		42
+-#define ATTR_TAG_PG_ISCSI_NAME			48
+-#define ATTR_TAG_PG_PORTAL_IP_ADDR		49
+-#define ATTR_TAG_PG_PORTAL_PORT			50
+-#define ATTR_TAG_PG_TAG				51
+-#define ATTR_TAG_PG_INDEX			52
+-#define ATTR_TAG_PG_NEXT_INDEX			53
+-#define ATTR_TAG_FC_PORT_NAME_WWPN		64
+-#define ATTR_TAG_PORT_ID			65
+-#define ATTR_TAG_FC_PORT_TYPE			66
+-#define ATTR_TAG_SYM_PORT_NAME			67
+-#define ATTR_TAG_FABRIC_PORT_NAME		68
+-#define ATTR_TAG_HARD_ADDR			69
+-#define ATTR_TAG_PORT_IP_ADDR			70
+-#define ATTR_TAG_CLASS_OF_SERVICE		71
+-#define ATTR_TAG_FC_4_TYPE			72
+-#define ATTR_TAG_FC_4_DESC			73
+-#define ATTR_TAG_FC_4_FEATURE			74
+-#define ATTR_TAG_IFCP_SCN_BITM			75
+-#define ATTR_TAG_PORT_ROLE			76
+-#define ATTR_TAG_PERM_PORT_NAME			77
+-#define ATTR_TAG_FC_4_TYPE_CODE			95
+-#define ATTR_TAG_FC_NODE_NAME_WWNN		96
+-#define ATTR_TAG_SYM_NODE_NAME			97
+-#define ATTR_TAG_NODE_IP_ADDR			98
+-#define ATTR_TAG_NODE_IPA			99
+-#define ATTR_TAG_PROXY_ISCSI_NAME		101
+-#define ATTR_TAG_SWITCH_NAME			128
+-#define ATTR_TAG_PREFERRED_ID			129
+-#define ATTR_TAG_ASSIGNED_ID			130
+-#define ATTR_TAG_VIRT_FABRIC_ID			132
+-#define ATTR_TAG_ISNS_SERV_VENDOR_OUI		256
+-#define ATTR_TAG_DD_SET_ID			2049
+-#define ATTR_TAG_DD_SET_SYM_NAME		2050
+-#define ATTR_TAG_DD_SET_STATUS			2051
+-#define ATTR_TAG_DD_SET_NEXT_ID			2052
+-#define ATTR_TAG_DD_ID				2065
+-#define ATTR_TAG_DD_SYM_NAME			2066
+-#define ATTR_TAG_DD_MEMBER_ISCSI_INDEX		2067
+-#define ATTR_TAG_DD_MEMBER_ISCSI_NAME		2068
+-#define ATTR_TAG_DD_MEMBER_FC_PORT_NAME		2069
+-#define ATTR_TAG_DD_MEMBER_PORTAL_INDEX		2070
+-#define ATTR_TAG_DD_MEMBER_PORTAL_ADDR		2071
+-#define ATTR_TAG_DD_MEMBER_PORTAL_TCP		2072
+-#define ATTR_TAG_DD_FEATURE			2078
+-#define ATTR_TAG_DD_ID_NEXT_ID			2079
+-
+-/* attribute maximum possible length */
+-#define NULL_SIZE				-2
+-#define VAR_SIZE				-1
+-#define ATTR_TAG_DELIMITER_SIZE			0
+-#define ATTR_TAG_EID_SIZE			256
+-#define ATTR_TAG_ENTITY_PROTO_SIZE		4
+-#define ATTR_TAG_MANA_IP_ADDR_SIZE		16
+-#define ATTR_TAG_TIMESTAMP_SIZE			8
+-#define ATTR_TAG_PROTO_VER_RANGE_SIZE		4
+-#define ATTR_TAG_REG_PERIOD_SIZE		4
+-#define ATTR_TAG_ENTITY_INDEX_SIZE		4
+-#define ATTR_TAG_ENTITY_NEXT_INDEX_SIZE		4
+-#define ATTR_TAG_ENTITY_ISAKMP_PHASE_SIZE	VAR_SIZE
+-#define ATTR_TAG_ENTITY_CERT_SIZE		VAR_SIZE
+-#define ATTR_TAG_PORTAL_IP_ADDR_SIZE		16
+-#define ATTR_TAG_PORTAL_PORT_SIZE		4
+-#define ATTR_TAG_PORTAL_SYM_NAME_SIZE		256
+-#define ATTR_TAG_ESI_INTERVAL_SZIE		4
+-#define ATTR_TAG_ESI_PORT_SIZE			4
+-#define ATTR_TAG_PORTAL_INDEX_SIZE		4
+-#define ATTR_TAG_SCN_PORT_SIZE			4
+-#define ATTR_TAG_PORTAL_NEXT_INDEX_SIZE		4
+-#define ATTR_TAG_PORTAL_SEC_BITM_SIZE		4
+-#define ATTR_TAG_PORTAL_ISAKMP_PHASE1_SIZE	VAR_SIZE
+-#define ATTR_TAG_PORTAL_ISAKMP_PHASE2_SIZE	VAR_SIZE
+-#define ATTR_TAG_PORTAL_CERT_SIZE		VAR_SIZE
+-#define ATTR_TAG_ISCSI_NAME_SIZE		224
+-#define ATTR_TAG_NODE_TYPE_SIZE			4
+-#define ATTR_TAG_ISCSI_ALIAS_SIZE		256
+-#define ATTR_TAG_ISCSI_SCN_BITM_SIZE		4
+-#define ATTR_TAG_ISCSI_NODE_INDEX_SIZE		4
+-#define ATTR_TAG_WWNN_TOKEN_SIZE		8
+-#define ATTR_TAG_ISCSI_NODE_NEXT_INDEX_SIZE	4
+-#define ATTR_TAG_ISCSI_AUTH_METHOD_SIZE		VAR_SIZE
+-#define ATTR_TAG_PG_ISCSI_NAME_SIZE		224
+-#define ATTR_TAG_PG_PORTAL_IP_ADDR_SIZE		16
+-#define ATTR_TAG_PG_PORTAL_PORT_SIZE		4
+-#define ATTR_TAG_PG_TAG_SIZE			4
+-#define ATTR_TAG_PG_INDEX_SIZE			4
+-#define ATTR_TAG_PG_NEXT_INDEX_SIZE		4
+-#define ATTR_TAG_FC_PORT_NAME_WWPN_SIZE		8
+-#define ATTR_TAG_PORT_ID_SIZE			4
+-#define ATTR_TAG_FC_PORT_TYPE_SIZE		4
+-#define ATTR_TAG_SYM_PORT_NAME_SIZE		256
+-#define ATTR_TAG_FABRIC_PORT_NAME_SIZE		8
+-#define ATTR_TAG_HARD_ADDR_SIZE			4
+-#define ATTR_TAG_PORT_IP_ADDR_SIZE		16
+-#define ATTR_TAG_CLASS_OF_SERVICE_SIZE		4
+-#define ATTR_TAG_FC_4_TYPE_SIZE			32
+-#define ATTR_TAG_FC_4_DESC_SIZE			256
+-#define ATTR_TAG_FC_4_FEATURE_SIZE		128
+-#define ATTR_TAG_IFCP_SCN_BITM_SIZE		4
+-#define ATTR_TAG_PORT_ROLE_SIZE			4
+-#define ATTR_TAG_PERM_PORT_NAME_SIZE		8
+-#define ATTR_TAG_FC_4_TYPE_CODE_SIZE		4
+-#define ATTR_TAG_FC_NODE_NAME_WWNN_SIZE		8
+-#define ATTR_TAG_SYM_NODE_NAME_SIZE		256
+-#define ATTR_TAG_NODE_IP_ADDR_SIZE		16
+-#define ATTR_TAG_NODE_IPA_SIZE			8
+-#define ATTR_TAG_PROXY_ISCSI_NAME_SIZE		256
+-#define ATTR_TAG_SWITCH_NAME_SIZE		8
+-#define ATTR_TAG_PREFERRED_ID_SIZE		4
+-#define ATTR_TAG_ASSIGNED_ID_SIZE		4
+-#define ATTR_TAG_VIRT_FABRIC_ID_SIZE		256
+-#define ATTR_TAG_ISNS_SERV_VENDOR_OUI_SIZE	4
+-#define ATTR_TAG_DD_SET_ID_SIZE			4
+-#define ATTR_TAG_DD_SET_SYM_NAME_SIZE		256
+-#define ATTR_TAG_DD_SET_STATUS_SIZE		4
+-#define ATTR_TAG_DD_SET_NEXT_ID_SIZE		4
+-#define ATTR_TAG_DD_ID_SIZE			4
+-#define ATTR_TAG_DD_SYM_NAME_SIZE		256
+-#define ATTR_TAG_DD_MEMBER_ISCSI_INDEX_SIZE	4
+-#define ATTR_TAG_DD_MEMBER_ISCSI_NAME_SIZE	224
+-#define ATTR_TAG_DD_MEMBER_FC_PORT_NAME_SIZE	224
+-#define ATTR_TAG_DD_MEMBER_PORTAL_INDEX_SIZE	4
+-#define ATTR_TAG_DD_MEMBER_PORTAL_ADDR_SIZE	16
+-#define ATTR_TAG_DD_MEMBER_PORTAL_TCP_SIZE	4
+-#define ATTR_TAG_DD_FEATURE_SIZE		4
+-#define ATTR_TAG_DD_ID_NEXT_ID_SIZE		4
+-
+-#define REPLACE		1
+-#define NO_REPLACE	0
+-
+-/* Be sure this number is still enough */
+-#define MAX_ISNS_CMD_SIZE	4096
+-#define MAX_ISNS_RESP_SIZE	4096
+-
+-/*
+- * maximum tlv value length, for current implementation is enough 
+- * if really need a larger size, then reallocate a memory and cast
+- * the first 4 bytes of attr_val to point to it.
+- */
+-#define MAX_TLV_VALUE_LEN	256
+-
+-#define Four_Bytes_Aligned(x)	((((x) + 3) &gt;&gt; 2) &lt;&lt; 2)
+-
+-struct tag_len_val {
+-	u32 attr_tag;
+-	long attr_len;
+-	char attr_val[MAX_TLV_VALUE_LEN];
+-};
+-
+-struct network_entity {
+-	struct tag_len_val eid;
+-	struct tag_len_val entity_proto;
+-	struct tag_len_val mana_ip_addr;
+-	struct tag_len_val timestamp;
+-	struct tag_len_val proto_ver_range;
+-	struct tag_len_val reg_period;
+-	struct tag_len_val entity_index;
+-	struct tag_len_val entity_isakmp_phase;
+-	struct tag_len_val entity_cert;
+-	struct network_entity *next;
+-};
+-
+-struct portal {
+-	struct tag_len_val portal_ip_addr;
+-	struct tag_len_val portal_port;
+-	struct tag_len_val portal_sym_name;
+-	struct tag_len_val esi_interval;
+-	struct tag_len_val esi_port;
+-	struct tag_len_val portal_index;
+-	struct tag_len_val scn_port;
+-	struct tag_len_val portal_sec_bitm;
+-	struct tag_len_val portal_isakmp_phase1;
+-	struct tag_len_val portal_isakmp_phase2;
+-	struct tag_len_val portal_cert;
+-	struct portal *next;
+-};
+-
+-struct portal_group {
+-	struct tag_len_val pg_iscsi_name;
+-	struct tag_len_val pg_ip_addr;
+-	struct tag_len_val pg_portal_port;
+-	struct tag_len_val pg_tag;
+-	struct tag_len_val pg_index;
+-	struct portal_group *next;
+-};
+-
+-struct storage_node {
+-	struct tag_len_val iscsi_name;
+-	struct tag_len_val iscsi_node_type;
+-	struct tag_len_val iscsi_alias;
+-	struct tag_len_val iscsi_scn_bitm;
+-	struct tag_len_val iscsi_node_index;
+-	struct tag_len_val wwnn_token;
+-	struct tag_len_val iscsi_auth_method;
+-	struct tag_len_val iscsi_node_cert;
+-	struct storage_node *next;
+-};
+-
+-struct discovery_domain {
+-	struct tag_len_val dd_id;
+-	struct tag_len_val dd_sym_name;
+-	struct tag_len_val dd_member_iscsi_index;
+-	struct tag_len_val dd_member_iscsi_name;
+-	struct tag_len_val dd_member_portal_index;
+-	struct tag_len_val dd_member_portal_ip_addr;
+-	struct tag_len_val dd_member_portal_port;
+-	struct tag_len_val dd_feature;
+-	struct discovery_domain *next;
+-};
+-
+-struct discovery_domain_set {
+-	struct tag_len_val dds_id;
+-	struct tag_len_val dds_sym_name;
+-	struct tag_len_val dds_status;
+-	struct discovery_domain_set *next;
+-};
+-
+-#define MAX_TLV_CNT		11
+-
+-typedef union  {
+-	struct network_entity ne;
+-	struct portal p;
+-	struct portal_group pg;
+-	struct storage_node node;
+-	struct discovery_domain dd;
+-	struct discovery_domain_set dds;
+-	struct tag_len_val tlv[MAX_TLV_CNT];
+-} TLVLIST;
+-
+-struct tag_len_val delimiter = {ATTR_TAG_DELIMITER, ATTR_TAG_DELIMITER_SIZE};
+-
+-struct isns_hdr {
+-	u16 isnsp_version;
+-	u16 function_id;
+-	u16 pdu_length;
+-	u16 flags;
+-	u16 transaction_id;
+-	u16 sequence_id;
+-};
+-
+-#define ISNS_HDR_LEN	sizeof(struct isns_hdr)
+-
+-struct isns_pdu {
+-	struct isns_hdr *hdr;
+-	char *pay_load;
+-	char *authentication_block;
+-};
+-
+-/*
+- * currently we only use one pdu for one cmd.
+- */
+-struct isns_cmd {
+-	struct isns_pdu pdu;
+-	u32 cmd_size;
+-};
+-
+-struct isns_resp {
+-	struct isns_pdu pdu;
+-	u32 resp_size;
+-};
+-
+-int check_isns_hdr(struct isns_hdr *hdr, int function_id);
+-int check_isns_resp_status(struct isns_pdu *pdu);
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000052.html">[Stgt-svn] r59 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000054.html">[Stgt-svn] r61 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#53">[ date ]</a>
+              <a href="thread.html#53">[ thread ]</a>
+              <a href="subject.html#53">[ subject ]</a>
+              <a href="author.html#53">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

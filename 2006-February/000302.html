@@ -1,0 +1,159 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r315 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r315%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602230757.k1N7vLXT024241%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000301.html">
+   <LINK REL="Next"  HREF="000303.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r315 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r315%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602230757.k1N7vLXT024241%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r315 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb 23 08:57:21 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000301.html">[Stgt-svn] r314 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000303.html">[Stgt-svn] r316 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#302">[ date ]</a>
+              <a href="thread.html#302">[ thread ]</a>
+              <a href="subject.html#302">[ subject ]</a>
+              <a href="author.html#302">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-23 08:56:59 +0100 (Thu, 23 Feb 2006)
+New Revision: 315
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Set the task attribute.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-23 05:57:37 UTC (rev 314)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-23 07:56:59 UTC (rev 315)
+@@ -36,6 +36,7 @@
+ #include &lt;asm/vio.h&gt;
+ 
+ #include &quot;viosrp.h&quot;
++#include &quot;srp.h&quot;
+ 
+ #define DEFAULT_TIMEOUT		30*HZ
+ #define	INITIAL_SRP_LIMIT	16
+@@ -113,6 +114,13 @@
+ 	V_DONE,
+ };
+ 
++enum srp_task_attributes {
++	SRP_SIMPLE_TASK = 0,
++	SRP_HEAD_TASK = 1,
++	SRP_ORDERED_TASK = 2,
++	SRP_ACA_TASK = 4
++};
++
+ /*
+  * This structure tracks our fundamental unit of work.  Whenever
+  * an SRP Information Unit (IU) arrives, we track all the good stuff
+@@ -314,31 +322,31 @@
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	enum dma_data_direction data_dir;
+ 	struct scsi_cmnd *scmd;
+-	int tags, len;
++	int tag, len;
+ 
+ 	dprintk(&quot;%p %p\n&quot;, iue-&gt;adapter, iue);
+ 
+ 	if (getlink(iue))
+ 		__set_bit(V_LINKED, &amp;iue-&gt;req.flags);
+ 
+-	tags = MSG_SIMPLE_TAG;
+-#if 0
++	tag = MSG_SIMPLE_TAG;
++
+ 	switch (iu-&gt;srp.cmd.task_attribute) {
+ 	case SRP_SIMPLE_TASK:
+-		tags = MSG_SIMPLE_TAG;
++		tag = MSG_SIMPLE_TAG;
+ 		break;
+ 	case SRP_ORDERED_TASK:
+-		tags = MSG_ORDERED_TAG;
++		tag = MSG_ORDERED_TAG;
+ 		break;
+ 	case SRP_HEAD_TASK:
+-		tags = MSG_HEAD_TAG;
++		tag = MSG_HEAD_TAG;
+ 		break;
+ 	default:
+ 		eprintk(&quot;Task attribute %d not supported, assuming barrier\n&quot;,
+ 			iu-&gt;srp.cmd.task_attribute);
+-		tags = MSG_ORDERED_TAG;
++		tag = MSG_ORDERED_TAG;
+ 	}
+-#endif
++
+ 	switch (iu-&gt;srp.cmd.cdb[0]) {
+ 	case WRITE_6:
+ 	case WRITE_10:
+@@ -357,7 +365,7 @@
+ 	}
+ 
+ 	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;,
+-		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags,
++		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag,
+ 		(unsigned long long) iu-&gt;srp.cmd.tag);
+ 
+ 	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+@@ -366,10 +374,11 @@
+ 	scmd-&gt;SCp.ptr = (char *) iue;
+ 	memcpy(scmd-&gt;data_cmnd, iu-&gt;srp.cmd.cdb, MAX_COMMAND_SIZE);
+ 	scmd-&gt;request_bufflen = len;
++	scmd-&gt;tag= tag;
+ 	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun, 0);
+ 
+ 	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;,
+-		iue, scmd, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tags);
++		iue, scmd, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag);
+ 
+ 	return 0;
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000301.html">[Stgt-svn] r314 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000303.html">[Stgt-svn] r316 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#302">[ date ]</a>
+              <a href="thread.html#302">[ thread ]</a>
+              <a href="subject.html#302">[ subject ]</a>
+              <a href="author.html#302">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

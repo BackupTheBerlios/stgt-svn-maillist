@@ -1,0 +1,212 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r494 - in trunk: ibmvstgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r494%20-%20in%20trunk%3A%20ibmvstgt/kernel%20kernel&In-Reply-To=%3C200606270354.k5R3sl74019390%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000479.html">
+   <LINK REL="Next"  HREF="000482.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r494 - in trunk: ibmvstgt/kernel kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r494%20-%20in%20trunk%3A%20ibmvstgt/kernel%20kernel&In-Reply-To=%3C200606270354.k5R3sl74019390%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r494 - in trunk: ibmvstgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Jun 27 05:54:47 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000479.html">[Stgt-svn] r493 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000482.html">[Stgt-svn] r495 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#481">[ date ]</a>
+              <a href="thread.html#481">[ thread ]</a>
+              <a href="subject.html#481">[ subject ]</a>
+              <a href="author.html#481">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-27 05:54:46 +0200 (Tue, 27 Jun 2006)
+New Revision: 494
+
+Modified:
+   trunk/ibmvstgt/kernel/libsrp.c
+   trunk/kernel/scsi_tgt_if.c
+   trunk/kernel/scsi_tgt_lib.c
+Log:
+update for cmnd field removal.
+
+
+Modified: trunk/ibmvstgt/kernel/libsrp.c
+===================================================================
+--- trunk/ibmvstgt/kernel/libsrp.c	2006-06-23 13:13:33 UTC (rev 493)
++++ trunk/ibmvstgt/kernel/libsrp.c	2006-06-27 03:54:46 UTC (rev 494)
+@@ -433,7 +433,7 @@
+ 	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+ 	BUG_ON(!scmd);
+ 	scmd-&gt;SCp.ptr = (char *) iue;
+-	memcpy(scmd-&gt;data_cmnd, cmd-&gt;cdb, MAX_COMMAND_SIZE);
++	memcpy(scmd-&gt;cmnd, cmd-&gt;cdb, MAX_COMMAND_SIZE);
+ 	scmd-&gt;request_bufflen = len;
+ 	scmd-&gt;tag = tag;
+ 	iue-&gt;scmd = scmd;
+
+Modified: trunk/kernel/scsi_tgt_if.c
+===================================================================
+--- trunk/kernel/scsi_tgt_if.c	2006-06-23 13:13:33 UTC (rev 493)
++++ trunk/kernel/scsi_tgt_if.c	2006-06-27 03:54:46 UTC (rev 494)
+@@ -65,9 +65,6 @@
+ 	struct tgt_event *ev;
+ 	int err, len;
+ 
+-	/* FIXME: we need scsi core to do that. */
+-	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+-
+ 	len = NLMSG_SPACE(sizeof(*ev));
+ 	/*
+ 	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+@@ -122,7 +119,7 @@
+ 	ev.k.tsk_mgmt_req.function = function;
+ 	ev.k.tsk_mgmt_req.tag = tag;
+ 	memcpy(ev.k.tsk_mgmt_req.lun, scsilun, sizeof(ev.k.tsk_mgmt_req.lun));
+-	ev.k.tsk_mgmt_req.mid = (u64) data;
++	ev.k.tsk_mgmt_req.mid = (u64) (unsigned long) data;
+ 
+ 	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
+ 		(unsigned long long) ev.k.tsk_mgmt_req.mid);
+
+Modified: trunk/kernel/scsi_tgt_lib.c
+===================================================================
+--- trunk/kernel/scsi_tgt_lib.c	2006-06-23 13:13:33 UTC (rev 493)
++++ trunk/kernel/scsi_tgt_lib.c	2006-06-27 03:54:46 UTC (rev 494)
+@@ -50,6 +50,9 @@
+ 	struct list_head hash_list;
+ 	struct request *rq;
+ 	u64 tag;
++
++	void *buffer;
++	unsigned bufflen;
+ };
+ 
+ #define TGT_HASH_ORDER	4
+@@ -328,6 +331,7 @@
+ static int scsi_tgt_init_cmd(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+ {
+ 	struct request *rq = cmd-&gt;request;
++	struct scsi_tgt_cmd *tcmd = rq-&gt;end_io_data;
+ 	int count;
+ 
+ 	cmd-&gt;use_sg = rq-&gt;nr_phys_segments;
+@@ -337,7 +341,7 @@
+ 
+ 	cmd-&gt;request_bufflen = rq-&gt;data_len;
+ 
+-	dprintk(&quot;cmd %p addr %p cnt %d %lu\n&quot;, cmd, cmd-&gt;buffer, cmd-&gt;use_sg,
++	dprintk(&quot;cmd %p addr %p cnt %d %lu\n&quot;, cmd, tcmd-&gt;buffer, cmd-&gt;use_sg,
+ 		rq_data_dir(rq));
+ 	count = blk_rq_map_sg(rq-&gt;q, rq, cmd-&gt;request_buffer);
+ 	if (likely(count &lt;= cmd-&gt;use_sg)) {
+@@ -345,7 +349,7 @@
+ 		return 0;
+ 	}
+ 
+-	eprintk(&quot;cmd %p addr %p cnt %d\n&quot;, cmd, cmd-&gt;buffer, cmd-&gt;use_sg);
++	eprintk(&quot;cmd %p addr %p cnt %d\n&quot;, cmd, tcmd-&gt;buffer, cmd-&gt;use_sg);
+ 	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+ 	return -EINVAL;
+ }
+@@ -356,8 +360,8 @@
+ {
+ 	struct request_queue *q = cmd-&gt;request-&gt;q;
+ 	struct request *rq = cmd-&gt;request;
+-	void *uaddr = cmd-&gt;buffer;
+-	unsigned int len = cmd-&gt;bufflen;
++	void *uaddr = tcmd-&gt;buffer;
++	unsigned int len = tcmd-&gt;bufflen;
+ 	struct bio *bio;
+ 	int err;
+ 
+@@ -425,12 +429,12 @@
+ 	}
+ 
+ 	dprintk(&quot;cmd %p request_bufflen %u bufflen %u\n&quot;,
+-		cmd, cmd-&gt;request_bufflen, cmd-&gt;bufflen);
++		cmd, cmd-&gt;request_bufflen, tcmd-&gt;bufflen);
+ 
+ 	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+ 	bio_list_add(&amp;tcmd-&gt;xfer_done_list, cmd-&gt;request-&gt;bio);
+ 
+-	cmd-&gt;buffer += cmd-&gt;request_bufflen;
++	tcmd-&gt;buffer += cmd-&gt;request_bufflen;
+ 	cmd-&gt;offset += cmd-&gt;request_bufflen;
+ 
+ 	if (!tcmd-&gt;xfer_list.head) {
+@@ -439,7 +443,7 @@
+ 	}
+ 
+ 	dprintk(&quot;cmd2 %p request_bufflen %u bufflen %u\n&quot;,
+-		cmd, cmd-&gt;request_bufflen, cmd-&gt;bufflen);
++		cmd, cmd-&gt;request_bufflen, tcmd-&gt;bufflen);
+ 
+ 	bio = bio_list_pop(&amp;tcmd-&gt;xfer_list);
+ 	BUG_ON(!bio);
+@@ -525,6 +529,7 @@
+ 	struct Scsi_Host *shost;
+ 	struct scsi_cmnd *cmd;
+ 	struct request *rq;
++	struct scsi_tgt_cmd *tcmd;
+ 	int err = 0;
+ 
+ 	dprintk(&quot;%d %u %d %u %lx %u\n&quot;, host_no, cid, result,
+@@ -556,12 +561,12 @@
+ 	 * store the userspace values here, the working values are
+ 	 * in the request_* values
+ 	 */
+-	cmd-&gt;buffer = (void *)uaddr;
+-	if (len)
+-		cmd-&gt;bufflen = len;
++	tcmd = cmd-&gt;request-&gt;end_io_data;
++	tcmd-&gt;buffer = (void *)uaddr;
++	tcmd-&gt;bufflen = len;
+ 	cmd-&gt;result = result;
+ 
+-	if (!cmd-&gt;bufflen) {
++	if (!tcmd-&gt;bufflen) {
+ 		err = __scsi_tgt_transfer_response(cmd);
+ 		goto done;
+ 	}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000479.html">[Stgt-svn] r493 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000482.html">[Stgt-svn] r495 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#481">[ date ]</a>
+              <a href="thread.html#481">[ thread ]</a>
+              <a href="subject.html#481">[ subject ]</a>
+              <a href="author.html#481">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,363 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r525 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r525%20-%20trunk/usr&In-Reply-To=%3C200608121310.k7CDAxC1018052%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000511.html">
+   <LINK REL="Next"  HREF="000513.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r525 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r525%20-%20trunk/usr&In-Reply-To=%3C200608121310.k7CDAxC1018052%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r525 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 12 15:10:59 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000511.html">[Stgt-svn] r524 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000513.html">[Stgt-svn] r526 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#512">[ date ]</a>
+              <a href="thread.html#512">[ thread ]</a>
+              <a href="subject.html#512">[ subject ]</a>
+              <a href="author.html#512">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-12 15:10:32 +0200 (Sat, 12 Aug 2006)
+New Revision: 525
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+For possible user-space target implementations, try to remove tgt_event in target.c
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-12 10:58:45 UTC (rev 524)
++++ trunk/usr/target.c	2006-08-12 13:10:32 UTC (rev 525)
+@@ -46,7 +46,6 @@
+ static struct target *target_lookup(int tid)
+ {
+ 	struct target *target;
+-
+ 	list_for_each_entry(target, &amp;target_hash_list[hashfn(tid)], t_hlist)
+ 		if (target-&gt;tid == tid)
+ 			return target;
+@@ -275,7 +274,8 @@
+ 	}
+ }
+ 
+-static void cmd_queue(struct tgt_event *ev_req)
++int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun, uint32_t data_len,
++		     int attribute, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+@@ -284,39 +284,38 @@
+ 	uint64_t offset, dev_id;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	unsigned long uaddr = 0;
+-	int hostno = ev_req-&gt;k.cmd_req.host_no;
+ 
+-	target = host_to_target(hostno);
++	target = host_to_target(host_no);
+ 	if (!target) {
+ 		int tid, lid = 0, err = -1;
+ 		if (tgt_drivers[lid]-&gt;target_bind) {
+-			tid = tgt_drivers[0]-&gt;target_bind(hostno);
++			tid = tgt_drivers[0]-&gt;target_bind(host_no);
+ 			if (tid &gt;= 0) {
+-				err = tgt_target_bind(tid, hostno, lid);
++				err = tgt_target_bind(tid, host_no, lid);
+ 				if (!err)
+-					target = host_to_target(hostno);
++					target = host_to_target(host_no);
+ 			}
+ 		}
+ 
+ 		if (!target) {
+-			eprintf(&quot;%d is not bind to any target\n&quot;,
+-				ev_req-&gt;k.cmd_req.host_no);
+-			return;
++			eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
++			return -ENOENT;
+ 		}
+ 	}
+ 
+ 	/* TODO: preallocate cmd */
+ 	cmd = calloc(1, sizeof(*cmd));
+-	cmd-&gt;hostno = ev_req-&gt;k.cmd_req.host_no;
+- 	cmd-&gt;cid = ev_req-&gt;k.cmd_req.cid;
+-	cmd-&gt;attribute = ev_req-&gt;k.cmd_req.attribute;
+-	cmd-&gt;tag = ev_req-&gt;k.cmd_req.tag;
++	if (!cmd)
++		return -ENOMEM;
++	cmd-&gt;hostno = host_no;
++/*  	cmd-&gt;cid = ev_req-&gt;k.cmd_req.cid; */
++	cmd-&gt;attribute = attribute;
++	cmd-&gt;tag = tag;
+ 	list_add(&amp;cmd-&gt;clist, &amp;target-&gt;cmd_list);
+-	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[hashfn(cmd-&gt;cid)]);
++/* 	list_add(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[hashfn(cmd-&gt;cid)]); */
+ 
+-	dev_id = scsi_get_devid(target-&gt;lid, ev_req-&gt;k.cmd_req.lun);
+-	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
+-		dev_id);
++	dev_id = scsi_get_devid(target-&gt;lid, lun);
++	dprintf(&quot;%x %&quot; PRIx64 &quot;\n&quot;, scb[0], dev_id);
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
+ 	if (cmd-&gt;dev) {
+@@ -329,32 +328,33 @@
+ 
+ 	if (enabled) {
+ 		result = scsi_cmd_perform(target-&gt;lid,
+-					  cmd-&gt;hostno, ev_req-&gt;k.cmd_req.scb,
+-					  &amp;len, ev_req-&gt;k.cmd_req.data_len,
++					  host_no, scb,
++					  &amp;len, data_len,
+ 					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+-					  ev_req-&gt;k.cmd_req.lun, cmd-&gt;dev,
++					  lun, cmd-&gt;dev,
+ 					  &amp;target-&gt;device_list);
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+ 		dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+-			cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0], uaddr,
+-			offset, result);
++			cmd-&gt;cid, scb[0], uaddr, offset, result);
+ 
+ 		set_cmd_processed(cmd);
+ 		tgt_kspace_send_cmd(cmd, result, rw);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %u %x %&quot; PRIu64 &quot; %d\n&quot;,
+-			cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
++			cmd-&gt;cid, scb[0],
+ 			cmd-&gt;dev ? cmd-&gt;dev-&gt;lun : ~0ULL,
+ 			q-&gt;active_cmd);
+ 
+-		memcpy(cmd-&gt;scb, ev_req-&gt;k.cmd_req.scb, sizeof(cmd-&gt;scb));
+-		memcpy(cmd-&gt;lun, ev_req-&gt;k.cmd_req.lun, sizeof(cmd-&gt;lun));
+-		cmd-&gt;len = ev_req-&gt;k.cmd_req.data_len;
++		memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
++		memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
++		cmd-&gt;len = data_len;
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
++
++	return 0;
+ }
+ 
+ static void post_cmd_done(struct tgt_cmd_queue *q)
+@@ -476,13 +476,11 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-static void cmd_done(struct tgt_event *ev)
++void target_cmd_done(int host_no, uint32_t cid)
+ {
+ 	struct target *target;
+ 	struct cmd *cmd;
+ 	struct mgmt_req *mreq;
+-	int host_no = ev-&gt;k.cmd_done.host_no;
+-	uint32_t cid = ev-&gt;k.cmd_done.cid;
+ 
+ 	target = host_to_target(host_no);
+ 	if (!target) {
+@@ -550,29 +548,26 @@
+ 	return count;
+ }
+ 
+-static void tsk_mgmt_req(struct tgt_event *ev_req)
++void target_mgmt_request(int host_no, int req_id, int function, uint8_t *lun,
++			 uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct mgmt_req *mreq;
+ 	int err = 0, count, send = 1;
+-	int host_no = ev_req-&gt;k.cmd_req.host_no;
+ 
+ 	target = host_to_target(host_no);
+ 	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;,
+-			ev_req-&gt;k.cmd_req.host_no);
++		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
+ 		return;
+ 	}
+ 
+ 	mreq = calloc(1, sizeof(*mreq));
+-	mreq-&gt;mid = ev_req-&gt;k.tsk_mgmt_req.mid;
+-	mreq-&gt;function = ev_req-&gt;k.tsk_mgmt_req.function;
++	mreq-&gt;mid = req_id;
++	mreq-&gt;function = function;
+ 
+-	switch (mreq-&gt;function) {
++	switch (function) {
+ 	case ABORT_TASK:
+-		count = abort_task_set(mreq, target, host_no,
+-				       ev_req-&gt;k.tsk_mgmt_req.tag,
+-				       NULL, 0);
++		count = abort_task_set(mreq, target, host_no, tag, NULL, 0);
+ 		if (mreq-&gt;busy)
+ 			send = 0;
+ 		if (!count)
+@@ -585,49 +580,25 @@
+ 		break;
+ 	case CLEAR_ACA:
+ 	case CLEAR_TASK_SET:
+-		eprintf(&quot;Not supported yet %x\n&quot;,
+-			ev_req-&gt;k.tsk_mgmt_req.function);
++		eprintf(&quot;Not supported yet %x\n&quot;, function);
+ 		err = -EINVAL;
+ 		break;
+ 	case LOGICAL_UNIT_RESET:
+-		count = abort_task_set(mreq, target, host_no, 0,
+-				       ev_req-&gt;k.tsk_mgmt_req.lun, 0);
++		count = abort_task_set(mreq, target, host_no, 0, lun, 0);
+ 		if (mreq-&gt;busy)
+ 			send = 0;
+ 		break;
+ 	default:
+ 		err = -EINVAL;
+-		eprintf(&quot;Unknown task management %x\n&quot;,
+-			ev_req-&gt;k.tsk_mgmt_req.function);
++		eprintf(&quot;Unknown task management %x\n&quot;, function);
+ 	}
+ 
+ 	if (send) {
+-		tgt_kspace_send_tsk_mgmt(ev_req-&gt;k.cmd_req.host_no,
+-					 ev_req-&gt;k.tsk_mgmt_req.mid, err);
++		tgt_kspace_send_tsk_mgmt(host_no, req_id, err);
+ 		free(mreq);
+ 	}
+ }
+ 
+-void kreq_exec(struct tgt_event *ev)
+-{
+-	dprintf(&quot;event %u\n&quot;, ev-&gt;type);
+-
+-	switch (ev-&gt;type) {
+-	case TGT_KEVENT_CMD_REQ:
+-		cmd_queue(ev);
+-		break;
+-	case TGT_KEVENT_CMD_DONE:
+-		cmd_done(ev);
+-		break;
+-	case TGT_KEVENT_TSK_MGMT_REQ:
+-		tsk_mgmt_req(ev);
+-		break;
+-	default:
+-		eprintf(&quot;unknown event %u\n&quot;, ev-&gt;type);
+-		exit(1);
+-	}
+-}
+-
+ int tgt_target_bind(int tid, int host_no, int lid)
+ {
+ 	struct target *target;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-12 10:58:45 UTC (rev 524)
++++ trunk/usr/tgtd.h	2006-08-12 13:10:32 UTC (rev 525)
+@@ -32,13 +32,18 @@
+ extern int ipc_init(int *fd);
+ extern void ipc_event_handle(int accept_fd);
+ 
+-extern void kreq_exec(struct tgt_event *ev);
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+ extern int tgt_target_create(int tid);
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+ 
++extern int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun,
++			    uint32_t data_len, int attribute, uint64_t tag);
++extern void target_cmd_done(int host_no, uint32_t cid);
++extern void target_mgmt_request(int host_no, int req_id, int function,
++				uint8_t *lun, uint64_t tag);
++
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+ extern int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-12 10:58:45 UTC (rev 524)
++++ trunk/usr/tgtif.c	2006-08-12 13:10:32 UTC (rev 525)
+@@ -74,6 +74,32 @@
+ 	dprintf(&quot;%u %u\n&quot;, r-&gt;entry_size, r-&gt;nr_entry);
+ }
+ 
++static void kreq_exec(struct tgt_event *ev)
++{
++	dprintf(&quot;event %u\n&quot;, ev-&gt;type);
++
++	switch (ev-&gt;type) {
++	case TGT_KEVENT_CMD_REQ:
++		target_cmd_queue(ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.scb,
++				 ev-&gt;k.cmd_req.lun, ev-&gt;k.cmd_req.data_len,
++				 ev-&gt;k.cmd_req.attribute, ev-&gt;k.cmd_req.tag);
++		break;
++	case TGT_KEVENT_CMD_DONE:
++		target_cmd_done(ev-&gt;k.cmd_done.host_no, ev-&gt;k.cmd_done.cid);
++		break;
++	case TGT_KEVENT_TSK_MGMT_REQ:
++		target_mgmt_request(ev-&gt;k.cmd_req.host_no,
++				    ev-&gt;k.tsk_mgmt_req.mid,
++				    ev-&gt;k.tsk_mgmt_req.function,
++				    ev-&gt;k.tsk_mgmt_req.lun,
++				    ev-&gt;k.tsk_mgmt_req.tag);
++		break;
++	default:
++		eprintf(&quot;unknown event %u\n&quot;, ev-&gt;type);
++		exit(1);
++	}
++}
++
+ int kreq_send(struct tgt_event *ev)
+ {
+ 	struct rbuf_hdr *hdr;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000511.html">[Stgt-svn] r524 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000513.html">[Stgt-svn] r526 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#512">[ date ]</a>
+              <a href="thread.html#512">[ thread ]</a>
+              <a href="subject.html#512">[ subject ]</a>
+              <a href="author.html#512">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

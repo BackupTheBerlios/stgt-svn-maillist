@@ -1,0 +1,698 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r774 - trunk/patches
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r774%20-%20trunk/patches&In-Reply-To=%3C200702091232.l19CWLiI018717%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000762.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r774 - trunk/patches</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r774%20-%20trunk/patches&In-Reply-To=%3C200702091232.l19CWLiI018717%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r774 - trunk/patches">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Feb  9 13:32:21 CET 2007</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000762.html">[Stgt-svn] r775 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#761">[ date ]</a>
+              <a href="thread.html#761">[ thread ]</a>
+              <a href="subject.html#761">[ subject ]</a>
+              <a href="author.html#761">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-09 13:32:21 +0100 (Fri, 09 Feb 2007)
+New Revision: 774
+
+Added:
+   trunk/patches/aioepoll-2.6.20.diff
+Removed:
+   trunk/patches/aioepoll-2.6.20-rc2.diff
+Log:
+Update aioepoll patch for 2.6.20.
+
+Deleted: trunk/patches/aioepoll-2.6.20-rc2.diff
+===================================================================
+--- trunk/patches/aioepoll-2.6.20-rc2.diff	2007-01-29 15:20:27 UTC (rev 773)
++++ trunk/patches/aioepoll-2.6.20-rc2.diff	2007-02-09 12:32:21 UTC (rev 774)
+@@ -1,242 +0,0 @@
+-diff --git a/fs/aio.c b/fs/aio.c
+-index 5f577a6..b546104 100644
+---- a/fs/aio.c
+-+++ b/fs/aio.c
+-@@ -30,6 +30,7 @@ #include &lt;linux/aio.h&gt;
+- #include &lt;linux/highmem.h&gt;
+- #include &lt;linux/workqueue.h&gt;
+- #include &lt;linux/security.h&gt;
+-+#include &lt;linux/eventpoll.h&gt;
+- 
+- #include &lt;asm/kmap_types.h&gt;
+- #include &lt;asm/uaccess.h&gt;
+-@@ -802,6 +803,8 @@ static void aio_queue_work(struct kioctx
+- 		timeout = 1;
+- 	else
+- 		timeout = HZ/10;
+-+
+-+	timeout = 1;
+- 	queue_delayed_work(aio_wq, &amp;ctx-&gt;wq, timeout);
+- }
+- 
+-@@ -1487,6 +1490,9 @@ static ssize_t aio_setup_iocb(struct kio
+- 		if (file-&gt;f_op-&gt;aio_fsync)
+- 			kiocb-&gt;ki_retry = aio_fsync;
+- 		break;
+-+	case IOCB_CMD_EPOLL_WAIT:
+-+		kiocb-&gt;ki_retry = eventpoll_aio_wait;
+-+		break;
+- 	default:
+- 		dprintk(&quot;EINVAL: io_submit: no operation provided\n&quot;);
+- 		ret = -EINVAL;
+-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+-index 3ae644e..6b78ada 100644
+---- a/fs/eventpoll.c
+-+++ b/fs/eventpoll.c
+-@@ -35,6 +35,7 @@ #include &lt;linux/eventpoll.h&gt;
+- #include &lt;linux/mount.h&gt;
+- #include &lt;linux/bitops.h&gt;
+- #include &lt;linux/mutex.h&gt;
+-+#include &lt;linux/aio.h&gt;
+- #include &lt;asm/uaccess.h&gt;
+- #include &lt;asm/system.h&gt;
+- #include &lt;asm/io.h&gt;
+-@@ -642,6 +643,150 @@ eexit_1:
+- 	return error;
+- }
+- 
+-+static void eventpoll_aio_timer(unsigned long data)
+-+{
+-+	struct kiocb *iocb = (struct kiocb *)data;
+-+	struct timer_list *timer = (struct timer_list *)iocb-&gt;private;
+-+	struct file *file = iocb-&gt;ki_filp;
+-+	struct eventpoll *ep = (struct eventpoll *)file-&gt;private_data;
+-+	unsigned long flags;
+-+
+-+	(void)del_timer(timer);
+-+	write_lock_irqsave(&amp;ep-&gt;lock, flags);
+-+	__wake_up_locked(&amp;ep-&gt;wq, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE);
+-+	write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
+-+}
+-+
+-+static int aio_epoll_cancel(struct kiocb *iocb, struct io_event *event)
+-+{
+-+	struct file *file = iocb-&gt;ki_filp;
+-+	struct eventpoll *ep = (struct eventpoll *)file-&gt;private_data;
+-+	int ret = -1;
+-+	struct list_head *list;
+-+	int seen = 0;
+-+
+-+	write_lock_irq(&amp;ep-&gt;lock);
+-+
+-+	if (iocb-&gt;private)
+-+		del_timer((struct timer_list *)iocb-&gt;private);
+-+	/*
+-+	 *  We need to know whether the event was removed from the wait
+-+	 *  queue in order to return the proper status to the cancellation
+-+	 *  code.
+-+	 */
+-+	list = &amp;ep-&gt;wq.task_list;
+-+
+-+	do {
+-+		struct list_head *next;
+-+		if (list == &amp;iocb-&gt;ki_wait.task_list)
+-+			seen++;
+-+		next = list-&gt;next;
+-+		if (next-&gt;prev != list) {
+-+			seen += 2;
+-+			break;
+-+		}
+-+		list = next;
+-+	} while (list != &amp;ep-&gt;wq.task_list);
+-+
+-+	if (seen == 1) {
+-+		__remove_wait_queue(&amp;ep-&gt;wq, &amp;iocb-&gt;ki_wait);
+-+		ret = 0;
+-+	}
+-+	write_unlock_irq(&amp;ep-&gt;lock);
+-+
+-+	if (ret == 0) {
+-+		/* successfully cancelled request */
+-+		kfree(iocb-&gt;private);
+-+		iocb-&gt;private = NULL;
+-+		/* drop the i/o reference */
+-+		aio_put_req(iocb);
+-+	} else
+-+		ret = -EAGAIN;
+-+
+-+	event-&gt;res = event-&gt;res2 = 0;
+-+	/* drop the cancel reference */
+-+	aio_put_req(iocb);
+-+
+-+	return ret;
+-+}
+-+
+-+/*
+-+ * iocb-&gt;ki_nbytes -- number of events
+-+ * iocb-&gt;ki_pos    -- relative timeout in milliseconds
+-+ * iocb-&gt;private   -- NULL first go;  after that, it's set to the the
+-+ *                    absolute timeout in jiffies.
+-+ */
+-+ssize_t eventpoll_aio_wait(struct kiocb *iocb)
+-+{
+-+	struct file *file = iocb-&gt;ki_filp;
+-+	ssize_t ret = -EINVAL;
+-+	int relative_ms;
+-+	unsigned long expires;
+-+	unsigned long now;
+-+	struct timer_list *timer;
+-+
+-+	if (!is_file_epoll(file) || iocb-&gt;ki_nbytes &gt; EP_MAX_EVENTS ||
+-+	    iocb-&gt;ki_nbytes &lt;= 0)
+-+		return -EINVAL;
+-+
+-+	if (!iocb-&gt;private) {
+-+		/*
+-+		 *  Note that we unconditionally allocate a timer, but we
+-+		 *  only use it if a timeout was specified.  Otherwise, it
+-+		 *  is just a holder for the &quot;infinite&quot; value.
+-+		 */
+-+		timer = kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+-+		if (!timer)
+-+			return -ENOMEM;
+-+
+-+		if ((long)iocb-&gt;ki_pos &lt; 0 || iocb-&gt;ki_pos &gt;= EP_MAX_MSTIMEO)
+-+			expires = MAX_SCHEDULE_TIMEOUT;
+-+		else
+-+			expires = jiffies + msecs_to_jiffies(iocb-&gt;ki_pos);
+-+
+-+		init_timer(timer);
+-+		timer-&gt;function = eventpoll_aio_timer;
+-+		timer-&gt;data = (unsigned long)iocb;
+-+		timer-&gt;expires = expires;
+-+	} else {
+-+		timer = (struct timer_list *)iocb-&gt;private;
+-+		expires = timer-&gt;expires;
+-+	}
+-+
+-+	now = jiffies;
+-+	if (timer-&gt;expires == MAX_SCHEDULE_TIMEOUT)
+-+		relative_ms = EP_MAX_MSTIMEO;
+-+	else if (time_before(now, expires))
+-+		relative_ms = jiffies_to_msecs(expires - now);
+-+	else
+-+		relative_ms = 0;
+-+
+-+	iocb-&gt;ki_cancel = aio_epoll_cancel;
+-+	ret = ep_poll(file-&gt;private_data,
+-+		      (struct epoll_event __user *)iocb-&gt;ki_buf,
+-+		      iocb-&gt;ki_nbytes, relative_ms);
+-+
+-+	/*
+-+	 *  If a timeout was specified, ep_poll returned retry, and we have
+-+	 *  not yet registered a timer, go ahead and register one.
+-+	 */
+-+	if (ret == -EIOCBRETRY &amp;&amp; !iocb-&gt;private) {
+-+		iocb-&gt;private = timer;
+-+		add_timer(timer);
+-+	}
+-+
+-+	/*
+-+	 *  Did we get any events?
+-+	 */
+-+	if (ret &gt;= 0) {
+-+		iocb-&gt;ki_cancel = NULL;
+-+		(void)del_timer(timer);
+-+		kfree(timer);
+-+		iocb-&gt;private = NULL;
+-+	}
+-+
+-+	return ret;
+-+}
+- 
+- /*
+-  * Implement the event wait interface for the eventpoll file. It is the kernel
+-@@ -1564,6 +1709,12 @@ retry:
+- 
+- 	res = 0;
+- 	if (list_empty(&amp;ep-&gt;rdllist)) {
+-+		if (in_aio() &amp;&amp; jtimeout) {
+-+			__add_wait_queue(&amp;ep-&gt;wq, current-&gt;io_wait);
+-+			res = -EIOCBRETRY;
+-+			write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
+-+			goto out;
+-+		}
+- 		/*
+- 		 * We don't have any available event to return to the caller.
+- 		 * We need to sleep here, and we will be wake up by
+-@@ -1608,7 +1759,7 @@ retry:
+- 	if (!res &amp;&amp; eavail &amp;&amp;
+- 	    !(res = ep_events_transfer(ep, events, maxevents)) &amp;&amp; jtimeout)
+- 		goto retry;
+--
+-+out:
+- 	return res;
+- }
+- 
+-diff --git a/include/linux/aio_abi.h b/include/linux/aio_abi.h
+-index e3ca0a4..292c811 100644
+---- a/include/linux/aio_abi.h
+-+++ b/include/linux/aio_abi.h
+-@@ -43,6 +43,7 @@ enum {
+- 	IOCB_CMD_NOOP = 6,
+- 	IOCB_CMD_PREADV = 7,
+- 	IOCB_CMD_PWRITEV = 8,
+-+  	IOCB_CMD_EPOLL_WAIT = 9,
+- };
+- 
+- /* read() from /dev/aio returns these structures. */
+-diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
+-index 84cfa8b..ed04500 100644
+---- a/include/linux/eventpoll.h
+-+++ b/include/linux/eventpoll.h
+-@@ -62,6 +62,9 @@ static inline void eventpoll_init_file(s
+- /* Used to release the epoll bits inside the &quot;struct file&quot; */
+- void eventpoll_release_file(struct file *file);
+- 
+-+/* Used to provide epoll_wait() to sys_io_submit() */
+-+ssize_t eventpoll_aio_wait(struct kiocb *iocb);
+-+
+- /*
+-  * This is called from inside fs/file_table.c:__fput() to unlink files
+-  * from the eventpoll interface. We need to have this facility to cleanup
+
+Added: trunk/patches/aioepoll-2.6.20.diff
+===================================================================
+--- trunk/patches/aioepoll-2.6.20.diff	2007-01-29 15:20:27 UTC (rev 773)
++++ trunk/patches/aioepoll-2.6.20.diff	2007-02-09 12:32:21 UTC (rev 774)
+@@ -0,0 +1,374 @@
++diff --git a/fs/aio.c b/fs/aio.c
++index 55991e4..ee4b679 100644
++--- a/fs/aio.c
+++++ b/fs/aio.c
++@@ -30,6 +30,7 @@ #include &lt;linux/aio.h&gt;
++ #include &lt;linux/highmem.h&gt;
++ #include &lt;linux/workqueue.h&gt;
++ #include &lt;linux/security.h&gt;
+++#include &lt;linux/eventpoll.h&gt;
++ 
++ #include &lt;asm/kmap_types.h&gt;
++ #include &lt;asm/uaccess.h&gt;
++@@ -193,6 +194,8 @@ #define put_aio_ring_event(event, km) do
++ 	kunmap_atomic((void *)((unsigned long)__event &amp; PAGE_MASK), km); \
++ } while(0)
++ 
+++static struct lock_class_key ioctx_wait_queue_head_lock_key;
+++
++ /* ioctx_alloc
++  *	Allocates and initializes an ioctx.  Returns an ERR_PTR if it failed.
++  */
++@@ -224,6 +227,8 @@ static struct kioctx *ioctx_alloc(unsign
++ 	spin_lock_init(&amp;ctx-&gt;ctx_lock);
++ 	spin_lock_init(&amp;ctx-&gt;ring_info.ring_lock);
++ 	init_waitqueue_head(&amp;ctx-&gt;wait);
+++	/* Teach lockdep to recognize this lock as a different class */
+++	lockdep_set_class(&amp;ctx-&gt;wait.lock, &amp;ioctx_wait_queue_head_lock_key);
++ 
++ 	INIT_LIST_HEAD(&amp;ctx-&gt;active_reqs);
++ 	INIT_LIST_HEAD(&amp;ctx-&gt;run_list);
++@@ -1399,6 +1404,42 @@ static ssize_t aio_setup_single_vector(s
++ 	return 0;
++ }
++ 
+++/* Uses iocb-&gt;ki_private */
+++void aio_free_iocb_timer(struct kiocb *iocb)
+++{
+++	struct timer_list *timer = (struct timer_list *)iocb-&gt;private;
+++
+++	if (timer) {
+++		del_timer(timer);
+++		kfree(timer);
+++		iocb-&gt;private = NULL;
+++	}
+++}
+++
+++/* Uses iocb-&gt;private */
+++int aio_setup_iocb_timer(struct kiocb *iocb, unsigned long expires,
+++	void (*function)(unsigned long))
+++{
+++	struct timer_list *timer;
+++
+++	if (iocb-&gt;private)
+++		return -EEXIST;
+++
+++	timer = kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+++	if (!timer)
+++		return -ENOMEM;
+++
+++	init_timer(timer);
+++	timer-&gt;function = function;
+++	timer-&gt;data = (unsigned long)iocb;
+++	timer-&gt;expires = expires;
+++
+++	iocb-&gt;private = timer;
+++	iocb-&gt;ki_dtor = aio_free_iocb_timer;
+++	return 0;
+++}
+++
+++
++ /*
++  * aio_setup_iocb:
++  *	Performs the initial checks and aio retry method
++@@ -1484,6 +1525,19 @@ static ssize_t aio_setup_iocb(struct kio
++ 		if (file-&gt;f_op-&gt;aio_fsync)
++ 			kiocb-&gt;ki_retry = aio_fsync;
++ 		break;
+++	case IOCB_CMD_EPOLL_WAIT:
+++		/*
+++	 	 *  Note that we unconditionally allocate a timer, but we
+++	 	 *  only use it if a timeout was specified.  Otherwise, it
+++	 	 *  is just a holder for the &quot;infinite&quot; value.
+++	 	 */
+++		ret = aio_setup_iocb_timer(kiocb, ep_relative_ms_to_jiffies(
+++					kiocb-&gt;ki_pos), eventpoll_aio_timer);
+++		if (unlikely(ret))
+++			break;
+++		kiocb-&gt;ki_retry = eventpoll_aio_wait;
+++		kiocb-&gt;ki_cancel = eventpoll_aio_cancel;
+++		break;
++ 	default:
++ 		dprintk(&quot;EINVAL: io_submit: no operation provided\n&quot;);
++ 		ret = -EINVAL;
++diff --git a/fs/eventpoll.c b/fs/eventpoll.c
++index 3ae644e..66ea9f1 100644
++--- a/fs/eventpoll.c
+++++ b/fs/eventpoll.c
++@@ -35,6 +35,7 @@ #include &lt;linux/eventpoll.h&gt;
++ #include &lt;linux/mount.h&gt;
++ #include &lt;linux/bitops.h&gt;
++ #include &lt;linux/mutex.h&gt;
+++#include &lt;linux/aio.h&gt;
++ #include &lt;asm/uaccess.h&gt;
++ #include &lt;asm/system.h&gt;
++ #include &lt;asm/io.h&gt;
++@@ -642,6 +643,75 @@ eexit_1:
++ 	return error;
++ }
++ 
+++/*
+++ * Called when the eventpoll timer expires or a cancellation
+++ * occurs for an aio_epoll_wait. It is enough for this function to
+++ * trigger a wakeup on the eventpoll waitqueue. The aio_wake_function()
+++ * callback will pull out the wait queue entry and kick the iocb so that
+++ * the rest gets taken care of in aio_run_iocb-&gt;aio_epoll_wait which
+++ * can recognize the cancelled state or timeout expiration and do
+++ * the right thing.
+++ */
+++void eventpoll_aio_timer(unsigned long data)
+++{
+++	struct kiocb *iocb = (struct kiocb *)data;
+++	struct timer_list *timer = iocb_timer(iocb);
+++	struct file *file = iocb-&gt;ki_filp;
+++	struct eventpoll *ep = (struct eventpoll *)file-&gt;private_data;
+++	unsigned long flags;
+++
+++	if (timer)
+++		del_timer(timer);
+++	write_lock_irqsave(&amp;ep-&gt;lock, flags);
+++	/* because ep-&gt;lock also protects ep-&gt;wq */
+++	__wake_up_locked(&amp;ep-&gt;wq, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE);
+++	write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
+++}
+++
+++
+++int eventpoll_aio_cancel(struct kiocb *iocb, struct io_event *event)
+++{
+++	/* to wakeup the iocb, so actual cancellation happens aio_run_iocb */
+++	eventpoll_aio_timer((unsigned long)iocb);
+++
+++	event-&gt;res = event-&gt;res2 = 0;
+++	/* drop the cancel reference */
+++	aio_put_req(iocb);
+++
+++	return 0;
+++}
+++
+++/*
+++ * iocb-&gt;ki_nbytes -- number of events
+++ * iocb-&gt;ki_pos    -- relative timeout in milliseconds
+++ * iocb-&gt;private   -- timer with absolute timeout in jiffies
+++ */
+++ssize_t eventpoll_aio_wait(struct kiocb *iocb)
+++{
+++	struct file *file = iocb-&gt;ki_filp;
+++	ssize_t ret = -EINVAL;
+++	unsigned long expires;
+++	struct timer_list *timer = iocb_timer(iocb);
+++
+++	if (!is_file_epoll(file) || iocb-&gt;ki_nbytes &gt; EP_MAX_EVENTS ||
+++	    iocb-&gt;ki_nbytes &lt;= 0)
+++		return -EINVAL;
+++
+++	expires = timer-&gt;expires;
+++	ret = ep_poll(file-&gt;private_data,
+++		      (struct epoll_event __user *)iocb-&gt;ki_buf,
+++		      iocb-&gt;ki_nbytes, ep_jiffies_to_relative_ms(expires));
+++
+++	/*
+++	 *  If a timeout was specified, ep_poll returned retry, and we have
+++	 *  not yet registered a timer, go ahead and register one.
+++	 */
+++	if (ret == -EIOCBRETRY) {
+++		mod_timer(timer, expires);
+++	}
+++
+++	return ret;
+++}
++ 
++ /*
++  * Implement the event wait interface for the eventpoll file. It is the kernel
++@@ -824,6 +894,7 @@ eexit_1:
++ 	return error;
++ }
++ 
+++static struct lock_class_key eventpoll_wait_queue_head_lock_key;
++ 
++ static int ep_alloc(struct eventpoll **pep)
++ {
++@@ -835,6 +906,9 @@ static int ep_alloc(struct eventpoll **p
++ 	rwlock_init(&amp;ep-&gt;lock);
++ 	init_rwsem(&amp;ep-&gt;sem);
++ 	init_waitqueue_head(&amp;ep-&gt;wq);
+++	/* Teach lockdep to recognize this lock as a different class */
+++	lockdep_set_class(&amp;ep-&gt;wq.lock, &amp;eventpoll_wait_queue_head_lock_key);
+++
++ 	init_waitqueue_head(&amp;ep-&gt;poll_wait);
++ 	INIT_LIST_HEAD(&amp;ep-&gt;rdllist);
++ 	ep-&gt;rbr = RB_ROOT;
++@@ -1549,7 +1623,7 @@ static int ep_poll(struct eventpoll *ep,
++ 	int res, eavail;
++ 	unsigned long flags;
++ 	long jtimeout;
++-	wait_queue_t wait;
+++	wait_queue_t *wait = current-&gt;io_wait;
++ 
++ 	/*
++ 	 * Calculate the timeout by checking for the &quot;infinite&quot; value ( -1 )
++@@ -1569,16 +1643,13 @@ retry:
++ 		 * We need to sleep here, and we will be wake up by
++ 		 * ep_poll_callback() when events will become available.
++ 		 */
++-		init_waitqueue_entry(&amp;wait, current);
++-		__add_wait_queue(&amp;ep-&gt;wq, &amp;wait);
++-
++ 		for (;;) {
++ 			/*
++ 			 * We don't want to sleep if the ep_poll_callback() sends us
++ 			 * a wakeup in between. That's why we set the task state
++ 			 * to TASK_INTERRUPTIBLE before doing the checks.
++ 			 */
++-			set_current_state(TASK_INTERRUPTIBLE);
+++			prepare_to_wait(&amp;ep-&gt;wq, wait, TASK_INTERRUPTIBLE);
++ 			if (!list_empty(&amp;ep-&gt;rdllist) || !jtimeout)
++ 				break;
++ 			if (signal_pending(current)) {
++@@ -1587,12 +1658,16 @@ retry:
++ 			}
++ 
++ 			write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
++-			jtimeout = schedule_timeout(jtimeout);
+++			if ((jtimeout = schedule_timeout_wait(jtimeout, wait))
+++				&lt; 0) {
+++				if ((res = jtimeout) == -EIOCBRETRY)
+++					goto out;
+++			}
+++			if (res &lt; 0)
+++				break;
++ 			write_lock_irqsave(&amp;ep-&gt;lock, flags);
++ 		}
++-		__remove_wait_queue(&amp;ep-&gt;wq, &amp;wait);
++-
++-		set_current_state(TASK_RUNNING);
+++		finish_wait(&amp;ep-&gt;wq, wait);
++ 	}
++ 
++ 	/* Is it worth to try to dig for events ? */
++@@ -1608,7 +1683,7 @@ retry:
++ 	if (!res &amp;&amp; eavail &amp;&amp;
++ 	    !(res = ep_events_transfer(ep, events, maxevents)) &amp;&amp; jtimeout)
++ 		goto retry;
++-
+++out:
++ 	return res;
++ }
++ 
++diff --git a/include/linux/aio.h b/include/linux/aio.h
++index a30ef13..6130ab0 100644
++--- a/include/linux/aio.h
+++++ b/include/linux/aio.h
++@@ -238,6 +238,7 @@ do {									\
++ } while (0)
++ 
++ #define io_wait_to_kiocb(wait) container_of(wait, struct kiocb, ki_wait)
+++#define iocb_timer(iocb)	((struct timer_list *)((iocb)-&gt;private))
++ 
++ #include &lt;linux/aio_abi.h&gt;
++ 
++diff --git a/include/linux/aio_abi.h b/include/linux/aio_abi.h
++index e3ca0a4..ff0ebdd 100644
++--- a/include/linux/aio_abi.h
+++++ b/include/linux/aio_abi.h
++@@ -43,6 +43,7 @@ enum {
++ 	IOCB_CMD_NOOP = 6,
++ 	IOCB_CMD_PREADV = 7,
++ 	IOCB_CMD_PWRITEV = 8,
+++	IOCB_CMD_EPOLL_WAIT = 9,
++ };
++ 
++ /* read() from /dev/aio returns these structures. */
++diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
++index 84cfa8b..203ff5f 100644
++--- a/include/linux/eventpoll.h
+++++ b/include/linux/eventpoll.h
++@@ -48,6 +48,33 @@ #ifdef __KERNEL__
++ /* Forward declarations to avoid compiler errors */
++ struct file;
++ 
+++/* Maximum msec timeout value storeable in a long int */
+++#define EP_MAX_MSTIMEO min(1000ULL * MAX_SCHEDULE_TIMEOUT / HZ, (LONG_MAX - 999ULL) / HZ)
+++
+++static inline int ep_jiffies_to_relative_ms(unsigned long expires)
+++{
+++	int relative_ms = 0;
+++	unsigned long now = jiffies;
+++
+++	if (expires == MAX_SCHEDULE_TIMEOUT)
+++		relative_ms = EP_MAX_MSTIMEO;
+++	else if (time_before(now, expires))
+++		relative_ms = jiffies_to_msecs(expires - now);
+++
+++	return relative_ms;
+++}
+++
+++static inline unsigned long ep_relative_ms_to_jiffies(int relative_ms)
+++{
+++	unsigned long expires;
+++
+++	if (relative_ms &lt; 0 || relative_ms &gt;= EP_MAX_MSTIMEO)
+++		expires = MAX_SCHEDULE_TIMEOUT;
+++	else
+++		expires = jiffies + msecs_to_jiffies(relative_ms);
+++	return expires;
+++}
+++
++ 
++ #ifdef CONFIG_EPOLL
++ 
++@@ -90,6 +117,10 @@ static inline void eventpoll_release(str
++ 	eventpoll_release_file(file);
++ }
++ 
+++extern void eventpoll_aio_timer(unsigned long data);
+++extern int eventpoll_aio_cancel(struct kiocb *iocb, struct io_event *event);
+++extern ssize_t eventpoll_aio_wait(struct kiocb *iocb);
+++
++ #else
++ 
++ static inline void eventpoll_init_file(struct file *file) {}
++diff --git a/include/linux/sched.h b/include/linux/sched.h
++index 4463735..cfbe552 100644
++--- a/include/linux/sched.h
+++++ b/include/linux/sched.h
++@@ -246,6 +246,8 @@ extern int in_sched_functions(unsigned l
++ 
++ #define	MAX_SCHEDULE_TIMEOUT	LONG_MAX
++ extern signed long FASTCALL(schedule_timeout(signed long timeout));
+++extern signed long FASTCALL(schedule_timeout_wait(signed long timeout,
+++				wait_queue_t *wait));
++ extern signed long schedule_timeout_interruptible(signed long timeout);
++ extern signed long schedule_timeout_uninterruptible(signed long timeout);
++ asmlinkage void schedule(void);
++diff --git a/kernel/timer.c b/kernel/timer.c
++index c2a8ccf..02f879e 100644
++--- a/kernel/timer.c
+++++ b/kernel/timer.c
++@@ -1368,6 +1368,27 @@ fastcall signed long __sched schedule_ti
++ EXPORT_SYMBOL(schedule_timeout);
++ 
++ /*
+++ * Same as schedule_timeout, except that it checks the wait queue context
+++ * passed in, and in case of an asynchronous waiter it does not sleep,
+++ * but returns -EIOCBRETRY to allow the operation to be retried later when
+++ * notified, unless it has been cancelled in which case it returns -EINTR
+++ */
+++fastcall signed long __sched schedule_timeout_wait(signed long timeout,
+++	wait_queue_t *wait)
+++{
+++	struct kiocb *iocb;
+++	if (is_sync_wait(wait))
+++		return schedule_timeout(timeout);
+++
+++	iocb = io_wait_to_kiocb(wait);
+++	if (kiocbIsCancelled(iocb))
+++		return -EINTR;
+++
+++	return -EIOCBRETRY;
+++}
+++
+++
+++/*
++  * We can use __set_current_state() here because schedule_timeout() calls
++  * schedule() unconditionally.
++  */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000762.html">[Stgt-svn] r775 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#761">[ date ]</a>
+              <a href="thread.html#761">[ thread ]</a>
+              <a href="subject.html#761">[ subject ]</a>
+              <a href="author.html#761">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

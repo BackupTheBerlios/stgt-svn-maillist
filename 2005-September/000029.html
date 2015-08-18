@@ -1,0 +1,330 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r35 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r35%20-%20trunk/kernel&In-Reply-To=%3C200509030926.j839Qn3J032221%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000028.html">
+   <LINK REL="Next"  HREF="000030.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r35 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r35%20-%20trunk/kernel&In-Reply-To=%3C200509030926.j839Qn3J032221%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r35 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Sep  3 11:26:49 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000028.html">[Stgt-svn] r34 - in trunk: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000030.html">[Stgt-svn] r37 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#29">[ date ]</a>
+              <a href="thread.html#29">[ thread ]</a>
+              <a href="subject.html#29">[ subject ]</a>
+              <a href="author.html#29">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-03 11:26:45 +0200 (Sat, 03 Sep 2005)
+New Revision: 35
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt_vsd.c
+Log:
+Add error handling support to stgt core.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-03 06:47:48 UTC (rev 34)
++++ trunk/kernel/stgt.c	2005-09-03 09:26:45 UTC (rev 35)
+@@ -737,8 +737,9 @@
+ 	struct nlmsghdr *nlh;
+ 	struct stgt_event *ev;
+ 	char *pdu;
+-	int len = NLMSG_SPACE(sizeof(*ev) + sizeof(cmnd-&gt;scb));
++	int len;
+ 
++	len = NLMSG_SPACE(sizeof(*ev) + sizeof(cmnd-&gt;scb));
+ 	if (!(skb = alloc_skb(NLMSG_SPACE(len), GFP_KERNEL)))
+ 		return -ENOMEM;
+ 
+@@ -758,10 +759,11 @@
+ 	return netlink_unicast(nls, skb, daemon_pid, 0);
+ }
+ 
+-static void cmnd_done(struct stgt_cmnd *cmnd)
++static void cmnd_done(struct stgt_cmnd *cmnd, int result)
+ {
+ 	void (*done)(struct stgt_cmnd *);
+ 
++	cmnd-&gt;result = result;
+ 	done = cmnd-&gt;done;
+ 	cmnd-&gt;done = NULL;
+ 	done(cmnd);
+@@ -788,13 +790,58 @@
+ 		}
+ 	}
+ 
+-	cmnd-&gt;result = result;
+-	cmnd_done(cmnd);
++	cmnd_done(cmnd, result);
+ }
+ 
++static int sense_data_build(struct stgt_cmnd *cmnd, uint8_t key,
++			    uint8_t ascode, uint8_t ascodeq)
++{
++	int i, len = 6;
++	char *data;
++
++	/* It works, however, dirty. */
++	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
++		__free_page(cmnd-&gt;sg[i].page);
++	kfree(cmnd-&gt;sg);
++
++	__alloc_buffer(cmnd, len, 0);
++	data = page_address(cmnd-&gt;sg[0].page);
++
++	data[0] = 0xf0 | 1U &lt;&lt; 7;
++	data[2] = key;
++	data[7] = len;
++	data[12] = ascode;
++	data[13] = ascodeq;
++
++	return len;
++}
++
++/* TODO: better error handling
++ * We should get ASC and ASCQ from the device code.
++ */
++static uint8_t error_to_sense_key(int err)
++{
++	uint8_t key;
++
++	switch (err) {
++	case -ENOMEM:
++		key = ABORTED_COMMAND;
++		break;
++	case -EOVERFLOW:
++		key = HARDWARE_ERROR;
++		break;
++	default:
++		key = HARDWARE_ERROR;
++		break;
++	}
++
++	return key;
++}
++
+ static void queuecommand(void *data)
+ {
+ 	int err;
++	uint8_t key;
+ 	enum stgt_cmnd_type type = STGT_CMND_USPACE;
+ 	struct stgt_cmnd *cmnd = (struct stgt_cmnd *) data;
+ 	struct stgt_target *target = cmnd-&gt;session-&gt;target;
+@@ -802,14 +849,6 @@
+ 
+ 	dprintk(&quot;%x\n&quot;, cmnd-&gt;scb[0]);
+ 
+-	/*
+-	 * seperate vsd (virtual disk from sd (real sd))
+-	 * call scsi_device_temaplte-&gt;prepcommand to see if they want it
+-	 * and allow them to setup.
+-	 *
+-	 * Then call queuecommand
+-	 */
+-
+ 	/* Should we do this earlier? */
+ 	device = stgt_device_find(target, cmnd-&gt;lun);
+ 	if (device)
+@@ -821,14 +860,30 @@
+ 	switch (type) {
+ 	case STGT_CMND_KSPACE:
+ 		err = device-&gt;sdt-&gt;queuecommand(device, cmnd);
+-		cmnd_done(cmnd);
++		if (err &lt; 0)
++			goto failed_cmnd;
++		else
++			cmnd_done(cmnd, SAM_STAT_GOOD);
+ 		break;
+ 	case STGT_CMND_USPACE:
+ 		err = uspace_cmnd_send(cmnd);
++		if (err &lt; 0)
++			goto failed_cmnd;
+ 		break;
+ 	default:
++		eprintk(&quot;%u %d\n&quot;, cmnd-&gt;scb[0], type);
++		assert(0);
+ 		break;
+ 	}
++
++	return;
++
++failed_cmnd:
++	eprintk(&quot;failed cmnd %llu %u %d %d\n&quot;,
++		cmnd-&gt;cid, cmnd-&gt;scb[0], err, type);
++	key = error_to_sense_key(err);
++	sense_data_build(cmnd, key, 0, 0);
++	cmnd_done(cmnd, SAM_STAT_CHECK_CONDITION);
+ }
+ 
+ static uint32_t translate_lun(uint8_t *p, int size)
+
+Modified: trunk/kernel/stgt_vsd.c
+===================================================================
+--- trunk/kernel/stgt_vsd.c	2005-09-03 06:47:48 UTC (rev 34)
++++ trunk/kernel/stgt_vsd.c	2005-09-03 09:26:45 UTC (rev 35)
+@@ -11,6 +11,7 @@
+ #include &lt;linux/namei.h&gt;
+ #include &lt;linux/uio.h&gt;
+ #include &lt;linux/fs.h&gt;
++#include &lt;linux/writeback.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ 
+ #include &lt;stgt.h&gt;
+@@ -106,10 +107,8 @@
+ 	int i;
+ 
+ 	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
+-	if (!iov) {
+-		printk(&quot;%s %d ENOMEM %d\n&quot;, __FUNCTION__, __LINE__, sg_count);
++	if (!iov)
+ 		return NULL;
+-	}
+ 
+ 	for (i = 0; i &lt; sg_count; i++) {
+ 		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
+@@ -119,47 +118,72 @@
+ 	return iov;
+ }
+ 
+-static int stgt_vsd_queue(struct stgt_device *device, struct stgt_cmnd *cmnd)
++static int vfs_io(struct stgt_device *device, struct stgt_cmnd *cmnd, int rw, int sync)
+ {
+ 	struct stgt_vsd_dev *vsddev = device-&gt;sdt_data;
++	struct inode *inode = vsddev-&gt;filp-&gt;f_dentry-&gt;d_inode;
++	ssize_t size;
++	struct iovec *iov;
+ 	loff_t pos = translate_offset(cmnd-&gt;scb);
+-	ssize_t size;
+-	struct iovec *iov = NULL;
+ 	int err = 0;
+ 
++	if (cmnd-&gt;bufflen + pos &gt; device-&gt;size)
++		return -EOVERFLOW;
++
++	iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
++	if (!iov)
++		return -ENOMEM;
++
++	if (rw == READ)
++		size = generic_file_readv(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
++	else
++		size = generic_file_writev(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
++
++	kfree(iov);
++
++	if (sync)
++		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
++				      (size_t) cmnd-&gt;bufflen);
++
++	if ((size != cmnd-&gt;bufflen) || err)
++		return -EIO;
++	else
++		return 0;
++}
++
++static int stgt_vsd_queue(struct stgt_device *device, struct stgt_cmnd *cmnd)
++{
++	struct stgt_vsd_dev *vsddev = device-&gt;sdt_data;
++	struct inode *inode = vsddev-&gt;filp-&gt;f_dentry-&gt;d_inode;
++	int err = 0;
++
+ 	switch (cmnd-&gt;scb[0]) {
+ 	case READ_6:
+ 	case READ_10:
+ 	case READ_16:
+-		iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
+-		if (!iov)
+-			goto out;
+-		size = generic_file_readv(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-		kfree(iov);
++		err = vfs_io(device, cmnd, READ, 0);
+ 		break;
+ 	case WRITE_6:
+ 	case WRITE_10:
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+-		iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
+-		if (!iov)
+-			goto out;
+-		err = generic_file_writev(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-		kfree(iov);
++		err = vfs_io(device, cmnd, WRITE, 0);
+ 		break;
+ 	case RESERVE:
+ 	case RELEASE:
+ 	case RESERVE_10:
+ 	case RELEASE_10:
+ 		break;
++	case SYNCHRONIZE_CACHE:
++		err = sync_page_range(inode, inode-&gt;i_mapping, 0, device-&gt;size);
++		break;
+ 	default:
+ 		BUG();
+ 	}
+ 
+ 	if (err &lt; 0)
+-		printk(&quot;%s %d: %d %llu\n&quot;, __FUNCTION__, __LINE__, err, pos);
+-out:
+-	return 0;
++		printk(&quot;%s %d: %x %d\n&quot;, __FUNCTION__, __LINE__, cmnd-&gt;scb[0], err);
++	return err;
+ }
+ 
+ static int stgt_vsd_prep(struct stgt_device *device, struct stgt_cmnd *cmnd)
+@@ -178,6 +202,7 @@
+ 	case RELEASE:
+ 	case RESERVE_10:
+ 	case RELEASE_10:
++	case SYNCHRONIZE_CACHE:
+ 		type = STGT_CMND_KSPACE;
+ 		break;
+ 	default:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000028.html">[Stgt-svn] r34 - in trunk: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000030.html">[Stgt-svn] r37 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#29">[ date ]</a>
+              <a href="thread.html#29">[ thread ]</a>
+              <a href="subject.html#29">[ subject ]</a>
+              <a href="author.html#29">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

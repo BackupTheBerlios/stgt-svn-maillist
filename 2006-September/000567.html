@@ -1,0 +1,373 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r580 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r580%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609010837.k818bg2e017894%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000566.html">
+   <LINK REL="Next"  HREF="000568.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r580 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r580%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609010837.k818bg2e017894%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r580 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Sep  1 10:37:42 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000566.html">[Stgt-svn] r579 - trunk/patch
+</A></li>
+        <LI>Next message: <A HREF="000568.html">[Stgt-svn] r581 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#567">[ date ]</a>
+              <a href="thread.html#567">[ thread ]</a>
+              <a href="subject.html#567">[ subject ]</a>
+              <a href="author.html#567">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-01 10:37:42 +0200 (Fri, 01 Sep 2006)
+New Revision: 580
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/util.h
+Log:
+Honor iSCSI command sequence.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-01 04:27:49 UTC (rev 579)
++++ trunk/usr/iscsi/iscsid.c	2006-09-01 08:37:42 UTC (rev 580)
+@@ -26,6 +26,8 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;util.h&quot;
+ 
++#define MAX_QUEUE_CMD	32
++
+ static struct iscsi_key login_keys[] = {
+ 	{&quot;InitiatorName&quot;,},
+ 	{&quot;InitiatorAlias&quot;,},
+@@ -744,8 +746,8 @@
+ 	rsp-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp-&gt;cmd_status = ctask-&gt;result;
+ 	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
+-	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+-	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn + 8);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
+ 
+ 	return 0;
+ }
+@@ -789,8 +791,8 @@
+ 
+ 	if (rsp-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
+ 		rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
+-	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn);
+-	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;exp_cmd_sn + 8);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
+ 
+ 	conn-&gt;rsp.datasize = datalen;
+ 	hton24(rsp-&gt;dlength, datalen);
+@@ -851,7 +853,7 @@
+ 	ctask-&gt;len = len;
+ 	ctask-&gt;rw = rw;
+ 
+-	list_add_tail(&amp;ctask-&gt;c_txlist, &amp;ctask-&gt;conn-&gt;tx_clist);
++	list_add_tail(&amp;ctask-&gt;c_list, &amp;ctask-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(ctask-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 
+ 	return 0;
+@@ -914,9 +916,6 @@
+ 		dprintf(&quot;%p\n&quot;, ctask-&gt;c_buffer);
+ 	}
+ 
+-	conn-&gt;exp_cmd_sn++;
+-	conn-&gt;rx_ctask = ctask;
+-
+ 	if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
+ 		conn-&gt;rx_size = ntoh24(req-&gt;dlength);
+ 		conn-&gt;rx_buffer = ctask-&gt;c_buffer;
+@@ -928,6 +927,8 @@
+ 			ctask-&gt;unsol_count, ctask-&gt;offset);
+ 	}
+ 
++	conn-&gt;rx_ctask = ctask;
++
+ 	return 0;
+ }
+ 
+@@ -963,7 +964,7 @@
+ 			if (ctask-&gt;unsol_count)
+ 				;
+ 			else
+-				list_add_tail(&amp;ctask-&gt;c_txlist, &amp;ctask-&gt;conn-&gt;tx_clist);
++				list_add_tail(&amp;ctask-&gt;c_list, &amp;ctask-&gt;conn-&gt;tx_clist);
+ 		} else
+ 			err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
+ 					       uaddr, req-&gt;lun,
+@@ -980,6 +981,56 @@
+ 	return err;
+ }
+ 
++int iscsi_task_queue(struct iscsi_ctask *ctask)
++{
++	struct session *session = ctask-&gt;conn-&gt;session;
++	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;ctask-&gt;req;
++	uint32_t cmd_sn;
++	struct iscsi_ctask *ent;
++
++	if (req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE) {
++		__iscsi_cmd_rx_done(ctask);
++		return 0;
++	}
++
++	dprintf(&quot;%x %x\n&quot;, be32_to_cpu(req-&gt;statsn), session-&gt;exp_cmd_sn);
++	cmd_sn = be32_to_cpu(req-&gt;statsn);
++	if (cmd_sn == session-&gt;exp_cmd_sn) {
++	retry:
++		session-&gt;exp_cmd_sn = ++cmd_sn;
++
++		__iscsi_cmd_rx_done(ctask);
++
++		if (list_empty(&amp;session-&gt;pending_cmd_list))
++			return 0;
++		ctask = list_entry(session-&gt;pending_cmd_list.next,
++				   struct iscsi_ctask, c_list);
++		if (be32_to_cpu(ctask-&gt;req.statsn) != cmd_sn)
++			return 0;
++
++		list_del(&amp;ctask-&gt;c_list);
++		clear_task_pending(ctask);
++		goto retry;
++	} else {
++		if (before(cmd_sn, session-&gt;exp_cmd_sn)) {
++			eprintf(&quot;unexpected cmd_sn (%u,%u)\n&quot;,
++				cmd_sn, session-&gt;exp_cmd_sn);
++			return -EINVAL;
++		}
++
++		/* TODO: check max cmd_sn */
++
++		list_for_each_entry(ent, &amp;session-&gt;pending_cmd_list, c_list) {
++			if (before(cmd_sn, be32_to_cpu(ent-&gt;req.statsn)))
++				break;
++		}
++
++		list_add_tail(&amp;ctask-&gt;c_list, &amp;ent-&gt;c_list);
++		set_task_pending(ctask);
++	}
++	return 0;
++}
++
+ int iscsi_cmd_rx_done(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;req.bhs;
+@@ -991,12 +1042,12 @@
+ 	op = hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 	switch (op) {
+ 	case ISCSI_OP_SCSI_CMD:
+-		__iscsi_cmd_rx_done(ctask);
++		err = iscsi_task_queue(ctask);
+ 		break;
+ 	case ISCSI_OP_SCSI_DATA_OUT:
+ 		if (ctask-&gt;r2t_count) {
+ 			dprintf(&quot;%x %d\n&quot;, hdr-&gt;itt, ctask-&gt;r2t_count);
+-			list_add_tail(&amp;ctask-&gt;c_txlist, &amp;ctask-&gt;conn-&gt;tx_clist);
++			list_add_tail(&amp;ctask-&gt;c_list, &amp;ctask-&gt;conn-&gt;tx_clist);
+ 			tgt_event_modify(conn-&gt;fd, EPOLLIN|EPOLLOUT);
+ 		} else
+ 			err = target_cmd_queue(conn-&gt;session-&gt;tsih, req-&gt;cdb,
+@@ -1064,7 +1115,7 @@
+ 	case ISCSI_OP_SCSI_DATA_IN:
+ 		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)) {
+ 			dprintf(&quot;more data %x\n&quot;, hdr-&gt;itt);
+-			list_add_tail(&amp;ctask-&gt;c_txlist, &amp;ctask-&gt;conn-&gt;tx_clist);
++			list_add_tail(&amp;ctask-&gt;c_list, &amp;ctask-&gt;conn-&gt;tx_clist);
+ 			goto out;
+ 		}
+ 	default:
+@@ -1097,14 +1148,14 @@
+ 
+ 	conn_write_pdu(conn);
+ 
+-	ctask = list_entry(conn-&gt;tx_clist.next, struct iscsi_ctask, c_txlist);
++	ctask = list_entry(conn-&gt;tx_clist.next, struct iscsi_ctask, c_list);
+ 	conn-&gt;tx_ctask = ctask;
+ 	dprintf(&quot;found a task %&quot; PRIx64 &quot; %u %u %u\n&quot;, ctask-&gt;tag,
+ 		ntohl(((struct iscsi_cmd *) (&amp;ctask-&gt;req))-&gt;data_length),
+ 		ctask-&gt;offset,
+ 		ctask-&gt;r2t_count);
+ 
+-	list_del(&amp;ctask-&gt;c_txlist);
++	list_del(&amp;ctask-&gt;c_list);
+ 
+ 	req = (struct iscsi_cmd *) &amp;ctask-&gt;req;
+ 
+@@ -1387,9 +1438,12 @@
+ 	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
+ 		fd = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 		if (fd &lt; 0) {
+-			eprintf(&quot;unable to create fdet %d %d %d, %m\n&quot;,
+-				res-&gt;ai_family,	res-&gt;ai_socktype,
+-				res-&gt;ai_protocol);
++			if (res-&gt;ai_family == AF_INET6)
++				dprintf(&quot;IPv6 support is disabled.\n&quot;);
++			else
++				eprintf(&quot;unable to create fdet %d %d %d, %m\n&quot;,
++					res-&gt;ai_family,	res-&gt;ai_socktype,
++					res-&gt;ai_protocol);
+ 			continue;
+ 		}
+ 
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-09-01 04:27:49 UTC (rev 579)
++++ trunk/usr/iscsi/iscsid.h	2006-09-01 08:37:42 UTC (rev 580)
+@@ -52,7 +52,10 @@
+ #define KEY_STATE_DONE		2
+ 
+ struct session {
++	/* linked to target-&gt;sessions_list */
+ 	struct list_head slist;
++
++	/* linked to sessions_list */
+ 	struct list_head hlist;
+ 
+ 	char *initiator;
+@@ -60,10 +63,17 @@
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+ 
++	/* links all connections (conn-&gt;clist) */
+ 	struct list_head conn_list;
+ 	int conn_cnt;
+ 
++	/* links all tasks (ctask-&gt;c_hlist) */
+ 	struct list_head cmd_list;
++
++	/* links pending tasks (ctask-&gt;c_list) */
++	struct list_head pending_cmd_list;
++
++	uint32_t exp_cmd_sn;
+ };
+ 
+ struct iscsi_ctask {
+@@ -73,9 +83,14 @@
+ 	uint64_t tag;
+ 	struct connection *conn;
+ 
++	/* linked to session-&gt;cmd_list */
+ 	struct list_head c_hlist;
+-	struct list_head c_txlist;
+ 
++	/* linked to conn-&gt;tx_clist or session-&gt;cmd_pending_list */
++	struct list_head c_list;
++
++	unsigned long flags;
++
+ 	uint64_t addr;
+ 	int result;
+ 	int len;
+@@ -194,6 +209,14 @@
+ 	int nr_sessions;
+ };
+ 
++enum task_flags {
++	TASK_pending,
++};
++
++#define set_task_pending(t)	((t)-&gt;flags |= (1 &lt;&lt; TASK_pending))
++#define clear_task_pending(t)	((t)-&gt;flags &amp;= ~(1 &lt;&lt; TASK_pending))
++#define task_pending(t)		((t)-&gt;flags &amp; (1 &lt;&lt; TASK_pending))
++
+ /* chap.c */
+ extern int cmnd_exec_auth_chap(struct connection *conn);
+ 
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-09-01 04:27:49 UTC (rev 579)
++++ trunk/usr/iscsi/session.c	2006-09-01 08:37:42 UTC (rev 580)
+@@ -78,6 +78,7 @@
+ 
+ 	INIT_LIST_HEAD(&amp;session-&gt;conn_list);
+ 	INIT_LIST_HEAD(&amp;session-&gt;cmd_list);
++	INIT_LIST_HEAD(&amp;session-&gt;pending_cmd_list);
+ 
+ 	memcpy(session-&gt;isid, conn-&gt;isid, sizeof(session-&gt;isid));
+ 	session-&gt;tsih = last_tsih = tsih;
+@@ -88,6 +89,7 @@
+ 	dprintf(&quot;session_create: %#&quot; PRIx64 &quot;\n&quot;, sid64(conn-&gt;isid, session-&gt;tsih));
+ 
+ 	list_add(&amp;session-&gt;hlist, &amp;sessions_list);
++	session-&gt;exp_cmd_sn = conn-&gt;exp_cmd_sn;
+ 
+ 	return 0;
+ }
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-09-01 04:27:49 UTC (rev 579)
++++ trunk/usr/util.h	2006-09-01 08:37:42 UTC (rev 580)
+@@ -47,4 +47,20 @@
+ 	ptr;				\
+ })
+ 
++static inline int before(uint32_t seq1, uint32_t seq2)
++{
++        return (int32_t)(seq1 - seq2) &lt; 0;
++}
++
++static inline int after(uint32_t seq1, uint32_t seq2)
++{
++	return (int32_t)(seq2 - seq1) &lt; 0;
++}
++
++/* is s2&lt;=s1&lt;=s3 ? */
++static inline int between(uint32_t seq1, uint32_t seq2, uint32_t seq3)
++{
++	return seq3 - seq2 &gt;= seq1 - seq2;
++}
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000566.html">[Stgt-svn] r579 - trunk/patch
+</A></li>
+	<LI>Next message: <A HREF="000568.html">[Stgt-svn] r581 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#567">[ date ]</a>
+              <a href="thread.html#567">[ thread ]</a>
+              <a href="subject.html#567">[ subject ]</a>
+              <a href="author.html#567">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

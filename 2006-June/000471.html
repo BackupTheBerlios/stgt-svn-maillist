@@ -1,0 +1,1126 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r484 - in branches/use-scsi-ml/istgt: include kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r484%20-%20in%20branches/use-scsi-ml/istgt%3A%20include%20kernel&In-Reply-To=%3C200606011401.k51E16HS031586%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000472.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r484 - in branches/use-scsi-ml/istgt: include kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r484%20-%20in%20branches/use-scsi-ml/istgt%3A%20include%20kernel&In-Reply-To=%3C200606011401.k51E16HS031586%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r484 - in branches/use-scsi-ml/istgt: include kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Jun  1 16:01:06 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000472.html">[Stgt-svn] r485 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#471">[ date ]</a>
+              <a href="thread.html#471">[ thread ]</a>
+              <a href="subject.html#471">[ subject ]</a>
+              <a href="author.html#471">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-01 16:01:04 +0200 (Thu, 01 Jun 2006)
+New Revision: 484
+
+Modified:
+   branches/use-scsi-ml/istgt/include/iscsi_if.h
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/libiscsi.c
+   branches/use-scsi-ml/istgt/kernel/libiscsi.h
+   branches/use-scsi-ml/istgt/kernel/scsi_transport_iscsi.h
+Log:
+Sync with the latest open-iscsi code (r596).
+
+
+Modified: branches/use-scsi-ml/istgt/include/iscsi_if.h
+===================================================================
+--- branches/use-scsi-ml/istgt/include/iscsi_if.h	2006-05-22 16:19:14 UTC (rev 483)
++++ branches/use-scsi-ml/istgt/include/iscsi_if.h	2006-06-01 14:01:04 UTC (rev 484)
+@@ -253,7 +253,6 @@
+  * These flags describes reason of stop_conn() call
+  */
+ #define STOP_CONN_TERM		0x1
+-#define STOP_CONN_SUSPEND	0x2
+ #define STOP_CONN_RECOVER	0x3
+ 
+ #define ISCSI_STATS_CUSTOM_MAX		32
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-22 16:19:14 UTC (rev 483)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-06-01 14:01:04 UTC (rev 484)
+@@ -43,11 +43,13 @@
+ 
+ #include &quot;iscsi_tcp.h&quot;
+ 
++#define ISCSI_TCP_VERSION &quot;1.0-595&quot;
++
+ MODULE_AUTHOR(&quot;Dmitry Yusupov &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">dmitry_yus at yahoo.com</A>&gt;, &quot;
+ 	      &quot;Alex Aizman &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">itn780 at yahoo.com</A>&gt;&quot;);
+ MODULE_DESCRIPTION(&quot;iSCSI/TCP data-path&quot;);
+ MODULE_LICENSE(&quot;GPL&quot;);
+-MODULE_VERSION(&quot;0:4.445&quot;);
++MODULE_VERSION(ISCSI_TCP_VERSION);
+ /* #define DEBUG_TCP */
+ #define DEBUG_ASSERT
+ 
+@@ -764,8 +766,8 @@
+ 	struct iscsi_cmd_task *ctask = tcp_conn-&gt;in.ctask;
+ 
+ 	if (tcp_conn-&gt;in.hdr-&gt;flags &amp; ISCSI_FLAG_DATA_STATUS) {
+-		debug_scsi(&quot;done [sc %lx res %d itt 0x%x]\n&quot;,
+-			   (long)cask-&gt;sc, ctask-&gt;sc-&gt;result, ctask-&gt;itt);
++		debug_scsi(&quot;done [sc %p res %d itt 0x%x]\n&quot;, ctask-&gt;sc,
++			   (struct scsi_cmnd *) (ctask-&gt;sc)-&gt;result, ctask-&gt;itt);
+ 		spin_lock(&amp;conn-&gt;session-&gt;lock);
+ 		__iscsi_ctask_cleanup(conn, ctask);
+ 		__iscsi_complete_pdu(conn, tcp_conn-&gt;in.hdr, NULL, 0);
+@@ -862,7 +864,7 @@
+ 		       if (rc == -EAGAIN)
+ 				goto nomore;
+ 		       else {
+-				iscsi_conn_failure(conn, rc);
++				iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+ 				return 0;
+ 		       }
+ 		}
+@@ -879,7 +881,7 @@
+ 			}
+ 			tcp_conn-&gt;in_progress = IN_PROGRESS_DATA_RECV;
+ 		} else if (rc) {
+-			iscsi_conn_failure(conn, rc);
++			iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+ 			return 0;
+ 		}
+ 	}
+@@ -922,7 +924,7 @@
+ 		if (rc) {
+ 			if (rc == -EAGAIN)
+ 				goto again;
+-			iscsi_conn_failure(conn, rc);
++			iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+ 			return 0;
+ 		}
+ 		tcp_conn-&gt;in.copy -= tcp_conn-&gt;in.padding;
+@@ -1031,7 +1033,6 @@
+ 
+ 	tcp_conn-&gt;old_write_space(sk);
+ 	debug_tcp(&quot;iscsi_write_space: cid %d\n&quot;, conn-&gt;id);
+-	clear_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+ 	scsi_queue_work(conn-&gt;session-&gt;host, &amp;conn-&gt;xmitwork);
+ }
+ 
+@@ -1081,7 +1082,7 @@
+ {
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct socket *sk = tcp_conn-&gt;sock;
+-	int offset = buf-&gt;sg.offset + buf-&gt;sent;
++	int offset = buf-&gt;sg.offset + buf-&gt;sent, res;
+ 
+ 	/*
+ 	 * if we got use_sg=0 or are sending something we kmallocd
+@@ -1092,10 +1093,22 @@
+ 	 * slab case.
+ 	 */
+ 	if (buf-&gt;use_sendmsg)
+-		return sock_no_sendpage(sk, buf-&gt;sg.page, offset, size, flags);
++		res = sock_no_sendpage(sk, buf-&gt;sg.page, offset, size, flags);
+ 	else
+-		return tcp_conn-&gt;sendpage(sk, buf-&gt;sg.page, offset, size,
+-					  flags);
++		res = tcp_conn-&gt;sendpage(sk, buf-&gt;sg.page, offset, size, flags);
++
++	if (res &gt;= 0) {
++		conn-&gt;txdata_octets += res;
++		buf-&gt;sent += res;
++		return res;
++	}
++
++	tcp_conn-&gt;sendpage_failures_cnt++;
++	if (res == -EAGAIN)
++		res = -ENOBUFS;
++	else
++		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
++	return res;
+ }
+ 
+ /**
+@@ -1110,7 +1123,6 @@
+ static inline int
+ iscsi_sendhdr(struct iscsi_conn *conn, struct iscsi_buf *buf, int datalen)
+ {
+-	struct iscsi_tcp_conn *tcp_conn;
+ 	int flags = 0; /* MSG_DONTWAIT; */
+ 	int res, size;
+ 
+@@ -1122,17 +1134,10 @@
+ 	res = iscsi_send(conn, buf, size, flags);
+ 	debug_tcp(&quot;sendhdr %d bytes, sent %d res %d\n&quot;, size, buf-&gt;sent, res);
+ 	if (res &gt;= 0) {
+-		conn-&gt;txdata_octets += res;
+-		buf-&gt;sent += res;
+ 		if (size != res)
+ 			return -EAGAIN;
+ 		return 0;
+-	} else if (res == -EAGAIN) {
+-		tcp_conn = conn-&gt;dd_data;
+-		tcp_conn-&gt;sendpage_failures_cnt++;
+-		set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-	} else if (res == -EPIPE)
+-		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
++	}
+ 
+ 	return res;
+ }
+@@ -1151,7 +1156,6 @@
+ iscsi_sendpage(struct iscsi_conn *conn, struct iscsi_buf *buf,
+ 	       int *count, int *sent)
+ {
+-	struct iscsi_tcp_conn *tcp_conn;
+ 	int flags = 0; /* MSG_DONTWAIT; */
+ 	int res, size;
+ 
+@@ -1166,19 +1170,12 @@
+ 	debug_tcp(&quot;sendpage: %d bytes, sent %d left %d sent %d res %d\n&quot;,
+ 		  size, buf-&gt;sent, *count, *sent, res);
+ 	if (res &gt;= 0) {
+-		conn-&gt;txdata_octets += res;
+-		buf-&gt;sent += res;
+ 		*count -= res;
+ 		*sent += res;
+ 		if (size != res)
+ 			return -EAGAIN;
+ 		return 0;
+-	} else if (res == -EAGAIN) {
+-		tcp_conn = conn-&gt;dd_data;
+-		tcp_conn-&gt;sendpage_failures_cnt++;
+-		set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-	} else if (res == -EPIPE)
+-		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
++	}
+ 
+ 	return res;
+ }
+@@ -1367,6 +1364,7 @@
+ iscsi_tcp_mtask_xmit(struct iscsi_conn *conn, struct iscsi_mgmt_task *mtask)
+ {
+ 	struct iscsi_tcp_mgmt_task *tcp_mtask = mtask-&gt;dd_data;
++	int rc;
+ 
+ 	debug_scsi(&quot;mtask deq [cid %d state %x itt 0x%x]\n&quot;,
+ 		conn-&gt;id, tcp_mtask-&gt;xmstate, mtask-&gt;itt);
+@@ -1380,12 +1378,13 @@
+ 		    conn-&gt;hdrdgst_en)
+ 			iscsi_hdr_digest(conn, &amp;tcp_mtask-&gt;headbuf,
+ 					(u8*)tcp_mtask-&gt;hdrext);
+-		if (iscsi_sendhdr(conn, &amp;tcp_mtask-&gt;headbuf,
+-				  mtask-&gt;data_count)) {
++		rc = iscsi_sendhdr(conn, &amp;tcp_mtask-&gt;headbuf,
++				   mtask-&gt;data_count);
++		if (rc) {
+ 			tcp_mtask-&gt;xmstate |= XMSTATE_IMM_HDR;
+ 			if (mtask-&gt;data_count)
+ 				tcp_mtask-&gt;xmstate &amp;= ~XMSTATE_IMM_DATA;
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 	}
+ 
+@@ -1396,10 +1395,13 @@
+ 		 * Virtual buffer could be spreaded across multiple pages...
+ 		 */
+ 		do {
+-			if (iscsi_sendpage(conn, &amp;tcp_mtask-&gt;sendbuf,
+-				   &amp;mtask-&gt;data_count, &amp;tcp_mtask-&gt;sent)) {
++			int rc;
++
++			rc = iscsi_sendpage(conn, &amp;tcp_mtask-&gt;sendbuf,
++					&amp;mtask-&gt;data_count, &amp;tcp_mtask-&gt;sent);
++			if (rc) {
+ 				tcp_mtask-&gt;xmstate |= XMSTATE_IMM_DATA;
+-				return -EAGAIN;
++				return rc;
+ 			}
+ 		} while (mtask-&gt;data_count);
+ 	}
+@@ -1421,16 +1423,19 @@
+ handle_xmstate_r_hdr(struct iscsi_conn *conn,
+ 		     struct iscsi_tcp_cmd_task *tcp_ctask)
+ {
++	int rc;
++
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_R_HDR;
+ 	if (conn-&gt;hdrdgst_en)
+ 		iscsi_hdr_digest(conn, &amp;tcp_ctask-&gt;headbuf,
+ 				 (u8*)tcp_ctask-&gt;hdrext);
+-	if (!iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, 0)) {
++	rc = iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, 0);
++	if (!rc) {
+ 		BUG_ON(tcp_ctask-&gt;xmstate != XMSTATE_IDLE);
+ 		return 0; /* wait for Data-In */
+ 	}
+ 	tcp_ctask-&gt;xmstate |= XMSTATE_R_HDR;
+-	return -EAGAIN;
++	return rc;
+ }
+ 
+ static inline int
+@@ -1438,16 +1443,16 @@
+ 		     struct iscsi_cmd_task *ctask)
+ {
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
++	int rc;
+ 
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_W_HDR;
+ 	if (conn-&gt;hdrdgst_en)
+ 		iscsi_hdr_digest(conn, &amp;tcp_ctask-&gt;headbuf,
+ 				 (u8*)tcp_ctask-&gt;hdrext);
+-	if (iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, ctask-&gt;imm_count)) {
++	rc = iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, ctask-&gt;imm_count);
++	if (rc)
+ 		tcp_ctask-&gt;xmstate |= XMSTATE_W_HDR;
+-		return -EAGAIN;
+-	}
+-	return 0;
++	return rc;
+ }
+ 
+ static inline int
+@@ -1455,17 +1460,19 @@
+ 			   struct iscsi_cmd_task *ctask)
+ {
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
++	int rc;
+ 
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_DATA_DIGEST;
+ 	debug_tcp(&quot;resent data digest 0x%x\n&quot;, tcp_ctask-&gt;datadigest);
+-	if (iscsi_digest_final_send(conn, ctask, &amp;tcp_ctask-&gt;immbuf,
+-				    &amp;tcp_ctask-&gt;datadigest, 0)) {
++	rc = iscsi_digest_final_send(conn, ctask, &amp;tcp_ctask-&gt;immbuf,
++				    &amp;tcp_ctask-&gt;datadigest, 0);
++	if (rc) {
+ 		tcp_ctask-&gt;xmstate |= XMSTATE_DATA_DIGEST;
+ 		debug_tcp(&quot;resent data digest 0x%x fail!\n&quot;,
+ 			  tcp_ctask-&gt;datadigest);
+-		return -EAGAIN;
+ 	}
+-	return 0;
++
++	return rc;
+ }
+ 
+ static inline int
+@@ -1473,6 +1480,7 @@
+ {
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
++	int rc;
+ 
+ 	BUG_ON(!ctask-&gt;imm_count);
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_IMM_DATA;
+@@ -1483,8 +1491,9 @@
+ 	}
+ 
+ 	for (;;) {
+-		if (iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf, &amp;ctask-&gt;imm_count,
+-				   &amp;tcp_ctask-&gt;sent)) {
++		rc = iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf,
++				   &amp;ctask-&gt;imm_count, &amp;tcp_ctask-&gt;sent);
++		if (rc) {
+ 			tcp_ctask-&gt;xmstate |= XMSTATE_IMM_DATA;
+ 			if (conn-&gt;datadgst_en) {
+ 				crypto_digest_final(tcp_conn-&gt;data_tx_tfm,
+@@ -1492,7 +1501,7 @@
+ 				debug_tcp(&quot;tx imm sendpage fail 0x%x\n&quot;,
+ 					  tcp_ctask-&gt;datadigest);
+ 			}
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 		if (conn-&gt;datadgst_en)
+ 			crypto_digest_update(tcp_conn-&gt;data_tx_tfm,
+@@ -1505,11 +1514,12 @@
+ 	}
+ 
+ 	if (conn-&gt;datadgst_en &amp;&amp; !(tcp_ctask-&gt;xmstate &amp; XMSTATE_W_PAD)) {
+-		if (iscsi_digest_final_send(conn, ctask, &amp;tcp_ctask-&gt;immbuf,
+-				            &amp;tcp_ctask-&gt;immdigest, 1)) {
++		rc = iscsi_digest_final_send(conn, ctask, &amp;tcp_ctask-&gt;immbuf,
++				            &amp;tcp_ctask-&gt;immdigest, 1);
++		if (rc) {
+ 			debug_tcp(&quot;sending imm digest 0x%x fail!\n&quot;,
+ 				  tcp_ctask-&gt;immdigest);
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 		debug_tcp(&quot;sending imm digest 0x%x\n&quot;, tcp_ctask-&gt;immdigest);
+ 	}
+@@ -1521,8 +1531,9 @@
+ handle_xmstate_uns_hdr(struct iscsi_conn *conn, struct iscsi_cmd_task *ctask)
+ {
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+-	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
++ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct iscsi_data_task *dtask;
++	int rc;
+ 
+ 	tcp_ctask-&gt;xmstate |= XMSTATE_UNS_DATA;
+ 	if (tcp_ctask-&gt;xmstate &amp; XMSTATE_UNS_INIT) {
+@@ -1533,10 +1544,12 @@
+ 					(u8*)dtask-&gt;hdrext);
+ 		tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_UNS_INIT;
+ 	}
+-	if (iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, ctask-&gt;data_count)) {
++
++	rc = iscsi_sendhdr(conn, &amp;tcp_ctask-&gt;headbuf, ctask-&gt;data_count);
++	if (rc) {
+ 		tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_UNS_DATA;
+ 		tcp_ctask-&gt;xmstate |= XMSTATE_UNS_HDR;
+-		return -EAGAIN;
++		return rc;
+ 	}
+ 
+ 	debug_scsi(&quot;uns dout [itt 0x%x dlen %d sent %d]\n&quot;,
+@@ -1550,6 +1563,7 @@
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+ 	struct iscsi_data_task *dtask = tcp_ctask-&gt;dtask;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
++	int rc;
+ 
+ 	BUG_ON(!ctask-&gt;data_count);
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_UNS_DATA;
+@@ -1562,8 +1576,9 @@
+ 	for (;;) {
+ 		int start = tcp_ctask-&gt;sent;
+ 
+-		if (iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf,
+-				   &amp;ctask-&gt;data_count, &amp;tcp_ctask-&gt;sent)) {
++		rc = iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf,
++				   &amp;ctask-&gt;data_count, &amp;tcp_ctask-&gt;sent);
++		if (rc) {
+ 			ctask-&gt;unsol_count -= tcp_ctask-&gt;sent - start;
+ 			tcp_ctask-&gt;xmstate |= XMSTATE_UNS_DATA;
+ 			/* will continue with this ctask later.. */
+@@ -1573,7 +1588,7 @@
+ 				debug_tcp(&quot;tx uns data fail 0x%x\n&quot;,
+ 					  dtask-&gt;digest);
+ 			}
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 
+ 		BUG_ON(tcp_ctask-&gt;sent &gt; ctask-&gt;total_length);
+@@ -1600,12 +1615,13 @@
+ 	 */
+ 	if (ctask-&gt;unsol_count) {
+ 		if (conn-&gt;datadgst_en) {
+-			if (iscsi_digest_final_send(conn, ctask,
++			rc = iscsi_digest_final_send(conn, ctask,
+ 						    &amp;dtask-&gt;digestbuf,
+-						    &amp;dtask-&gt;digest, 1)) {
++						    &amp;dtask-&gt;digest, 1);
++			if (rc) {
+ 				debug_tcp(&quot;send uns digest 0x%x fail\n&quot;,
+ 					  dtask-&gt;digest);
+-				return -EAGAIN;
++				return rc;
+ 			}
+ 			debug_tcp(&quot;sending uns digest 0x%x, more uns\n&quot;,
+ 				  dtask-&gt;digest);
+@@ -1615,12 +1631,13 @@
+ 	}
+ 
+ 	if (conn-&gt;datadgst_en &amp;&amp; !(tcp_ctask-&gt;xmstate &amp; XMSTATE_W_PAD)) {
+-		if (iscsi_digest_final_send(conn, ctask,
++		rc = iscsi_digest_final_send(conn, ctask,
+ 					    &amp;dtask-&gt;digestbuf,
+-					    &amp;dtask-&gt;digest, 1)) {
++					    &amp;dtask-&gt;digest, 1);
++		if (rc) {
+ 			debug_tcp(&quot;send last uns digest 0x%x fail\n&quot;,
+ 				   dtask-&gt;digest);
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 		debug_tcp(&quot;sending uns digest 0x%x\n&quot;,dtask-&gt;digest);
+ 	}
+@@ -1636,7 +1653,7 @@
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+ 	struct iscsi_r2t_info *r2t = tcp_ctask-&gt;r2t;
+ 	struct iscsi_data_task *dtask = &amp;r2t-&gt;dtask;
+-	int left;
++	int left, rc;
+ 
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_SOL_DATA;
+ 	tcp_ctask-&gt;dtask = dtask;
+@@ -1652,7 +1669,8 @@
+ 	if (!r2t-&gt;data_count)
+ 		goto data_out_done;
+ 
+-	if (iscsi_sendpage(conn, &amp;r2t-&gt;sendbuf, &amp;r2t-&gt;data_count, &amp;r2t-&gt;sent)) {
++	rc = iscsi_sendpage(conn, &amp;r2t-&gt;sendbuf, &amp;r2t-&gt;data_count, &amp;r2t-&gt;sent);
++	if (rc) {
+ 		tcp_ctask-&gt;xmstate |= XMSTATE_SOL_DATA;
+ 		/* will continue with this ctask later.. */
+ 		if (conn-&gt;datadgst_en) {
+@@ -1660,7 +1678,7 @@
+ 					  (u8 *)&amp;dtask-&gt;digest);
+ 			debug_tcp(&quot;r2t data send fail 0x%x\n&quot;, dtask-&gt;digest);
+ 		}
+-		return -EAGAIN;
++		return rc;
+ 	}
+ 
+ 	BUG_ON(r2t-&gt;data_count &lt; 0);
+@@ -1687,12 +1705,13 @@
+ 	left = r2t-&gt;data_length - r2t-&gt;sent;
+ 	if (left) {
+ 		if (conn-&gt;datadgst_en) {
+-			if (iscsi_digest_final_send(conn, ctask,
++			rc = iscsi_digest_final_send(conn, ctask,
+ 						    &amp;dtask-&gt;digestbuf,
+-						    &amp;dtask-&gt;digest, 1)) {
++						    &amp;dtask-&gt;digest, 1);
++			if (rc) {
+ 				debug_tcp(&quot;send r2t data digest 0x%x&quot;
+ 					  &quot;fail\n&quot;, dtask-&gt;digest);
+-				return -EAGAIN;
++				return rc;
+ 			}
+ 			debug_tcp(&quot;r2t data send digest 0x%x\n&quot;,
+ 				  dtask-&gt;digest);
+@@ -1709,11 +1728,12 @@
+ 	 */
+ 	BUG_ON(tcp_ctask-&gt;r2t_data_count - r2t-&gt;data_length &lt; 0);
+ 	if (conn-&gt;datadgst_en) {
+-		if (iscsi_digest_final_send(conn, ctask, &amp;dtask-&gt;digestbuf,
+-					    &amp;dtask-&gt;digest, 1)) {
++		rc = iscsi_digest_final_send(conn, ctask, &amp;dtask-&gt;digestbuf,
++					    &amp;dtask-&gt;digest, 1);
++		if (rc) {
+ 			debug_tcp(&quot;send last r2t data digest 0x%x&quot;
+ 				  &quot;fail\n&quot;, dtask-&gt;digest);
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 		debug_tcp(&quot;r2t done dout digest 0x%x\n&quot;, dtask-&gt;digest);
+ 	}
+@@ -1739,15 +1759,16 @@
+ 	struct iscsi_tcp_cmd_task *tcp_ctask = ctask-&gt;dd_data;
+ 	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
+ 	struct iscsi_data_task *dtask = tcp_ctask-&gt;dtask;
+-	int sent;
++	int sent, rc;
+ 
+ 	tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_W_PAD;
+ 	iscsi_buf_init_iov(&amp;tcp_ctask-&gt;sendbuf, (char*)&amp;tcp_ctask-&gt;pad,
+ 			    tcp_ctask-&gt;pad_count);
+-	if (iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf, &amp;tcp_ctask-&gt;pad_count,
+-			   &amp;sent)) {
++	rc = iscsi_sendpage(conn, &amp;tcp_ctask-&gt;sendbuf, &amp;tcp_ctask-&gt;pad_count,
++			   &amp;sent);
++	if (rc) {
+ 		tcp_ctask-&gt;xmstate |= XMSTATE_W_PAD;
+-		return -EAGAIN;
++		return rc;
+ 	}
+ 
+ 	if (conn-&gt;datadgst_en) {
+@@ -1755,22 +1776,24 @@
+ 				     &amp;tcp_ctask-&gt;sendbuf.sg, 1);
+ 		/* imm data? */
+ 		if (!dtask) {
+-			if (iscsi_digest_final_send(conn, ctask,
++			rc = iscsi_digest_final_send(conn, ctask,
+ 						    &amp;tcp_ctask-&gt;immbuf,
+-						    &amp;tcp_ctask-&gt;immdigest, 1)) {
++						    &amp;tcp_ctask-&gt;immdigest, 1);
++			if (rc) {
+ 				debug_tcp(&quot;send padding digest 0x%x&quot;
+ 					  &quot;fail!\n&quot;, tcp_ctask-&gt;immdigest);
+-				return -EAGAIN;
++				return rc;
+ 			}
+ 			debug_tcp(&quot;done with padding, digest 0x%x\n&quot;,
+ 				  tcp_ctask-&gt;datadigest);
+ 		} else {
+-			if (iscsi_digest_final_send(conn, ctask,
++			rc = iscsi_digest_final_send(conn, ctask,
+ 						    &amp;dtask-&gt;digestbuf,
+-						    &amp;dtask-&gt;digest, 1)) {
++						    &amp;dtask-&gt;digest, 1);
++			if (rc) {
+ 				debug_tcp(&quot;send padding digest 0x%x&quot;
+ 				          &quot;fail\n&quot;, dtask-&gt;digest);
+-				return -EAGAIN;
++				return rc;
+ 			}
+ 			debug_tcp(&quot;done with padding, digest 0x%x\n&quot;,
+ 				  dtask-&gt;digest);
+@@ -1794,10 +1817,8 @@
+ 	if (ctask-&gt;mtask)
+ 		return rc;
+ 
+-	if (tcp_ctask-&gt;xmstate &amp; XMSTATE_R_HDR) {
+-		rc = handle_xmstate_r_hdr(conn, tcp_ctask);
+-		return rc;
+-	}
++	if (tcp_ctask-&gt;xmstate &amp; XMSTATE_R_HDR)
++		return handle_xmstate_r_hdr(conn, tcp_ctask);
+ 
+ 	if (tcp_ctask-&gt;xmstate &amp; XMSTATE_W_HDR) {
+ 		rc = handle_xmstate_w_hdr(conn, ctask);
+@@ -1849,10 +1870,11 @@
+ 		if (conn-&gt;hdrdgst_en)
+ 			iscsi_hdr_digest(conn, &amp;r2t-&gt;headbuf,
+ 					(u8*)r2t-&gt;dtask.hdrext);
+-		if (iscsi_sendhdr(conn, &amp;r2t-&gt;headbuf, r2t-&gt;data_count)) {
++		rc = iscsi_sendhdr(conn, &amp;r2t-&gt;headbuf, r2t-&gt;data_count);
++		if (rc) {
+ 			tcp_ctask-&gt;xmstate &amp;= ~XMSTATE_SOL_DATA;
+ 			tcp_ctask-&gt;xmstate |= XMSTATE_SOL_HDR;
+-			return -EAGAIN;
++			return rc;
+ 		}
+ 
+ 		debug_scsi(&quot;sol dout [dsn %d itt 0x%x dlen %d sent %d]\n&quot;,
+@@ -1999,30 +2021,28 @@
+ 	if (err)
+ 		return err;
+ 
+-	if (conn-&gt;stop_stage != STOP_CONN_SUSPEND) {
+-		/* bind iSCSI connection and socket */
+-		tcp_conn-&gt;sock = sock;
++	/* bind iSCSI connection and socket */
++	tcp_conn-&gt;sock = sock;
+ 
+-		/* setup Socket parameters */
+-		sk = sock-&gt;sk;
+-		sk-&gt;sk_reuse = 1;
+-		sk-&gt;sk_sndtimeo = 15 * HZ; /* FIXME: make it configurable */
+-		sk-&gt;sk_allocation = GFP_ATOMIC;
++	/* setup Socket parameters */
++	sk = sock-&gt;sk;
++	sk-&gt;sk_reuse = 1;
++	sk-&gt;sk_sndtimeo = 15 * HZ; /* FIXME: make it configurable */
++	sk-&gt;sk_allocation = GFP_ATOMIC;
+ 
+-		/* FIXME: disable Nagle's algorithm */
++	/* FIXME: disable Nagle's algorithm */
+ 
+-		/*
+-		 * Intercept TCP callbacks for sendfile like receive
+-		 * processing.
+-		 */
+-		conn-&gt;recv_lock = &amp;sk-&gt;sk_callback_lock;
+-		iscsi_conn_set_callbacks(conn);
+-		tcp_conn-&gt;sendpage = tcp_conn-&gt;sock-&gt;ops-&gt;sendpage;
+-		/*
+-		 * set receive state machine into initial state
+-		 */
+-		tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+-	}
++	/*
++	 * Intercept TCP callbacks for sendfile like receive
++	 * processing.
++	 */
++	conn-&gt;recv_lock = &amp;sk-&gt;sk_callback_lock;
++	iscsi_conn_set_callbacks(conn);
++	tcp_conn-&gt;sendpage = tcp_conn-&gt;sock-&gt;ops-&gt;sendpage;
++	/*
++	 * set receive state machine into initial state
++	 */
++	tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+ 
+ 	return 0;
+ }
+@@ -2497,8 +2517,8 @@
+ EXPORT_SYMBOL_GPL(iscsi_tcp_session_destroy);
+ 
+ static struct scsi_host_template iscsi_sht = {
+-	.name			= &quot;iSCSI Initiator over TCP/IP, v.&quot;
+-				  ISCSI_VERSION_STR,
++	.name			= &quot;iSCSI Initiator over TCP/IP, v&quot;
++				  ISCSI_TCP_VERSION,
+ 	.queuecommand           = iscsi_queuecommand,
+ 	.change_queue_depth	= iscsi_change_queue_depth,
+ 	.can_queue		= ISCSI_XMIT_CMDS_MAX - 1,
+
+Modified: branches/use-scsi-ml/istgt/kernel/libiscsi.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/libiscsi.c	2006-05-22 16:19:14 UTC (rev 483)
++++ branches/use-scsi-ml/istgt/kernel/libiscsi.c	2006-06-01 14:01:04 UTC (rev 484)
+@@ -487,7 +487,12 @@
+ 	unsigned long flags;
+ 
+ 	spin_lock_irqsave(&amp;session-&gt;lock, flags);
+-	if (session-&gt;conn_cnt == 1 || session-&gt;leadconn == conn)
++	if (session-&gt;state == ISCSI_STATE_FAILED) {
++		spin_unlock_irqrestore(&amp;session-&gt;lock, flags);
++		return;
++	}
++
++	if (conn-&gt;stop_stage == 0)
+ 		session-&gt;state = ISCSI_STATE_FAILED;
+ 	spin_unlock_irqrestore(&amp;session-&gt;lock, flags);
+ 	set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+@@ -508,10 +513,11 @@
+ static int iscsi_data_xmit(struct iscsi_conn *conn)
+ {
+ 	struct iscsi_transport *tt;
++	int rc = 0;
+ 
+ 	if (unlikely(conn-&gt;suspend_tx)) {
+ 		debug_scsi(&quot;conn %d Tx suspended!\n&quot;, conn-&gt;id);
+-		return 0;
++		return -ENODATA;
+ 	}
+ 	tt = conn-&gt;session-&gt;tt;
+ 
+@@ -531,13 +537,15 @@
+ 	BUG_ON(conn-&gt;ctask &amp;&amp; conn-&gt;mtask);
+ 
+ 	if (conn-&gt;ctask) {
+-		if (tt-&gt;xmit_cmd_task(conn, conn-&gt;ctask))
++		rc = tt-&gt;xmit_cmd_task(conn, conn-&gt;ctask);
++		if (rc)
+ 			goto again;
+ 		/* done with this in-progress ctask */
+ 		conn-&gt;ctask = NULL;
+ 	}
+ 	if (conn-&gt;mtask) {
+-	        if (tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask))
++		rc = tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask);
++	        if (rc)
+ 		        goto again;
+ 		/* done with this in-progress mtask */
+ 		conn-&gt;mtask = NULL;
+@@ -547,9 +555,12 @@
+         if (unlikely(__kfifo_len(conn-&gt;immqueue))) {
+ 	        while (__kfifo_get(conn-&gt;immqueue, (void*)&amp;conn-&gt;mtask,
+ 			           sizeof(void*))) {
++			spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+ 			list_add_tail(&amp;conn-&gt;mtask-&gt;running,
+ 				      &amp;conn-&gt;mgmt_run_list);
+-		        if (tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask))
++			spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
++			rc = tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask);
++		        if (rc)
+ 			        goto again;
+ 	        }
+ 		/* done with this mtask */
+@@ -563,11 +574,15 @@
+ 		 * iscsi tcp may readd the task to the xmitqueue to send
+ 		 * write data
+ 		 */
++		spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+ 		if (list_empty(&amp;conn-&gt;ctask-&gt;running))
+ 			list_add_tail(&amp;conn-&gt;ctask-&gt;running, &amp;conn-&gt;run_list);
+-		if (tt-&gt;xmit_cmd_task(conn, conn-&gt;ctask))
++		spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
++		rc = tt-&gt;xmit_cmd_task(conn, conn-&gt;ctask);
++		if (rc)
+ 			goto again;
+ 	}
++
+ 	/* done with this ctask */
+ 	conn-&gt;ctask = NULL;
+ 
+@@ -575,34 +590,38 @@
+         if (unlikely(__kfifo_len(conn-&gt;mgmtqueue))) {
+ 	        while (__kfifo_get(conn-&gt;mgmtqueue, (void*)&amp;conn-&gt;mtask,
+ 			           sizeof(void*))) {
++			spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+ 			list_add_tail(&amp;conn-&gt;mtask-&gt;running,
+ 				      &amp;conn-&gt;mgmt_run_list);
+-		        if (tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask))
++			spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
++		        rc = tt-&gt;xmit_mgmt_task(conn, conn-&gt;mtask);
++			if (rc)
+ 			        goto again;
+ 	        }
+ 		/* done with this mtask */
+ 		conn-&gt;mtask = NULL;
+ 	}
+ 
+-	return 0;
++	return -ENODATA;
+ 
+ again:
+ 	if (unlikely(conn-&gt;suspend_tx))
+-		return 0;
++		return -ENODATA;
+ 
+-	return -EAGAIN;
++	return rc;
+ }
+ 
+ static void iscsi_xmitworker(void *data)
+ {
+ 	struct iscsi_conn *conn = data;
+-
++	int rc;
+ 	/*
+ 	 * serialize Xmit worker on a per-connection basis.
+ 	 */
+ 	mutex_lock(&amp;conn-&gt;xmitmutex);
+-	if (iscsi_data_xmit(conn))
+-		scsi_queue_work(conn-&gt;session-&gt;host, &amp;conn-&gt;xmitwork);
++	do {
++		rc = iscsi_data_xmit(conn);
++	} while (rc &gt;= 0 || rc == -EAGAIN);
+ 	mutex_unlock(&amp;conn-&gt;xmitmutex);
+ }
+ 
+@@ -612,6 +631,7 @@
+ 	FAILURE_SESSION_FREED,
+ 	FAILURE_WINDOW_CLOSED,
+ 	FAILURE_SESSION_TERMINATE,
++	FAILURE_SESSION_IN_RECOVERY,
+ 	FAILURE_SESSION_RECOVERY_TIMEOUT,
+ };
+ 
+@@ -631,18 +651,30 @@
+ 
+ 	spin_lock(&amp;session-&gt;lock);
+ 
+-	if (session-&gt;state != ISCSI_STATE_LOGGED_IN) {
+-		if (session-&gt;recovery_failed) {
+-			reason = FAILURE_SESSION_RECOVERY_TIMEOUT;
+-			goto fault;
+-		} else if (session-&gt;state == ISCSI_STATE_FAILED) {
+-			reason = FAILURE_SESSION_FAILED;
++	/*
++	 * ISCSI_STATE_FAILED is a temp. state. The recovery
++	 * code will decide what is best to do with command queued
++	 * during this time
++	 */
++	if (session-&gt;state != ISCSI_STATE_LOGGED_IN &amp;&amp;
++	    session-&gt;state != ISCSI_STATE_FAILED) {
++		/*
++		 * to handle the race between when we set the recovery state
++		 * and block the session we requeue here (commands could
++		 * be entering our queuecommand while a block is starting
++		 * up because the block code is not locked)
++		 */
++		if (session-&gt;state == ISCSI_STATE_IN_RECOVERY) {
++			reason = FAILURE_SESSION_IN_RECOVERY;
+ 			goto reject;
+-		} else if (session-&gt;state == ISCSI_STATE_TERMINATE) {
+-			reason = FAILURE_SESSION_TERMINATE;
+-			goto fault;
+ 		}
+-		reason = FAILURE_SESSION_FREED;
++
++		if (session-&gt;state == ISCSI_STATE_RECOVERY_FAILED)
++			reason = FAILURE_SESSION_RECOVERY_TIMEOUT;
++		else if (session-&gt;state == ISCSI_STATE_TERMINATE)
++			reason = FAILURE_SESSION_TERMINATE;
++		else
++			reason = FAILURE_SESSION_FREED;
+ 		goto fault;
+ 	}
+ 
+@@ -728,8 +760,8 @@
+ 		 */
+ 		mtask = conn-&gt;login_mtask;
+ 	else {
+-	        BUG_ON(conn-&gt;c_stage == ISCSI_CONN_INITIAL_STAGE);
+-	        BUG_ON(conn-&gt;c_stage == ISCSI_CONN_STOPPED);
++		BUG_ON(conn-&gt;c_stage == ISCSI_CONN_INITIAL_STAGE);
++		BUG_ON(conn-&gt;c_stage == ISCSI_CONN_STOPPED);
+ 
+ 		nop-&gt;exp_statsn = cpu_to_be32(conn-&gt;exp_statsn);
+ 		if (!__kfifo_get(session-&gt;mgmtpool.queue,
+@@ -803,7 +835,7 @@
+ 
+ 	spin_lock_bh(&amp;session-&gt;lock);
+ 	if (session-&gt;state != ISCSI_STATE_LOGGED_IN) {
+-		session-&gt;recovery_failed = 1;
++		session-&gt;state = ISCSI_STATE_RECOVERY_FAILED;
+ 		if (conn)
+ 			wake_up(&amp;conn-&gt;ehwait);
+ 	}
+@@ -838,20 +870,14 @@
+ 	 * we drop the lock here but the leadconn cannot be destoyed while
+ 	 * we are in the scsi eh
+ 	 */
+-	if (fail_session) {
++	if (fail_session)
+ 		iscsi_conn_failure(conn, ISCSI_ERR_CONN_FAILED);
+-		/*
+-		 * if userspace cannot respond then we must kick this off
+-		 * here for it
+-		 */
+-		iscsi_start_session_recovery(session, conn, STOP_CONN_RECOVER);
+-	}
+ 
+ 	debug_scsi(&quot;iscsi_eh_host_reset wait for relogin\n&quot;);
+ 	wait_event_interruptible(conn-&gt;ehwait,
+ 				 session-&gt;state == ISCSI_STATE_TERMINATE ||
+ 				 session-&gt;state == ISCSI_STATE_LOGGED_IN ||
+-				 session-&gt;recovery_failed);
++				 session-&gt;state == ISCSI_STATE_RECOVERY_FAILED);
+ 	if (signal_pending(current))
+ 		flush_signals(current);
+ 
+@@ -940,8 +966,7 @@
+ 	wait_event_interruptible(conn-&gt;ehwait,
+ 				 sc-&gt;SCp.phase != session-&gt;age ||
+ 				 session-&gt;state != ISCSI_STATE_LOGGED_IN ||
+-				 conn-&gt;tmabort_state != TMABORT_INITIAL ||
+-				 session-&gt;recovery_failed);
++				 conn-&gt;tmabort_state != TMABORT_INITIAL);
+ 	if (signal_pending(current))
+ 		flush_signals(current);
+ 	del_timer_sync(&amp;conn-&gt;tmabort_timer);
+@@ -968,7 +993,7 @@
+ 									\
+ 		if (task-&gt;itt == itt) {					\
+ 			debug_scsi(&quot;matched task\n&quot;);			\
+-			break;						\
++			return task;					\
+ 		}							\
+ 									\
+ 		__kfifo_put(fifo, (void*)&amp;task, sizeof(void*));		\
+@@ -1400,8 +1425,8 @@
+ 	struct iscsi_session *session = conn-&gt;session;
+ 	unsigned long flags;
+ 
+-	mutex_lock(&amp;conn-&gt;xmitmutex);
+ 	set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
++	mutex_lock(&amp;conn-&gt;xmitmutex);
+ 	if (conn-&gt;c_stage == ISCSI_CONN_INITIAL_STAGE) {
+ 		if (session-&gt;tt-&gt;suspend_conn_recv)
+ 			session-&gt;tt-&gt;suspend_conn_recv(conn);
+@@ -1487,25 +1512,17 @@
+ 		 * unblock eh_abort() if it is blocked. re-try all
+ 		 * commands after successful recovery
+ 		 */
+-		session-&gt;conn_cnt++;
+ 		conn-&gt;stop_stage = 0;
+ 		conn-&gt;tmabort_state = TMABORT_INITIAL;
+ 		session-&gt;age++;
+-		session-&gt;recovery_failed = 0;
+ 		spin_unlock_bh(&amp;session-&gt;lock);
+ 
+ 		iscsi_unblock_session(session_to_cls(session));
+ 		wake_up(&amp;conn-&gt;ehwait);
+ 		return 0;
+ 	case STOP_CONN_TERM:
+-		session-&gt;conn_cnt++;
+ 		conn-&gt;stop_stage = 0;
+ 		break;
+-	case STOP_CONN_SUSPEND:
+-		conn-&gt;stop_stage = 0;
+-		clear_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_rx);
+-		clear_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-		break;
+ 	default:
+ 		break;
+ 	}
+@@ -1566,8 +1583,8 @@
+ 	conn-&gt;ctask = NULL;
+ }
+ 
+-void iscsi_start_session_recovery(struct iscsi_session *session,
+-				  struct iscsi_conn *conn, int flag)
++static void iscsi_start_session_recovery(struct iscsi_session *session,
++					 struct iscsi_conn *conn, int flag)
+ {
+ 	int old_stop_stage;
+ 
+@@ -1579,38 +1596,25 @@
+ 
+ 	/*
+ 	 * When this is called for the in_login state, we only want to clean
+-	 * up the login task and connection.
++	 * up the login task and connection. We do not need to block and set
++	 * the recovery state again
+ 	 */
+-	if (conn-&gt;stop_stage != STOP_CONN_RECOVER)
+-		session-&gt;conn_cnt--;
++	if (flag == STOP_CONN_TERM)
++		session-&gt;state = ISCSI_STATE_TERMINATE;
++	else if (conn-&gt;stop_stage != STOP_CONN_RECOVER)
++		session-&gt;state = ISCSI_STATE_IN_RECOVERY;
+ 
+ 	old_stop_stage = conn-&gt;stop_stage;
+ 	conn-&gt;stop_stage = flag;
++	conn-&gt;c_stage = ISCSI_CONN_STOPPED;
++	set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+ 	spin_unlock_bh(&amp;session-&gt;lock);
+ 
+ 	if (session-&gt;tt-&gt;suspend_conn_recv)
+ 		session-&gt;tt-&gt;suspend_conn_recv(conn);
+ 
+ 	mutex_lock(&amp;conn-&gt;xmitmutex);
+-	spin_lock_bh(&amp;session-&gt;lock);
+-	conn-&gt;c_stage = ISCSI_CONN_STOPPED;
+-	set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-
+-	if (session-&gt;conn_cnt == 0 || session-&gt;leadconn == conn)
+-		session-&gt;state = ISCSI_STATE_FAILED;
+-
+-	spin_unlock_bh(&amp;session-&gt;lock);
+-
+-	session-&gt;tt-&gt;terminate_conn(conn);
+ 	/*
+-	 * flush queues.
+-	 */
+-	spin_lock_bh(&amp;session-&gt;lock);
+-	fail_all_commands(conn);
+-	flush_control_queues(session, conn);
+-	spin_unlock_bh(&amp;session-&gt;lock);
+-
+-	/*
+ 	 * for connection level recovery we should not calculate
+ 	 * header digest. conn-&gt;hdr_size used for optimization
+ 	 * in hdr_extract() and will be re-negotiated at
+@@ -1619,18 +1623,24 @@
+ 	if (flag == STOP_CONN_RECOVER) {
+ 		conn-&gt;hdrdgst_en = 0;
+ 		conn-&gt;datadgst_en = 0;
+-
+-		/*
+-		 * if this is called from the eh and and from userspace
+-		 * then we only need to block once.
+-		 */
+-		if (session-&gt;state == ISCSI_STATE_FAILED &amp;&amp;
+-		    old_stop_stage != STOP_CONN_RECOVER)
++		if (session-&gt;state == ISCSI_STATE_IN_RECOVERY &amp;&amp;
++		    old_stop_stage != STOP_CONN_RECOVER) {
++			debug_scsi(&quot;blocking session\n&quot;);
+ 			iscsi_block_session(session_to_cls(session));
++		}
+ 	}
++
++	session-&gt;tt-&gt;terminate_conn(conn);
++	/*
++	 * flush queues.
++	 */
++	spin_lock_bh(&amp;session-&gt;lock);
++	fail_all_commands(conn);
++	flush_control_queues(session, conn);
++	spin_unlock_bh(&amp;session-&gt;lock);
++
+ 	mutex_unlock(&amp;conn-&gt;xmitmutex);
+ }
+-EXPORT_SYMBOL_GPL(iscsi_start_session_recovery);
+ 
+ void iscsi_conn_stop(struct iscsi_cls_conn *cls_conn, int flag)
+ {
+@@ -1642,20 +1652,6 @@
+ 	case STOP_CONN_TERM:
+ 		iscsi_start_session_recovery(session, conn, flag);
+ 		break;
+-	case STOP_CONN_SUSPEND:
+-		if (session-&gt;tt-&gt;suspend_conn_recv)
+-			session-&gt;tt-&gt;suspend_conn_recv(conn);
+-
+-		mutex_lock(&amp;conn-&gt;xmitmutex);
+-		spin_lock_bh(&amp;session-&gt;lock);
+-
+-		conn-&gt;stop_stage = flag;
+-		conn-&gt;c_stage = ISCSI_CONN_STOPPED;
+-		set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_tx);
+-
+-		spin_unlock_bh(&amp;session-&gt;lock);
+-		mutex_unlock(&amp;conn-&gt;xmitmutex);
+-		break;
+ 	default:
+ 		printk(KERN_ERR &quot;iscsi: invalid stop flag %d\n&quot;, flag);
+ 	}
+
+Modified: branches/use-scsi-ml/istgt/kernel/libiscsi.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/libiscsi.h	2006-05-22 16:19:14 UTC (rev 483)
++++ branches/use-scsi-ml/istgt/kernel/libiscsi.h	2006-06-01 14:01:04 UTC (rev 484)
+@@ -212,9 +212,7 @@
+ 						 * - mgmtpool,		   *
+ 						 * - r2tpool		   */
+ 	int			state;		/* session state           */
+-	int			recovery_failed;
+ 	struct list_head	item;
+-	int			conn_cnt;
+ 	int			age;		/* counts session re-opens */
+ 
+ 	struct list_head	connections;	/* list of connections */
+@@ -243,8 +241,6 @@
+ 		    int, int, uint32_t, uint32_t *);
+ extern void iscsi_session_teardown(struct iscsi_cls_session *);
+ extern struct iscsi_session *class_to_transport_session(struct iscsi_cls_session *);
+-extern void iscsi_start_session_recovery(struct iscsi_session *,
+-					struct iscsi_conn *, int);
+ extern void iscsi_session_recovery_timedout(struct iscsi_cls_session *);
+ 
+ #define session_to_cls(_sess) \
+
+Modified: branches/use-scsi-ml/istgt/kernel/scsi_transport_iscsi.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/scsi_transport_iscsi.h	2006-05-22 16:19:14 UTC (rev 483)
++++ branches/use-scsi-ml/istgt/kernel/scsi_transport_iscsi.h	2006-06-01 14:01:04 UTC (rev 484)
+@@ -57,8 +57,12 @@
+  *			Called from queuecommand with session lock held.
+  * @init_mgmt_task:	Initialize a iscsi_mgmt_task and any internal structs.
+  *			Called from iscsi_conn_send_generic with xmitmutex.
+- * @xmit_cmd_task:	requests LLD to transfer cmd task
+- * @xmit_mgmt_task:	requests LLD to transfer mgmt task
++ * @xmit_cmd_task:	Requests LLD to transfer cmd task. Returns 0 or the
++ *			the number of bytes transferred on success, and -Exyz
++ *			value on error.
++ * @xmit_mgmt_task:	Requests LLD to transfer mgmt task. Returns 0 or the
++ *			the number of bytes transferred on success, and -Exyz
++ *			value on error.
+  * @cleanup_cmd_task:	requests LLD to fail cmd task. Called with xmitmutex
+  *			and session-&gt;lock after the connection has been
+  *			suspended and terminated during recovery. If called
+@@ -173,6 +177,8 @@
+ #define ISCSI_STATE_LOGGED_IN		2
+ #define ISCSI_STATE_FAILED		3
+ #define ISCSI_STATE_TERMINATE		4
++#define ISCSI_STATE_IN_RECOVERY		5
++#define ISCSI_STATE_RECOVERY_FAILED	6
+ 
+ struct iscsi_cls_session {
+ 	struct list_head sess_list;		/* item in session_list */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000472.html">[Stgt-svn] r485 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#471">[ date ]</a>
+              <a href="thread.html#471">[ thread ]</a>
+              <a href="subject.html#471">[ subject ]</a>
+              <a href="author.html#471">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

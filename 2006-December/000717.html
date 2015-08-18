@@ -1,0 +1,607 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r730 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r730%20-%20trunk/usr&In-Reply-To=%3C200612300423.kBU4NIYS023081%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000716.html">
+   <LINK REL="Next"  HREF="000718.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r730 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r730%20-%20trunk/usr&In-Reply-To=%3C200612300423.kBU4NIYS023081%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r730 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Dec 30 05:23:18 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000716.html">[Stgt-svn] r729 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000718.html">[Stgt-svn] r731 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#717">[ date ]</a>
+              <a href="thread.html#717">[ thread ]</a>
+              <a href="subject.html#717">[ subject ]</a>
+              <a href="author.html#717">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-30 05:23:18 +0100 (Sat, 30 Dec 2006)
+New Revision: 730
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+Log:
+Add account code.
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/mgmt.c	2006-12-30 04:23:18 UTC (rev 730)
+@@ -187,6 +187,68 @@
+ 	return err;
+ }
+ 
++static int account_mgmt(int lld_no,  struct mgmt_task *mtask)
++{
++	struct tgtadm_req *req = &amp;mtask-&gt;req;
++	struct tgtadm_rsp *rsp = &amp;mtask-&gt;rsp;
++	int err = TGTADM_INVALID_REQUEST;
++	char *user, *password;
++
++	switch (req-&gt;op) {
++	case OP_NEW:
++	case OP_DELETE:
++	case OP_BIND:
++	case OP_UNBIND:
++		user = strstr(mtask-&gt;buf, &quot;user=&quot;);
++		if (!user)
++			goto out;
++		user += 5;
++
++		if (req-&gt;op == OP_NEW) {
++			password = strchr(user, ',');
++			if (!password)
++				goto out;
++
++			*password = '\0';
++			password += strlen(&quot;password=&quot;);
++
++			err = account_add(user, password);
++		} else {
++			if (req-&gt;op == OP_DELETE) {
++				account_del(user);
++				err = 0;
++			} else
++				err = account_ctl(req-&gt;tid, req-&gt;aid,
++						  user, req-&gt;op == OP_BIND);
++		}
++		break;
++	case OP_SHOW:
++	retry:
++		err = account_show(mtask-&gt;buf, mtask-&gt;bsize);
++		if (err == mtask-&gt;bsize) {
++			char *p;
++			mtask-&gt;bsize &lt;&lt;= 1;
++			p = realloc(mtask-&gt;buf, mtask-&gt;bsize);
++			if (p) {
++				mtask-&gt;buf = p;
++				goto retry;
++			} else
++				err = TGTADM_NOMEM;
++		}
++		break;
++	default:
++		break;
++	}
++out:
++	if (req-&gt;op == OP_SHOW)
++		set_show_results(rsp, &amp;err);
++	else {
++		rsp-&gt;err = err;
++		rsp-&gt;len = sizeof(*rsp);
++	}
++	return err;
++}
++
+ static int tgt_mgmt(struct mgmt_task *mtask)
+ {
+ 	struct tgtadm_req *req = &amp;mtask-&gt;req;
+@@ -215,16 +277,7 @@
+ 		err = device_mgmt(lld_no, req, mtask-&gt;buf, rsp, &amp;len);
+ 		break;
+ 	case MODE_ACCOUNT:
+-		if (tgt_drivers[lld_no]-&gt;account)
+-			err = tgt_drivers[lld_no]-&gt;account(req-&gt;op, req-&gt;tid, req-&gt;aid,
+-							   mtask-&gt;buf, mtask-&gt;buf, len);
+-		if (req-&gt;op == OP_SHOW) {
+-			set_show_results(rsp, &amp;err);
+-			err = 0;
+-		} else {
+-			rsp-&gt;err = err;
+-			rsp-&gt;len = sizeof(*rsp);
+-		}
++		err = account_mgmt(lld_no, mtask);
+ 		break;
+ 	default:
+ 		if (req-&gt;op == OP_SHOW &amp;&amp; tgt_drivers[lld_no]-&gt;show) {
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/target.c	2006-12-30 04:23:18 UTC (rev 730)
+@@ -630,6 +630,202 @@
+ 	}
+ }
+ 
++struct account_entry {
++	int aid;
++	char *user;
++	char *password;
++	struct list_head ac_list;
++};
++
++static LIST_HEAD(accounts_list);
++
++static struct account_entry *__account_lookup_id(int aid)
++{
++	struct account_entry *ac;
++
++	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++		if (ac-&gt;aid == aid)
++			return ac;
++	return NULL;
++}
++
++static struct account_entry *__account_lookup_user(char *user)
++{
++	struct account_entry *ac;
++
++	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++		if (!strcmp(ac-&gt;user, user))
++			return ac;
++	return NULL;
++}
++
++int account_lookup(int tid, int type, char *user, int ulen,
++		   char *password, int plen)
++{
++	int i;
++	struct target *target;
++	struct account_entry *ac;
++
++	target = target_lookup(tid);
++	if (!target)
++		return -ENOENT;
++
++	if (type == ACCOUNT_TYPE_INCOMING) {
++		for (i = 0; target-&gt;account.nr_inaccount; i++) {
++			ac = __account_lookup_id(target-&gt;account.in_aids[i]);
++			if (ac)
++				goto found;
++		}
++	} else {
++		ac = __account_lookup_id(target-&gt;account.out_aid);
++		if (ac)
++			goto found;
++	}
++
++	return -ENOENT;
++found:
++	strncpy(user, ac-&gt;user, ulen);
++	strncpy(password, ac-&gt;password, plen);
++	return 0;
++}
++
++int account_add(char *user, char *password)
++{
++	int aid;
++	struct account_entry *ac;
++
++	ac = __account_lookup_user(user);
++	if (ac)
++		return TGTADM_USER_EXIST;
++
++	for (aid = 1; __account_lookup_id(aid) &amp;&amp; aid &lt; INT_MAX; aid++)
++		;
++	if (aid == INT_MAX)
++		return TGTADM_TOO_MANY_USER;
++
++	ac = zalloc(sizeof(*ac));
++	if (!ac)
++		return TGTADM_NOMEM;
++
++	ac-&gt;aid = aid;
++	ac-&gt;user = strdup(user);
++	if (!ac-&gt;user)
++		goto free_account;
++
++	ac-&gt;password = strdup(password);
++	if (!ac-&gt;password)
++		goto free_username;
++
++	list_add(&amp;ac-&gt;ac_list, &amp;accounts_list);
++	return 0;
++free_username:
++	free(ac-&gt;user);
++free_account:
++	free(ac);
++	return TGTADM_NOMEM;
++}
++
++static int __inaccount_bind(struct target *target, int aid)
++{
++	int i;
++
++	/* first, check whether we already have this account. */
++	for (i = 0; i &lt; target-&gt;account.max_inaccount; i++)
++		if (target-&gt;account.in_aids[i] == aid)
++			return TGTADM_USER_EXIST;
++
++	if (target-&gt;account.nr_inaccount &lt; target-&gt;account.max_inaccount) {
++		for (i = 0; i &lt; target-&gt;account.max_inaccount; i++)
++			if (!target-&gt;account.in_aids[i])
++				break;
++		if (i == target-&gt;account.max_inaccount) {
++			eprintf(&quot;bug %d\n&quot;, target-&gt;account.max_inaccount);
++			return TGTADM_UNKNOWN_ERR;
++		}
++
++		target-&gt;account.in_aids[i] = aid;
++		target-&gt;account.nr_inaccount++;
++	} else {
++		int new_max = target-&gt;account.max_inaccount &lt;&lt; 1;
++		int *buf;
++
++		buf = zalloc(new_max * sizeof(int));
++		if (!buf)
++			return TGTADM_NOMEM;
++
++		memcpy(buf, target-&gt;account.in_aids,
++		       target-&gt;account.max_inaccount * sizeof(int));
++		free(target-&gt;account.in_aids);
++		target-&gt;account.in_aids = buf;
++		target-&gt;account.in_aids[target-&gt;account.max_inaccount] = aid;
++		target-&gt;account.max_inaccount = new_max;
++	}
++
++	return 0;
++}
++
++int account_ctl(int tid, int type, char *user, int bind)
++{
++	struct target *target;
++	struct account_entry *ac;
++	int i, err = 0;
++
++	target = target_lookup(tid);
++	if (!target)
++		return TGTADM_NO_TARGET;
++
++	ac = __account_lookup_user(user);
++	if (!ac)
++		return TGTADM_NO_USER;
++
++	if (bind) {
++		if (type == ACCOUNT_TYPE_INCOMING)
++			err = __inaccount_bind(target, ac-&gt;aid);
++		else {
++			if (target-&gt;account.out_aid)
++				err = TGTADM_OUTACCOUNT_EXIST;
++			else
++				target-&gt;account.out_aid = ac-&gt;aid;
++		}
++	} else
++		if (type == ACCOUNT_TYPE_INCOMING) {
++			for (i = 0; i &lt; target-&gt;account.max_inaccount; i++)
++				if (target-&gt;account.in_aids[i] == ac-&gt;aid) {
++					target-&gt;account.in_aids[i] = 0;
++					target-&gt;account.nr_inaccount--;
++				}
++
++			if (i == target-&gt;account.max_inaccount)
++				err = TGTADM_NO_USER;
++		} else
++			if (target-&gt;account.out_aid)
++				target-&gt;account.out_aid = 0;
++			else
++				err = TGTADM_NO_USER;
++
++	return err;
++}
++
++void account_del(char *user)
++{
++	struct account_entry *ac;
++	struct target *target;
++
++	ac = __account_lookup_user(user);
++	if (!ac)
++		return;
++
++	list_for_each_entry(target, &amp;target_list, t_list) {
++		account_ctl(target-&gt;tid, ACCOUNT_TYPE_INCOMING, ac-&gt;user, 0);
++		account_ctl(target-&gt;tid, ACCOUNT_TYPE_OUTGOING, ac-&gt;user, 0);
++	}
++
++	list_del(&amp;ac-&gt;ac_list);
++	free(ac-&gt;user);
++	free(ac-&gt;password);
++	free(ac);
++}
++
+ int acl_add(int tid, char *address)
+ {
+ 	char *str;
+@@ -823,12 +1019,11 @@
+ 
+ int tgt_target_show_all(char *buf, int rest)
+ {
+-	int total, max = rest;
++	int total = 0, max = rest;
+ 	struct target *target;
+ 	struct tgt_device *device;
+ 	struct acl_entry *acl;
+ 
+-	total = 0;
+ 	list_for_each_entry(target, &amp;target_list, t_list) {
+ 		shprintf(total, buf, rest,
+ 			 &quot;Target %d: %s\n&quot;
+@@ -840,6 +1035,24 @@
+ 			 tgt_drivers[target-&gt;lid]-&gt;name,
+ 			 target_state_name(target-&gt;target_state));
+ 
++		if (tgt_drivers[target-&gt;lid]-&gt;account) {
++			int i, aid;
++
++			shprintf(total, buf, rest, TAB1
++				 &quot;Account information:\n&quot;);
++			for (i = 0; i &lt; target-&gt;account.nr_inaccount; i++) {
++				aid = target-&gt;account.in_aids[i];
++				shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;,
++					 __account_lookup_id(aid)-&gt;user);
++			}
++			if (target-&gt;account.out_aid) {
++				aid = target-&gt;account.out_aid;
++				shprintf(total, buf, rest,
++					 TAB2 &quot;%s (outgoing)\n&quot;,
++					 __account_lookup_id(aid)-&gt;user);
++			}
++		}
++
+ 		shprintf(total, buf, rest, TAB1 &quot;ACL information:\n&quot;);
+ 		list_for_each_entry(acl, &amp;target-&gt;acl_list, aclent_list)
+ 			shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;, acl-&gt;address);
+@@ -876,6 +1089,8 @@
+ 	return target-&gt;name;
+ }
+ 
++#define DEFAULT_NR_ACCOUNT 16
++
+ int tgt_target_create(int lld, int tid, char *args)
+ {
+ 	int i, t_type = TARGET_SBC, bs_type = LU_BS_FILE;
+@@ -920,6 +1135,14 @@
+ 		return -ENOMEM;
+ 	}
+ 
++	target-&gt;account.in_aids = zalloc(DEFAULT_NR_ACCOUNT * sizeof(int));
++	if (!target-&gt;account.in_aids) {
++		free(target-&gt;name);
++		free(target);
++		return -ENOMEM;
++	}
++	target-&gt;account.max_inaccount = DEFAULT_NR_ACCOUNT;
++
+ 	target-&gt;tid = tid;
+ 	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hash_list); i++)
+ 		INIT_LIST_HEAD(&amp;target-&gt;cmd_hash_list[i]);
+@@ -982,11 +1205,29 @@
+ 		free(acl);
+ 	}
+ 
++	free(target-&gt;account.in_aids);
++
+ 	free(target);
+ 
+ 	return 0;
+ }
+ 
++int account_show(char *buf, int rest)
++{
++	int total = 0, max = rest;
++	struct account_entry *ac;
++
++	if (!list_empty(&amp;accounts_list))
++		shprintf(total, buf, rest, &quot;Account list:\n&quot;);
++
++	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++		shprintf(total, buf, rest, TAB1 &quot;%s\n&quot;, ac-&gt;user);
++
++	return total;
++overflow:
++	return max;
++}
++
+ __attribute__((constructor)) static void target_init(void)
+ {
+ 	int i;
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/target.h	2006-12-30 04:23:18 UTC (rev 730)
+@@ -19,6 +19,18 @@
+ 	struct list_head aclent_list;
+ };
+ 
++enum {
++	ACCOUNT_TYPE_INCOMING,
++	ACCOUNT_TYPE_OUTGOING,
++};
++
++struct tgt_account {
++	int out_aid;
++	int nr_inaccount;
++	int max_inaccount;
++	int *in_aids;
++};
++
+ struct mgmt_req {
+ 	uint64_t mid;
+ 	int busy;
+@@ -47,6 +59,8 @@
+ 	struct backedio_template *bdt;
+ 
+ 	struct list_head acl_list;
++
++	struct tgt_account account;
+ };
+ 
+ struct cmd {
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/tgtadm.c	2006-12-30 04:23:18 UTC (rev 730)
+@@ -74,7 +74,13 @@
+ 	&quot;this logical unit already exists&quot;,  /* 10 */
+ 
+ 	&quot;this access control rule already exists&quot;,
+-	&quot;unknown parameter&quot;,
++	&quot;this account already exists&quot;,
++	&quot;can't find the account&quot;,
++	&quot;Too many accounts&quot;,
++	&quot;invalid request&quot;, /* 15 */
++
++	&quot;this target already has an outgoing account&quot;,
++	&quot;unknown parameter&quot;, /* 15 */
+ };
+ 
+ static struct option const long_options[] =
+@@ -86,7 +92,6 @@
+ 	{&quot;sid&quot;, required_argument, NULL, 's'},
+ 	{&quot;cid&quot;, required_argument, NULL, 'c'},
+ 	{&quot;lun&quot;, required_argument, NULL, 'u'},
+-	{&quot;aid&quot;, required_argument, NULL, 'a'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+ 	{&quot;bus&quot;, required_argument, NULL, 'B'},
+ 	{&quot;name&quot;, required_argument, NULL, 'n'},
+@@ -98,12 +103,13 @@
+ 	{&quot;backing-store-type&quot;, required_argument, NULL, 'S'},
+ 	{&quot;user&quot;, required_argument, NULL, 'y'},
+ 	{&quot;password&quot;, required_argument, NULL, 'Y'},
++	{&quot;outgoing&quot;, no_argument, NULL, 'O'},
+ 	{&quot;debug&quot;, no_argument, NULL, 'd'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+ };
+ 
+-static char *short_options = &quot;l:o:m:t:s:c:u:i:a:B:T:I:p:b:S:n:v:y:Y:dh&quot;;
++static char *short_options = &quot;l:o:m:t:s:c:u:i:B:T:I:p:b:S:n:v:y:Y:dh&quot;;
+ 
+ static void usage(int status)
+ {
+@@ -386,8 +392,8 @@
+ 		case 'u':
+ 			lun = strtoull(optarg, NULL, 10);
+ 			break;
+-		case 'a':
+-			aid = strtol(optarg, NULL, 10);
++		case 'O':
++			aid = 1;
+ 			break;
+ 		case 'i':
+ 			hostno = strtol(optarg, NULL, 10);
+@@ -493,10 +499,12 @@
+ 		len += snprintf(params + len, rest - len,
+ 				&quot;%sbacking-store-type=%d&quot;, len ? &quot;,&quot; : &quot;&quot;, bs_type);
+ 
+-	if (password &amp;&amp; user)
+-		len += snprintf(params + len, rest - len, &quot;user=%s,password=%s&quot;,
+-				user, password);
++	if (user)
++		len += snprintf(params + len, rest - len, &quot;user=%s&quot;, user);
+ 
++	if (password)
++		len += snprintf(params + len, rest - len, &quot;,password=%s&quot;, password);
++
+ 	req-&gt;len = sizeof(*req) + len;
+ 
+ 	err = ipc_mgmt_req(req);
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/tgtadm.h	2006-12-30 04:23:18 UTC (rev 730)
+@@ -18,6 +18,12 @@
+ 	TGTADM_LUN_EXIST,
+ 
+ 	TGTADM_ACL_EXIST,
++	TGTADM_USER_EXIST,
++	TGTADM_NO_USER,
++	TGTADM_TOO_MANY_USER,
++	TGTADM_INVALID_REQUEST,
++
++	TGTADM_OUTACCOUNT_EXIST,
+ 	TGTADM_UNKNOWN_PARAM,
+ };
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-12-29 11:06:01 UTC (rev 729)
++++ trunk/usr/tgtd.h	2006-12-30 04:23:18 UTC (rev 730)
+@@ -110,4 +110,11 @@
+ extern void acl_del(int tid, char *address);
+ extern char *acl_get(int tid, int idx);
+ 
++extern int account_lookup(int tid, int type, char *user, int ulen,
++			  char *password, int plen);
++extern int account_add(char *user, char *password);
++extern void account_del(char *user);
++extern int account_ctl(int tid, int type, char *user, int bind);
++extern int account_show(char *buf, int rest);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000716.html">[Stgt-svn] r729 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000718.html">[Stgt-svn] r731 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#717">[ date ]</a>
+              <a href="thread.html#717">[ thread ]</a>
+              <a href="subject.html#717">[ subject ]</a>
+              <a href="author.html#717">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

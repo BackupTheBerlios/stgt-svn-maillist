@@ -1,0 +1,628 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r156 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r156%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511050923.jA59NEYp004357%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000149.html">
+   <LINK REL="Next"  HREF="000151.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r156 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r156%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511050923.jA59NEYp004357%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r156 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 10:23:14 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000149.html">[Stgt-svn] r155 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000151.html">[Stgt-svn] r157 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#150">[ date ]</a>
+              <a href="thread.html#150">[ thread ]</a>
+              <a href="subject.html#150">[ subject ]</a>
+              <a href="author.html#150">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 10:23:13 +0100 (Sat, 05 Nov 2005)
+New Revision: 156
+
+Modified:
+   trunk/istgt/kernel/digest.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/nthread.c
+Log:
+Rename cmnd_* macros cmd_*.
+
+Modified: trunk/istgt/kernel/digest.c
+===================================================================
+--- trunk/istgt/kernel/digest.c	2005-11-05 09:04:04 UTC (rev 155)
++++ trunk/istgt/kernel/digest.c	2005-11-05 09:23:13 UTC (rev 156)
+@@ -135,7 +135,7 @@
+ 	struct scatterlist *sg;
+ 	uint32_t offset, crc;
+ 
+-	if (cmnd_opcode(cmnd) == ISCSI_OP_SCSI_DATA_OUT) {
++	if (cmd_opcode(cmnd) == ISCSI_OP_SCSI_DATA_OUT) {
+ 		struct iscsi_cmnd *scsi_cmnd = cmnd-&gt;req;
+ 		struct iscsi_data *req = (struct iscsi_data *) &amp;cmnd-&gt;pdu.bhs;
+ 
+@@ -150,7 +150,7 @@
+ 	digest_data(cmnd-&gt;conn-&gt;rx_digest_tfm, cmnd, sg, offset,
+ 		    (uint8_t *) &amp;crc);
+ 
+-	if (!cmnd-&gt;conn-&gt;read_overflow &amp;&amp; (cmnd_opcode(cmnd) != ISCSI_OP_PDU_REJECT)) {
++	if (!cmnd-&gt;conn-&gt;read_overflow &amp;&amp; (cmd_opcode(cmnd) != ISCSI_OP_PDU_REJECT)) {
+ 		if (crc != cmnd-&gt;ddigest)
+ 			return -EIO;
+ 	}
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-05 09:04:04 UTC (rev 155)
++++ trunk/istgt/kernel/iscsi.c	2005-11-05 09:23:13 UTC (rev 156)
+@@ -18,7 +18,7 @@
+ 
+ static uint32_t cmnd_write_size(struct iscsi_cmnd *cmnd)
+ {
+-	struct iscsi_cmd *hdr = cmnd_hdr(cmnd);
++	struct iscsi_cmd *hdr = cmd_hdr(cmnd);
+ 
+ 	if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
+ 		return be32_to_cpu(hdr-&gt;data_length);
+@@ -27,7 +27,7 @@
+ 
+ static uint32_t cmnd_read_size(struct iscsi_cmnd *cmnd)
+ {
+-	struct iscsi_cmd *hdr = cmnd_hdr(cmnd);
++	struct iscsi_cmd *hdr = cmd_hdr(cmnd);
+ 
+ 	if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_READ) {
+ 		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE))
+@@ -136,8 +136,8 @@
+ 
+ 	if (!list_empty(&amp;cmnd-&gt;list)) {
+ 		eprintk(&quot;%x %x %x %x %lx %lx %u %u %u %u %u %u %u %d %d\n&quot;,
+-			cmnd_itt(cmnd), cmnd_ttt(cmnd), cmnd_opcode(cmnd),
+-			cmnd_scsicode(cmnd), cmnd-&gt;state, cmnd-&gt;flags,
++			cmd_itt(cmnd), cmd_ttt(cmnd), cmd_opcode(cmnd),
++			cmd_scsicode(cmnd), cmnd-&gt;state, cmnd-&gt;flags,
+ 			cmnd-&gt;r2t_sn, cmnd-&gt;r2t_length, cmnd-&gt;is_unsolicited_data,
+ 			cmnd-&gt;target_task_tag, cmnd-&gt;outstanding_r2t,
+ 			cmnd-&gt;hdigest, cmnd-&gt;ddigest,
+@@ -154,7 +154,7 @@
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 	struct iscsi_cmnd *data_cmnd;
+ 	struct scatterlist *sg = cmnd-&gt;tc-&gt;sg;
+-	struct iscsi_cmd *req = cmnd_hdr(cmnd);
++	struct iscsi_cmd *req = cmd_hdr(cmnd);
+ 	struct iscsi_data_rsp *rsp;
+ 	uint32_t pdusize, expsize, scsisize, size, offset, sn;
+ 	LIST_HEAD(send);
+@@ -216,7 +216,7 @@
+ static struct iscsi_cmnd *create_scsi_rsp(struct iscsi_cmnd *req)
+ {
+ 	struct iscsi_cmnd *rsp;
+-	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
++	struct iscsi_cmd *req_hdr = cmd_hdr(req);
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+ 
+ 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+@@ -267,7 +267,7 @@
+ 	rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 	rsp_hdr-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+-	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
++	rsp_hdr-&gt;itt = cmd_hdr(req)-&gt;itt;
+ 
+ 	stc = tgt_cmd_to_scsi(req-&gt;tc);
+ 	sense = (struct iscsi_sense_data *) stc-&gt;sense_buff;
+@@ -302,7 +302,7 @@
+ 	rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 	rsp_hdr-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+-	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
++	rsp_hdr-&gt;itt = cmd_hdr(req)-&gt;itt;
+ 
+ 	stc = tgt_cmd_to_scsi(req-&gt;tc);
+ 	sg-&gt;page = virt_to_page(stc-&gt;sense_buff);
+@@ -342,7 +342,7 @@
+ 	kfree(cmnd-&gt;pdu.ahs);
+ 
+ 	if (!list_empty(&amp;cmnd-&gt;list)) {
+-		struct iscsi_cmd *req = cmnd_hdr(cmnd);
++		struct iscsi_cmd *req = cmd_hdr(cmnd);
+ 
+ 		eprintk(&quot;cmnd %p still on some list?, %x, %x, %x, %x, %x, %x, %x %lx %lx\n&quot;,
+ 			cmnd, req-&gt;opcode, req-&gt;cdb[0], req-&gt;flags, req-&gt;itt,
+@@ -350,7 +350,7 @@
+ 			req-&gt;cmdsn, be32_to_cpu(cmnd-&gt;pdu.datasize), cmnd-&gt;state, conn-&gt;state);
+ 
+ 		if (cmnd-&gt;req) {
+-			struct iscsi_cmd *req = cmnd_hdr(cmnd-&gt;req);
++			struct iscsi_cmd *req = cmd_hdr(cmnd-&gt;req);
+ 			eprintk(&quot;%p %x %u\n&quot;, req, req-&gt;opcode, req-&gt;cdb[0]);
+ 		}
+ 		dump_stack();
+@@ -377,8 +377,8 @@
+ 
+ 	BUG_ON(1);
+ 
+-/* 	eprintk(&quot;%x %x %x %u\n&quot;, cmnd_itt(cmnd), cmnd_opcode(cmnd), */
+-/* 		cmnd_hdr(cmnd)-&gt;cdb[0], cmnd-&gt;pdu.datasize); */
++/* 	eprintk(&quot;%x %x %x %u\n&quot;, cmd_itt(cmnd), cmnd_opcode(cmnd), */
++/* 		cmd_hdr(cmnd)-&gt;cdb[0], cmnd-&gt;pdu.datasize); */
+ 
+ /* 	if (!(size = cmnd-&gt;pdu.datasize)) */
+ /* 		return; */
+@@ -554,7 +554,7 @@
+ 	if (tmp &amp;&amp; tmp == cmnd)
+ 		__cmnd_remove_hash(tmp);
+ 	else
+-		eprintk(&quot;%p:%x not found\n&quot;, cmnd, cmnd_itt(cmnd));
++		eprintk(&quot;%p:%x not found\n&quot;, cmnd, cmd_itt(cmnd));
+ 
+ 	spin_unlock(&amp;session-&gt;cmnd_hash_lock);
+ }
+@@ -567,8 +567,8 @@
+ 
+ 	rsp = get_rsp_cmnd(req);
+ 	rsp_hdr = (struct iscsi_cmd_rsp *)&amp;rsp-&gt;pdu.bhs;
+-	if (cmnd_opcode(rsp) != ISCSI_OP_SCSI_CMD_RSP) {
+-		eprintk(&quot;unexpected response command %u\n&quot;, cmnd_opcode(rsp));
++	if (cmd_opcode(rsp) != ISCSI_OP_SCSI_CMD_RSP) {
++		eprintk(&quot;unexpected response command %u\n&quot;, cmd_opcode(rsp));
+ 		return;
+ 	}
+ 
+@@ -579,7 +579,7 @@
+ 	}
+ 	size = cmnd_read_size(req);
+ 	if (size) {
+-		if (cmnd_hdr(req)-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
++		if (cmd_hdr(req)-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
+ 			rsp_hdr-&gt;flags |= ISCSI_FLAG_CMD_BIDI_UNDERFLOW;
+ 			rsp_hdr-&gt;bi_residual_count = cpu_to_be32(size);
+ 		} else {
+@@ -661,7 +661,7 @@
+ 
+ 	length = req-&gt;r2t_length;
+ 	burst = req-&gt;conn-&gt;session-&gt;param.max_burst_length;
+-	offset = be32_to_cpu(cmnd_hdr(req)-&gt;data_length) - length;
++	offset = be32_to_cpu(cmd_hdr(req)-&gt;data_length) - length;
+ 
+ 	do {
+ 		rsp = iscsi_cmnd_create_rsp_cmnd(req, 0);
+@@ -670,8 +670,8 @@
+ 		rsp_hdr = (struct iscsi_r2t_rsp *)&amp;rsp-&gt;pdu.bhs;
+ 		rsp_hdr-&gt;opcode = ISCSI_OP_R2T;
+ 		rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+-		memcpy(rsp_hdr-&gt;lun, cmnd_hdr(req)-&gt;lun, 8);
+-		rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
++		memcpy(rsp_hdr-&gt;lun, cmd_hdr(req)-&gt;lun, 8);
++		rsp_hdr-&gt;itt = cmd_hdr(req)-&gt;itt;
+ 		rsp_hdr-&gt;r2tsn = cpu_to_be32(req-&gt;r2t_sn++);
+ 		rsp_hdr-&gt;data_offset = cpu_to_be32(offset);
+ 		if (length &gt; burst) {
+@@ -683,7 +683,7 @@
+ 			length = 0;
+ 		}
+ 
+-		dprintk(&quot;%x %u %u %u %u\n&quot;, cmnd_itt(req),
++		dprintk(&quot;%x %u %u %u %u\n&quot;, cmd_itt(req),
+ 			be32_to_cpu(rsp_hdr-&gt;data_length),
+ 			be32_to_cpu(rsp_hdr-&gt;data_offset),
+ 			be32_to_cpu(rsp_hdr-&gt;r2tsn), req-&gt;outstanding_r2t);
+@@ -702,7 +702,7 @@
+ {
+ 	struct tgt_cmd *tc = (struct tgt_cmd *) data;
+ 	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) tc-&gt;private;
+-	struct iscsi_cmd *req = cmnd_hdr(cmnd);
++	struct iscsi_cmd *req = cmd_hdr(cmnd);
+ 
+ 	if (tc-&gt;result != SAM_STAT_GOOD) {
+ 		struct iscsi_cmnd *rsp;
+@@ -760,7 +760,7 @@
+ 
+ static void tgt_scsi_cmd_create(struct iscsi_cmnd *req)
+ {
+-	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
++	struct iscsi_cmd *req_hdr = cmd_hdr(req);
+ 	struct iscsi_conn *conn = req-&gt;conn;
+ 	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	enum dma_data_direction data_dir;
+@@ -833,24 +833,24 @@
+ 	uint32_t size, tmp;
+ 	int i = 0, err = 0;
+ 
+-	if (cmnd_ttt(cmnd) != cpu_to_be32(ISCSI_RESERVED_TAG)) {
++	if (cmd_ttt(cmnd) != cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		/*
+ 		 * We don't request a NOP-Out by sending a NOP-In.
+ 		 * See 10.18.2 in the draft 20.
+ 		 */
+-		eprintk(&quot;initiator bug %x\n&quot;, cmnd_itt(cmnd));
++		eprintk(&quot;initiator bug %x\n&quot;, cmd_itt(cmnd));
+ 		err = -ISCSI_PROTOCOL_ERROR;
+ 		goto out;
+ 	}
+ 
+-	if (cmnd_itt(cmnd) == cpu_to_be32(ISCSI_RESERVED_TAG)) {
++	if (cmd_itt(cmnd) == cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		if (!(cmnd-&gt;pdu.bhs.opcode &amp; ISCSI_OP_IMMEDIATE))
+ 			eprintk(&quot;%s\n&quot;,&quot;initiator bug!&quot;);
+ 		update_stat_sn(cmnd);
+ 		err = check_cmd_sn(cmnd);
+ 		goto out;
+ 	} else if ((err = cmnd_insert_hash(cmnd)) &lt; 0) {
+-		eprintk(&quot;ignore this request %x\n&quot;, cmnd_itt(cmnd));
++		eprintk(&quot;ignore this request %x\n&quot;, cmd_itt(cmnd));
+ 		goto out;
+ 	}
+ 
+@@ -905,7 +905,7 @@
+ 
+ static void scsi_cmnd_start(struct iscsi_conn *conn, struct iscsi_cmnd *req)
+ {
+-	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
++	struct iscsi_cmd *req_hdr = cmd_hdr(req);
+ 
+ 	dprintk(&quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+@@ -935,7 +935,7 @@
+ 		if (!(req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) ||
+ 		      req-&gt;pdu.datasize) {
+ 			/* unexpected unsolicited data */
+-			eprintk(&quot;%x %x\n&quot;, cmnd_itt(req), req_hdr-&gt;cdb[0]);
++			eprintk(&quot;%x %x\n&quot;, cmd_itt(req), req_hdr-&gt;cdb[0]);
+ 			create_sense_rsp(req, ABORTED_COMMAND, 0xc, 0xc);
+ 			cmnd_skip_data(req);
+ 		}
+@@ -964,14 +964,14 @@
+ 		req-&gt;target_task_tag = get_next_ttt(conn-&gt;session);
+ 
+ 		if (!param-&gt;immediate_data &amp;&amp; req-&gt;pdu.datasize)
+-			eprintk(&quot;%x %x\n&quot;, cmnd_itt(req), req_hdr-&gt;cdb[0]);
++			eprintk(&quot;%x %x\n&quot;, cmd_itt(req), req_hdr-&gt;cdb[0]);
+ 
+ 		if (param-&gt;initial_r2t &amp;&amp;
+ 		    !(req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL))
+-			eprintk(&quot;%x %x\n&quot;, cmnd_itt(req), req_hdr-&gt;cdb[0]);
++			eprintk(&quot;%x %x\n&quot;, cmd_itt(req), req_hdr-&gt;cdb[0]);
+ 
+ 		if (req_hdr-&gt;cdb[0] == WRITE_VERIFY &amp;&amp; req_hdr-&gt;cdb[1] &amp; 0x02)
+-			eprintk(&quot;Verification is ignored %x\n&quot;, cmnd_itt(req));
++			eprintk(&quot;Verification is ignored %x\n&quot;, cmd_itt(req));
+ 
+ 		if (req-&gt;pdu.datasize) {
+ 			if (cmnd_recv_pdu(conn, req-&gt;tc, 0, req-&gt;pdu.datasize) &lt; 0)
+@@ -1001,18 +1001,18 @@
+ 	cmnd-&gt;req = scsi_cmnd = cmnd_find_hash(conn-&gt;session, req-&gt;itt, req-&gt;ttt);
+ 	if (!scsi_cmnd) {
+ 		eprintk(&quot;unable to find scsi task %x %x\n&quot;,
+-			cmnd_itt(cmnd), cmnd_ttt(cmnd));
++			cmd_itt(cmnd), cmd_ttt(cmnd));
+ 		goto skip_data;
+ 	}
+ 
+ 	if (scsi_cmnd-&gt;r2t_length &lt; cmnd-&gt;pdu.datasize) {
+ 		eprintk(&quot;invalid data len %x %u %u\n&quot;,
+-			cmnd_itt(scsi_cmnd), cmnd-&gt;pdu.datasize, scsi_cmnd-&gt;r2t_length);
++			cmd_itt(scsi_cmnd), cmnd-&gt;pdu.datasize, scsi_cmnd-&gt;r2t_length);
+ 		goto skip_data;
+ 	}
+ 
+ 	if (scsi_cmnd-&gt;r2t_length + offset != cmnd_write_size(scsi_cmnd)) {
+-		eprintk(&quot;%x %u %u %u\n&quot;, cmnd_itt(scsi_cmnd), scsi_cmnd-&gt;r2t_length,
++		eprintk(&quot;%x %u %u %u\n&quot;, cmd_itt(scsi_cmnd), scsi_cmnd-&gt;r2t_length,
+ 			offset,	cmnd_write_size(scsi_cmnd));
+ 		goto skip_data;
+ 	}
+@@ -1023,7 +1023,7 @@
+ 		/* unsolicited burst data */
+ 		if (scsi_cmnd-&gt;pdu.bhs.flags &amp; ISCSI_FLAG_CMD_FINAL) {
+ 			eprintk(&quot;unexpected data from %x %x\n&quot;,
+-				cmnd_itt(cmnd), cmnd_ttt(cmnd));
++				cmd_itt(cmnd), cmd_ttt(cmnd));
+ 			goto skip_data;
+ 		}
+ 	}
+@@ -1052,7 +1052,7 @@
+ 	BUG_ON(!scsi_cmnd);
+ 
+ 	if (conn-&gt;read_overflow) {
+-		eprintk(&quot;%x %u\n&quot;, cmnd_itt(cmnd), conn-&gt;read_overflow);
++		eprintk(&quot;%x %u\n&quot;, cmd_itt(cmnd), conn-&gt;read_overflow);
+ 		offset = be32_to_cpu(req-&gt;offset);
+ 		offset += cmnd-&gt;pdu.datasize - conn-&gt;read_overflow;
+ 		if (cmnd_recv_pdu(conn, scsi_cmnd-&gt;tc, offset, conn-&gt;read_overflow) &lt; 0)
+@@ -1070,7 +1070,7 @@
+ 		/* TODO : proper error handling */
+ 		if (!(req-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) &amp;&amp;
+ 		    scsi_cmnd-&gt;r2t_length == 0)
+-			eprintk(&quot;initiator error %x\n&quot;, cmnd_itt(scsi_cmnd));
++			eprintk(&quot;initiator error %x\n&quot;, cmd_itt(scsi_cmnd));
+ 
+ 		if (!(req-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL))
+ 			goto out;
+@@ -1103,7 +1103,7 @@
+ /* 	int err =  -ISCSI_RESPONSE_UNKNOWN_TASK; */
+ 
+ /* 	if ((cmnd = cmnd_find_hash(session, itt, ISCSI_RESERVED_TAG))) { */
+-/* 		eprintk(&quot;%x %x %x %u %u %u %u\n&quot;, cmnd_itt(cmnd), cmnd_opcode(cmnd), */
++/* 		eprintk(&quot;%x %x %x %u %u %u %u\n&quot;, cmd_itt(cmnd), cmnd_opcode(cmnd), */
+ /* 			cmnd-&gt;r2t_length, cmnd_scsicode(cmnd), */
+ /* 			cmnd_write_size(cmnd), cmnd-&gt;is_unsolicited_data, */
+ /* 			cmnd-&gt;outstanding_r2t); */
+@@ -1128,7 +1128,7 @@
+ 
+ /* 				if (all) */
+ /* 					__cmnd_abort(cmnd); */
+-/* 				else if (translate_lun(cmnd_hdr(cmnd)-&gt;lun) == lun) */
++/* 				else if (translate_lun(cmd_hdr(cmnd)-&gt;lun) == lun) */
+ /* 					__cmnd_abort(cmnd); */
+ /* 			} */
+ /* 		} */
+@@ -1169,7 +1169,7 @@
+ /* 	rsp_hdr-&gt;response = ISCSI_TMF_RSP_COMPLETE; */
+ 	rsp_hdr-&gt;response = ISCSI_TMF_RSP_REJECTED;
+ 
+-	eprintk(&quot;%x %d %x\n&quot;, cmnd_itt(req), function, req_hdr-&gt;rtt);
++	eprintk(&quot;%x %d %x\n&quot;, cmd_itt(req), function, req_hdr-&gt;rtt);
+ 
+ /* 	switch (function) { */
+ /* 	case ISCSI_FUNCTION_ABORT_TASK: */
+@@ -1223,7 +1223,7 @@
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_nopin *rsp_hdr;
+ 
+-	if (cmnd_itt(req) != cpu_to_be32(ISCSI_RESERVED_TAG)) {
++	if (cmd_itt(req) != cpu_to_be32(ISCSI_RESERVED_TAG)) {
+ 		rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+ 
+ 		rsp_hdr = (struct iscsi_nopin *)&amp;rsp-&gt;pdu.bhs;
+@@ -1270,7 +1270,7 @@
+ 	dprintk(&quot;%p,%x,%u\n&quot;, cmnd, cmnd_opcode(cmnd),
+ 		cmnd-&gt;pdu.bhs.statsn);
+ 
+-	switch (cmnd_opcode(cmnd)) {
++	switch (cmd_opcode(cmnd)) {
+ 	case ISCSI_OP_NOOP_OUT:
+ 		noop_out_exec(cmnd);
+ 		break;
+@@ -1290,7 +1290,7 @@
+ 	case ISCSI_OP_SNACK:
+ 		break;
+ 	default:
+-		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmnd_opcode(cmnd));
++		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmd_opcode(cmnd));
+ 		break;
+ 	}
+ }
+@@ -1385,7 +1385,7 @@
+ 	iop++;
+ 	conn-&gt;write_size = sizeof(cmnd-&gt;pdu.bhs);
+ 
+-	switch (cmnd_opcode(cmnd)) {
++	switch (cmd_opcode(cmnd)) {
+ 	case ISCSI_OP_NOOP_IN:
+ 		cmnd_set_sn(cmnd, 1);
+ 		cmnd_send_pdu(conn, cmnd);
+@@ -1427,7 +1427,7 @@
+ 		cmnd_send_pdu(conn, cmnd);
+ 		break;
+ 	default:
+-		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmnd_opcode(cmnd));
++		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmd_opcode(cmnd));
+ 		break;
+ 	}
+ 
+@@ -1440,8 +1440,8 @@
+ {
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 
+-	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+-	switch (cmnd_opcode(cmnd)) {
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmd_opcode(cmnd));
++	switch (cmd_opcode(cmnd)) {
+ 	case ISCSI_OP_NOOP_IN:
+ 	case ISCSI_OP_SCSI_CMD_RSP:
+ 	case ISCSI_OP_SCSI_TMFUNC_RSP:
+@@ -1453,7 +1453,7 @@
+ 	case ISCSI_OP_LOGOUT_RSP:
+ 		break;
+ 	default:
+-		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmnd_opcode(cmnd));
++		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmd_opcode(cmnd));
+ 		BUG_ON(1);
+ 		break;
+ 	}
+@@ -1481,7 +1481,7 @@
+ 	uint32_t cmd_sn;
+ 
+ 	dprintk(&quot;%p:%x %u,%u\n&quot;,
+-		cmnd, cmnd_opcode(cmnd), cmnd-&gt;pdu.bhs.statsn,
++		cmnd, cmd_opcode(cmnd), cmnd-&gt;pdu.bhs.statsn,
+ 		session-&gt;exp_cmd_sn);
+ 
+ 	if (cmnd-&gt;pdu.bhs.opcode &amp; ISCSI_OP_IMMEDIATE) {
+@@ -1501,13 +1501,13 @@
+ 			if (cmnd-&gt;pdu.bhs.statsn != cmd_sn)
+ 				break;
+ /* 			eprintk(&quot;find out-of-order %x %u %u\n&quot;, */
+-/* 				cmnd_itt(cmnd), cmd_sn, cmnd-&gt;pdu.bhs.statsn); */
++/* 				cmd_itt(cmnd), cmd_sn, cmnd-&gt;pdu.bhs.statsn); */
+ 			list_del_init(&amp;cmnd-&gt;list);
+ 			clear_cmnd_pending(cmnd);
+ 		}
+ 	} else {
+ /* 		eprintk(&quot;out-of-order %x %u %u\n&quot;, */
+-/* 			cmnd_itt(cmnd), cmd_sn, session-&gt;exp_cmd_sn); */
++/* 			cmd_itt(cmnd), cmd_sn, session-&gt;exp_cmd_sn); */
+ 
+ 		set_cmnd_pending(cmnd);
+ 		if (before(cmd_sn, session-&gt;exp_cmd_sn)) /* close the conn */
+@@ -1534,7 +1534,7 @@
+ 	struct iscsi_sess_param *param = &amp;conn-&gt;session-&gt;param;
+ 
+ 	if (cmnd-&gt;pdu.datasize &gt; param-&gt;max_recv_data_length) {
+-		eprintk(&quot;too lond data %x %u %u\n&quot;, cmnd_itt(cmnd),
++		eprintk(&quot;too lond data %x %u %u\n&quot;, cmd_itt(cmnd),
+ 			cmnd-&gt;pdu.datasize, param-&gt;max_recv_data_length);
+ 
+ 		if (get_pgcnt(cmnd-&gt;pdu.datasize, 0) &gt; ISCSI_CONN_IOV_MAX) {
+@@ -1554,7 +1554,7 @@
+ 	if (check_segment_length(cmnd) &lt; 0)
+ 		return;
+ 
+-	switch (cmnd_opcode(cmnd)) {
++	switch (cmd_opcode(cmnd)) {
+ 	case ISCSI_OP_NOOP_OUT:
+ 		err = noop_out_start(conn, cmnd);
+ 		break;
+@@ -1581,7 +1581,7 @@
+ 	}
+ 
+ 	if (err &lt; 0) {
+-		eprintk(&quot;%x %x %d\n&quot;, cmnd_opcode(cmnd), cmnd_itt(cmnd), err);
++		eprintk(&quot;%x %x %d\n&quot;, cmd_opcode(cmnd), cmd_itt(cmnd), err);
+ 		iscsi_cmnd_reject(cmnd, -err);
+ 	}
+ }
+@@ -1590,8 +1590,8 @@
+ {
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 
+-	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+-	switch (cmnd_opcode(cmnd)) {
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmd_opcode(cmnd));
++	switch (cmd_opcode(cmnd)) {
+ 	case ISCSI_OP_SCSI_REJECT:
+ 	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_SCSI_CMD:
+@@ -1612,7 +1612,7 @@
+ 		cmnd_release(cmnd, 0);
+ 		break;
+ 	default:
+-		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmnd_opcode(cmnd));
++		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmd_opcode(cmnd));
+ 		BUG();
+ 		break;
+ 	}
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-11-05 09:04:04 UTC (rev 155)
++++ trunk/istgt/kernel/iscsi.h	2005-11-05 09:23:13 UTC (rev 156)
+@@ -245,11 +245,11 @@
+ 	hton24(pdu-&gt;bhs.dlength, pdu-&gt;datasize);
+ }
+ 
+-#define cmnd_hdr(cmnd) ((struct iscsi_cmd *) (&amp;((cmnd)-&gt;pdu.bhs)))
+-#define cmnd_ttt(cmnd) cpu_to_be32((cmnd)-&gt;pdu.bhs.ttt)
+-#define cmnd_itt(cmnd) cpu_to_be32((cmnd)-&gt;pdu.bhs.itt)
+-#define cmnd_opcode(cmnd) ((cmnd)-&gt;pdu.bhs.opcode &amp; ISCSI_OPCODE_MASK)
+-#define cmnd_scsicode(cmnd) cmnd_hdr(cmnd)-&gt;cdb[0]
++#define cmd_hdr(cmd) ((struct iscsi_cmd *) (&amp;((cmd)-&gt;pdu.bhs)))
++#define cmd_ttt(cmd) cpu_to_be32((cmd)-&gt;pdu.bhs.ttt)
++#define cmd_itt(cmd) cpu_to_be32((cmd)-&gt;pdu.bhs.itt)
++#define cmd_opcode(cmd) ((cmd)-&gt;pdu.bhs.opcode &amp; ISCSI_OPCODE_MASK)
++#define cmd_scsicode(cmd) cmd_hdr(cmd)-&gt;cdb[0]
+ 
+ #define	SECTOR_SIZE_BITS	9
+ 
+
+Modified: trunk/istgt/kernel/nthread.c
+===================================================================
+--- trunk/istgt/kernel/nthread.c	2005-11-05 09:04:04 UTC (rev 155)
++++ trunk/istgt/kernel/nthread.c	2005-11-05 09:23:13 UTC (rev 156)
+@@ -257,7 +257,7 @@
+ 		rx_ddigest(conn, RX_END);
+ 		break;
+ 	default:
+-		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;read_state, cmnd_opcode(cmnd));
++		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;read_state, cmd_opcode(cmnd));
+ 		BUG_ON(1);
+ 	}
+ 
+@@ -268,13 +268,13 @@
+ 		return res;
+ 
+ 	if (conn-&gt;read_size) {
+-		eprintk(&quot;%d %x %d\n&quot;, res, cmnd_opcode(cmnd), conn-&gt;read_size);
++		eprintk(&quot;%d %x %d\n&quot;, res, cmd_opcode(cmnd), conn-&gt;read_size);
+ 		BUG_ON(1);
+ 	}
+ 
+ 	cmnd_rx_end(cmnd);
+ 	if (conn-&gt;read_size) {
+-		eprintk(&quot;%x %d\n&quot;, cmnd_opcode(cmnd), conn-&gt;read_size);
++		eprintk(&quot;%x %d\n&quot;, cmd_opcode(cmnd), conn-&gt;read_size);
+ 		conn-&gt;read_state = RX_DATA;
+ 		return 1;
+ 	}
+@@ -522,7 +522,7 @@
+ 		res = tx_ddigest(cmnd, TX_END);
+ 		break;
+ 	default:
+-		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;write_state, cmnd_opcode(cmnd));
++		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;write_state, cmd_opcode(cmnd));
+ 		BUG_ON(1);
+ 	}
+ 
+@@ -533,7 +533,7 @@
+ 		return res;
+ 
+ 	if (conn-&gt;write_size) {
+-		eprintk(&quot;%d %x %u\n&quot;, res, cmnd_opcode(cmnd), conn-&gt;write_size);
++		eprintk(&quot;%d %x %u\n&quot;, res, cmd_opcode(cmnd), conn-&gt;write_size);
+ 		BUG_ON(conn-&gt;write_size);
+ 	}
+ 	cmnd_tx_end(cmnd);
+@@ -600,7 +600,7 @@
+ 	if (atomic_read(&amp;conn-&gt;nr_cmnds)) {
+ 		eprintk(&quot;%u\n&quot;, atomic_read(&amp;conn-&gt;nr_cmnds));
+ 		list_for_each_entry(cmnd, &amp;conn-&gt;pdu_list, conn_list)
+-			eprintk(&quot;%x %x\n&quot;, cmnd_opcode(cmnd), cmnd_itt(cmnd));
++			eprintk(&quot;%x %x\n&quot;, cmd_opcode(cmnd), cmd_itt(cmnd));
+ 		BUG_ON(1);
+ 	}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000149.html">[Stgt-svn] r155 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000151.html">[Stgt-svn] r157 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#150">[ date ]</a>
+              <a href="thread.html#150">[ thread ]</a>
+              <a href="subject.html#150">[ subject ]</a>
+              <a href="author.html#150">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

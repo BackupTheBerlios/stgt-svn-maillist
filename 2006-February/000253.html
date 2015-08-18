@@ -1,0 +1,343 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r266 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r266%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602051229.k15CTp41010547%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000252.html">
+   <LINK REL="Next"  HREF="000254.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r266 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r266%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602051229.k15CTp41010547%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r266 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Feb  5 13:29:51 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000252.html">[Stgt-svn] r265 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000254.html">[Stgt-svn] r267 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#253">[ date ]</a>
+              <a href="thread.html#253">[ thread ]</a>
+              <a href="subject.html#253">[ subject ]</a>
+              <a href="author.html#253">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-05 13:29:45 +0100 (Sun, 05 Feb 2006)
+New Revision: 266
+
+Added:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+Removed:
+   branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+Modified:
+   branches/use-scsi-ml/kernel/Makefile
+Log:
+Rename scsi_tgt_nl.c scsi_tgt_if.c. scsi_tgt_if.c has netlink and packet socket code.
+
+
+Modified: branches/use-scsi-ml/kernel/Makefile
+===================================================================
+--- branches/use-scsi-ml/kernel/Makefile	2006-02-05 12:06:55 UTC (rev 265)
++++ branches/use-scsi-ml/kernel/Makefile	2006-02-05 12:29:45 UTC (rev 266)
+@@ -6,7 +6,7 @@
+ 
+ ifneq ($(KERNELRELEASE),)
+ obj-m			+= scsi_tgt_core.o
+-scsi_tgt_core-objs	:= scsi_tgt_lib.o scsi_tgt_nl.o
++scsi_tgt_core-objs	:= scsi_tgt_lib.o scsi_tgt_if.o
+ 
+ else
+ 
+
+Copied: branches/use-scsi-ml/kernel/scsi_tgt_if.c (from rev 262, branches/use-scsi-ml/kernel/scsi_tgt_nl.c)
+
+Deleted: branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-05 12:06:55 UTC (rev 265)
++++ branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-05 12:29:45 UTC (rev 266)
+@@ -1,246 +0,0 @@
+-/*
+- * Target Netlink Framework code
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/netlink.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;net/tcp.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+-#include &lt;scsi/scsi_cmnd.h&gt;
+-#include &lt;scsi/scsi_host.h&gt;
+-#include &lt;scsi/scsi_tgt_if.h&gt;
+-
+-#include &quot;scsi_tgt_priv.h&quot;
+-
+-/* default task when host is not setup in userspace yet */
+-static int tgtd_pid;
+-static struct sock *nls;
+-
+-static int scsi_tgt_get_pid(struct Scsi_Host *shost)
+-{
+-	struct scsi_tgt_queuedata *queue = shost-&gt;uspace_req_q-&gt;queuedata;
+-
+-	if (likely(queue-&gt;task))
+-		return queue-&gt;task-&gt;pid;
+-	else {
+-		printk(KERN_INFO &quot;Sending cmd to tgtd. Host%d is unbound\n&quot;,
+-		       shost-&gt;host_no);
+-		return tgtd_pid;
+-	}
+-}
+-
+-int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+-{
+-	struct sk_buff *skb;
+-	struct nlmsghdr *nlh;
+-	struct tgt_event *ev;
+-	char *pdu;
+-	int len, err;
+-	pid_t pid;
+-
+-	pid = scsi_tgt_get_pid(cmd-&gt;shost);
+-	len = NLMSG_SPACE(sizeof(*ev) +
+-			  MAX_COMMAND_SIZE + sizeof(struct scsi_lun));
+-	/*
+-	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+-	 */
+-	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	dprintk(&quot;%p %d %Zd %d\n&quot;, cmd, len, sizeof(*ev), MAX_COMMAND_SIZE);
+-	nlh = __nlmsg_put(skb, pid, 0, TGT_KEVENT_CMD_REQ,
+-			  len - sizeof(*nlh), 0);
+-	ev = NLMSG_DATA(nlh);
+-	memset(ev, 0, sizeof(*ev));
+-
+-	pdu = (char *) ev-&gt;data;
+-	ev-&gt;k.cmd_req.host_no = cmd-&gt;shost-&gt;host_no;
+-	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+-	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+-
+-	/* FIXME: we need scsi core to do that. */
+-	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+-	memcpy(pdu, cmd-&gt;cmnd, MAX_COMMAND_SIZE);
+-	memcpy(pdu + MAX_COMMAND_SIZE, cmd-&gt;request-&gt;end_io_data,
+-	       sizeof(struct scsi_lun));
+-
+-	err = netlink_unicast(nls, skb, pid, 0);
+-	if (err &lt; 0)
+-		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb &quot;
+-		      &quot;to pid %d err %d\n&quot;, pid, err);
+-	return err;
+-}
+-
+-static int send_event_res(uint16_t type, struct tgt_event *p,
+-			  void *data, int dlen, gfp_t flags, pid_t pid)
+-{
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-	skb = alloc_skb(len, flags);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
+-
+-	ev = NLMSG_DATA(nlh);
+-	memcpy(ev, p, sizeof(*ev));
+-	if (dlen)
+-		memcpy(ev-&gt;data, data, dlen);
+-
+-	return netlink_unicast(nls, skb, pid, 0);
+-}
+-
+-int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+-{
+-	struct tgt_event ev;
+-	char dummy[MAX_COMMAND_SIZE + sizeof(struct scsi_lun)];
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	ev.k.cmd_done.host_no = cmd-&gt;shost-&gt;host_no;
+-	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+-	ev.k.cmd_done.result = cmd-&gt;result;
+-
+-	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
+-			      gfp_mask, scsi_tgt_get_pid(cmd-&gt;shost));
+-}
+-
+-static int scsi_tgt_bind_host(struct tgt_event *ev)
+-{
+-	struct Scsi_Host *shost;
+-	struct task_struct *tsk;
+-	int err = 0;
+-
+-	dprintk(&quot;%d %d\n&quot;, ev-&gt;u.target_bind.host_no, ev-&gt;u.target_bind.pid);
+-
+-	shost = scsi_host_lookup(ev-&gt;u.target_bind.host_no);
+-	if (IS_ERR(shost)) {
+-		eprintk(&quot;Could not find host no %d\n&quot;,
+-			ev-&gt;u.target_bind.host_no);
+-			return -EINVAL;
+-	}
+-
+-	tsk = find_task_by_pid(ev-&gt;u.target_bind.pid);
+-	if (tsk) {
+-		struct scsi_tgt_queuedata *queue;
+-
+-		queue = shost-&gt;uspace_req_q-&gt;queuedata;
+-		queue-&gt;task = tsk;
+-	} else {
+-		eprintk(&quot;Could not find process %d\n&quot;,
+-			ev-&gt;u.target_bind.pid);
+-		err = EINVAL;
+-	}
+-
+-	scsi_host_put(shost);
+-	return 0;
+-}
+-
+-static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+-{
+-	struct tgt_event *ev = NLMSG_DATA(nlh);
+-	int err = 0;
+-
+-	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
+-		nlh-&gt;nlmsg_pid, current-&gt;pid);
+-
+-	switch (nlh-&gt;nlmsg_type) {
+-	case TGT_UEVENT_START:
+-		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+-		break;
+-	case TGT_UEVENT_TARGET_BIND:
+-		err = scsi_tgt_bind_host(ev);
+-		break;
+-	case TGT_UEVENT_CMD_RES:
+-		/* TODO: handle multiple cmds in one event */
+-		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_res.host_no,
+-					   ev-&gt;u.cmd_res.cid,
+-					   ev-&gt;u.cmd_res.result,
+-					   ev-&gt;u.cmd_res.len,
+-					   ev-&gt;u.cmd_res.offset,
+-					   ev-&gt;u.cmd_res.uaddr,
+-					   ev-&gt;u.cmd_res.rw,
+-					   ev-&gt;u.cmd_res.try_map);
+-		break;
+-	default:
+-		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+-		err = -EINVAL;
+-	}
+-
+-	return err;
+-}
+-
+-static int event_recv_skb(struct sk_buff *skb)
+-{
+-	int err;
+-	uint32_t rlen;
+-	struct nlmsghdr	*nlh;
+-
+-	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+-		nlh = (struct nlmsghdr *) skb-&gt;data;
+-		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+-			return 0;
+-		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+-		if (rlen &gt; skb-&gt;len)
+-			rlen = skb-&gt;len;
+-		err = event_recv_msg(skb, nlh);
+-
+-		dprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+-		/*
+-		 * TODO for passthru commands the lower level should
+-		 * probably handle the result or we should modify this
+-		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES) {
+-			struct tgt_event ev;
+-
+-			memset(&amp;ev, 0, sizeof(ev));
+-			ev.k.event_res.err = err;
+-			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+-				       GFP_KERNEL | __GFP_NOFAIL,
+-					nlh-&gt;nlmsg_pid);
+-		}
+-		skb_pull(skb, rlen);
+-	}
+-	return 0;
+-}
+-
+-static void event_recv(struct sock *sk, int length)
+-{
+-	struct sk_buff *skb;
+-
+-	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
+-		if (NETLINK_CREDS(skb)-&gt;uid) {
+-			skb_pull(skb, skb-&gt;len);
+-			kfree_skb(skb);
+-			continue;
+-		}
+-
+-		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
+-			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
+-		else
+-			kfree_skb(skb);
+-	}
+-}
+-
+-void __exit scsi_tgt_nl_exit(void)
+-{
+-	sock_release(nls-&gt;sk_socket);
+-}
+-
+-int __init scsi_tgt_nl_init(void)
+-{
+-	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv,
+-				    THIS_MODULE);
+-	if (!nls)
+-		return -ENOMEM;
+-
+-	return 0;
+-}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000252.html">[Stgt-svn] r265 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000254.html">[Stgt-svn] r267 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#253">[ date ]</a>
+              <a href="thread.html#253">[ thread ]</a>
+              <a href="subject.html#253">[ subject ]</a>
+              <a href="author.html#253">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

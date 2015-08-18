@@ -1,0 +1,909 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r450 - in branches/use-scsi-ml: . istgt/usr usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r450%20-%20in%20branches/use-scsi-ml%3A%20.%20istgt/usr%20usr&In-Reply-To=%3C200605050914.k459ErKp001511%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000436.html">
+   <LINK REL="Next"  HREF="000438.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r450 - in branches/use-scsi-ml: . istgt/usr usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r450%20-%20in%20branches/use-scsi-ml%3A%20.%20istgt/usr%20usr&In-Reply-To=%3C200605050914.k459ErKp001511%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r450 - in branches/use-scsi-ml: . istgt/usr usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri May  5 11:14:53 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000436.html">[Stgt-svn] r449 - branches/use-scsi-ml/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000438.html">[Stgt-svn] r451 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#437">[ date ]</a>
+              <a href="thread.html#437">[ thread ]</a>
+              <a href="subject.html#437">[ subject ]</a>
+              <a href="author.html#437">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-05 11:14:39 +0200 (Fri, 05 May 2006)
+New Revision: 450
+
+Added:
+   branches/use-scsi-ml/istgt/usr/libistgt.c
+Modified:
+   branches/use-scsi-ml/initd
+   branches/use-scsi-ml/istgt/usr/Makefile
+   branches/use-scsi-ml/istgt/usr/iscsid.h
+   branches/use-scsi-ml/istgt/usr/istgt.c
+   branches/use-scsi-ml/istgt/usr/netlink.c
+   branches/use-scsi-ml/istgt/usr/target.c
+   branches/use-scsi-ml/usr/mgmt.c
+Log:
+tgtadm requests go to istgtd through tgtd by using ipc. We need to
+find a better way later on.
+
+
+Modified: branches/use-scsi-ml/initd
+===================================================================
+--- branches/use-scsi-ml/initd	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/initd	2006-05-05 09:14:39 UTC (rev 450)
+@@ -7,7 +7,7 @@
+ MEM_SIZE=1048576
+ export LD_LIBRARY_PATH=${PWD}/usr:${PWD}/istgt/usr:${PWD}/ibmvstgt/usr:${LD_LIBRARY_PATH}
+ 
+-if [ -f ${PWD}/istgt/kernel/istgt.ko ] ; then
++if [ -f ${PWD}/istgt/kernel/istgt_tcp.ko ] ; then
+ 	TARGET=istgt
+ fi
+ 
+@@ -17,7 +17,10 @@
+ 
+ 	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+ 		modprobe -q crc32c
+-		insmod ${PWD}/istgt/kernel/istgt.ko
++		insmod ${PWD}/istgt/kernel/scsi_transport_iscsi.ko
++		insmod ${PWD}/istgt/kernel/libiscsi.ko
++		insmod ${PWD}/istgt/kernel/istgt_tcp.ko
++		${PWD}/istgt/usr/istgtd
+ 	else
+ 		insmod ${PWD}/ibmvstgt/kernel/libsrp.ko
+ 		insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
+@@ -26,19 +29,13 @@
+ 	${PWD}/usr/tgtd -d0
+ 
+ 	sleep 1
+-
+-	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+-		echo &quot;Start istgt&quot;    
+-#		${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+-#		${PWD}/usr/tgtadm --driver istgt --op bind --tid 1 --hostno 1
+-#		${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --lun 0 --params Path=/dev/sdb1
+-	fi
+ }
+ 	
+ stop_server()
+ {
+ 	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+ 		${PWD}/usr/tgtadm --driver istgt --op delete
++		killall -9 istgtd
+ 	else
+ 		${PWD}/usr/tgtadm --driver ibmvstgt --op delete
+ 	fi
+@@ -48,7 +45,9 @@
+ 	sleep 1
+ 
+ 	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+-		rmmod istgt
++		rmmod istgt_tcp
++		rmmod libiscsi
++		rmmod scsi_transport_iscsi
+ 	else
+ 		rmmod libsrp
+ 		rmmod ibmvstgt
+
+Modified: branches/use-scsi-ml/istgt/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/Makefile	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/Makefile	2006-05-05 09:14:39 UTC (rev 450)
+@@ -1,9 +1,11 @@
+ CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../include -I../../include -I../../usr
+ LIBS = -lcrypto
+-OBJS = param.o iscsid.o session.o target.o chap.o ctldev.o
+-SHAREDLIB = istgt.so
++OBJS = libistgt.o
++SHAREDLIB = libistgt.so
+ DAEMON = istgtd
+ 
++all: $(DAEMON) $(SHAREDLIB)
++
+ $(DAEMON): log.o istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o
+ 	$(CC) $^ -o $@ $(LIBS)
+ 
+
+Modified: branches/use-scsi-ml/istgt/usr/iscsid.h
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/iscsid.h	2006-05-05 09:14:39 UTC (rev 450)
+@@ -20,13 +20,14 @@
+ #include &lt;scsi/iscsi_proto.h&gt;
+ 
+ #define ISCSI_NAME_LEN 255
++#define ISTGT_NAMESPACE &quot;ISTGT_ABSTRACT_NAMESPACE&quot;
+ 
+ #define DIGEST_ALL	(DIGEST_NONE | DIGEST_CRC32C)
+ #define DIGEST_NONE		(1 &lt;&lt; 0)
+ #define DIGEST_CRC32C           (1 &lt;&lt; 1)
+ 
+ extern uint64_t thandle;
+-extern int nl_fd;
++extern int nl_fd, ipc_fd;
+ 
+ #define sid64(isid, tsih)					\
+ ({								\
+@@ -191,6 +192,9 @@
+ struct target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
++extern void ipc_event(void);
++extern int ipc_init(void);
++
+ /* netlink.c */
+ struct iscsi_kernel_interface {
+ 	int (*set_param) (uint64_t transport_handle, uint32_t sid,
+
+Modified: branches/use-scsi-ml/istgt/usr/istgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/istgt.c	2006-05-05 09:14:39 UTC (rev 450)
+@@ -41,7 +41,8 @@
+ 
+ enum {
+ 	POLL_LISTEN,
+-	POLL_NL = POLL_LISTEN + LISTEN_MAX,
++	POLL_IPC = POLL_LISTEN + LISTEN_MAX,
++	POLL_NL,
+ 	POLL_INCOMING,
+ 	POLL_MAX = POLL_INCOMING + INCOMING_MAX,
+ };
+@@ -50,7 +51,7 @@
+ static struct connection *incoming[INCOMING_MAX];
+ static char program_name[] = &quot;istgt&quot;;
+ uint64_t thandle;
+-int nl_fd;
++int nl_fd, ipc_fd;
+ 
+ static void set_non_blocking(int fd)
+ {
+@@ -59,9 +60,9 @@
+ 	if (res != -1) {
+ 		res = fcntl(fd, F_SETFL, res | O_NONBLOCK);
+ 		if (res)
+-			dprintf(&quot;unable to set fd flags (%s)!&quot;, strerror(errno));
++			dprintf(&quot;unable to set fd flags (%s)!\n&quot;, strerror(errno));
+ 	} else
+-		dprintf(&quot;unable to get fd flags (%s)!&quot;, strerror(errno));
++		dprintf(&quot;unable to get fd flags (%s)!\n&quot;, strerror(errno));
+ }
+ 
+ static void listen_socket_create(struct pollfd *pfds)
+@@ -78,14 +79,14 @@
+ 	hints.ai_flags = AI_PASSIVE;
+ 
+ 	if (getaddrinfo(NULL, servname, &amp;hints, &amp;res0)) {
+-		eprintf(&quot;unable to get address info (%s)!&quot;, strerror(errno));
++		eprintf(&quot;unable to get address info (%s)!\n&quot;, strerror(errno));
+ 		exit(1);
+ 	}
+ 
+ 	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
+ 		sock = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 		if (sock &lt; 0) {
+-			eprintf(&quot;unable to create server socket (%s) %d %d %d!&quot;,
++			eprintf(&quot;unable to create server socket (%s) %d %d %d!\n&quot;,
+ 				  strerror(errno), res-&gt;ai_family,
+ 				  res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 			continue;
+@@ -93,7 +94,7 @@
+ 
+ 		opt = 1;
+ 		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &amp;opt, sizeof(opt)))
+-			dprintf(&quot;unable to set SO_REUSEADDR on server socket (%s)!&quot;,
++			dprintf(&quot;unable to set SO_REUSEADDR on server socket (%s)!\n&quot;,
+ 				    strerror(errno));
+ 		opt = 1;
+ 		if (res-&gt;ai_family == AF_INET6 &amp;&amp;
+@@ -101,12 +102,12 @@
+ 			continue;
+ 
+ 		if (bind(sock, res-&gt;ai_addr, res-&gt;ai_addrlen)) {
+-			eprintf(&quot;unable to bind server socket (%s)!&quot;, strerror(errno));
++			eprintf(&quot;unable to bind server socket (%s)!\n&quot;, strerror(errno));
+ 			continue;
+ 		}
+ 
+ 		if (listen(sock, INCOMING_MAX)) {
+-			eprintf(&quot;unable to listen to server socket (%s)!&quot;, strerror(errno));
++			eprintf(&quot;unable to listen to server socket (%s)!\n&quot;, strerror(errno));
+ 			continue;
+ 		}
+ 
+@@ -132,7 +133,7 @@
+ 	namesize = sizeof(from);
+ 	if ((fd = accept(afd, (struct sockaddr *) &amp;from, &amp;namesize)) &lt; 0) {
+ 		if (errno != EINTR &amp;&amp; errno != EAGAIN) {
+-			eprintf(&quot;accept(incoming_socket)&quot;);
++			eprintf(&quot;accept(incoming_socket)\n&quot;);
+ 			exit(1);
+ 		}
+ 		return;
+@@ -149,7 +150,7 @@
+ 
+ 	conn = conn_alloc();
+ 	if (!conn) {
+-		eprintf(&quot;fail to allocate %s&quot;, &quot;conn\n&quot;);
++		eprintf(&quot;fail to allocate conn\n&quot;);
+ 		goto out;
+ 	}
+ 	conn-&gt;fd = fd;
+@@ -179,6 +180,12 @@
+ 			accept_connection(pfds, pfds[POLL_LISTEN + i].fd);
+ 	}
+ 
++/* 	if (pfd[POLL_NL].revents) */
++/* 		handle_iscsi_events(nl_fd); */
++
++	if (pfds[POLL_IPC].revents)
++		ipc_event();
++
+ 	for (i = 0; i &lt; INCOMING_MAX; i++) {
+ 		conn = incoming[i];
+ 		pfd = &amp;pfds[POLL_INCOMING + i];
+@@ -301,7 +308,7 @@
+ 		}
+ 
+ 		if (conn-&gt;state == STATE_CLOSE) {
+-			log_debug(&quot;connection closed&quot;);
++			dprintf(&quot;connection closed\n&quot;);
+ 			conn_free_pdu(conn);
+ 			conn_free(conn);
+ 			close(pfd-&gt;fd);
+@@ -315,6 +322,11 @@
+ {
+ 	int i, err;
+ 
++	pfd[POLL_NL].fd = nl_fd;
++	pfd[POLL_NL].events = POLLIN;
++	pfd[POLL_IPC].fd = ipc_fd;
++	pfd[POLL_IPC].events = POLLIN;
++
+ 	listen_socket_create(pfd + POLL_LISTEN);
+ 
+ 	for (i = 0; i &lt; INCOMING_MAX; i++) {
+@@ -371,6 +383,10 @@
+ 	if (err)
+ 		exit(1);
+ 
++	err = ipc_init();
++	if (err)
++		exit(1);
++
+ 	event_loop();
+ 
+ 	return 0;
+
+Added: branches/use-scsi-ml/istgt/usr/libistgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/libistgt.c	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/libistgt.c	2006-05-05 09:14:39 UTC (rev 450)
+@@ -0,0 +1,86 @@
++/*
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published
++ * by the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ *
++ * See the file COPYING included with this distribution for more details.
++ */
++
++#include &lt;ctype.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;dirent.h&gt;
++
++#include &lt;sys/ioctl.h&gt;
++#include &lt;sys/types.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/socket.h&gt;
++#include &lt;sys/un.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;linux/types.h&gt;
++#include &lt;linux/netlink.h&gt;
++
++#include &quot;iscsid.h&quot;
++#include &quot;tgtadm.h&quot;
++
++static int ipc_connect(void)
++{
++	int fd, err;
++	struct sockaddr_un addr;
++
++	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (fd &lt; 0)
++		return fd;
++
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.sun_family = AF_LOCAL;
++	memcpy((char *) &amp;addr.sun_path + 1, ISTGT_NAMESPACE, strlen(ISTGT_NAMESPACE));
++
++	if ((err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
++		fd = err;
++
++	return fd;
++}
++
++int ipc_mgmt(char *sbuf, char *rbuf)
++{
++	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
++	struct tgtadm_req *req;
++	int err = -EINVAL, fd;
++	char *params;
++
++	req = NLMSG_DATA(nlh);
++	params = (char *) req + sizeof(*req);
++
++	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
++		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
++
++	fd = ipc_connect();
++	if (fd &lt; 0) {
++		eprintf(&quot;cannot connect istgtd\n&quot;);
++		return fd;
++	}
++
++	err = write(fd, sbuf, nlh-&gt;nlmsg_len);
++	if (err &lt; 0) {
++		eprintf(&quot;cannot connect istgtd\n&quot;);
++		goto out;
++	}
++
++out:
++	close(fd);
++
++	return err;
++}
+
+Modified: branches/use-scsi-ml/istgt/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/netlink.c	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/netlink.c	2006-05-05 09:14:39 UTC (rev 450)
+@@ -35,15 +35,13 @@
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
++#include &quot;tgtadm.h&quot;
+ 
+ #define NL_BUFSIZE 4096
+ 
+ static struct sockaddr_nl saddr, daddr;
+ 
+ #if 0
+-extern struct qelem targets_list;
+-static int typeid;
+-
+ void async_event(char *data)
+ {
+ 	struct tgt_event *ev = (struct tgt_event *) data;
+@@ -68,247 +66,6 @@
+ 		break;
+ 	}
+ }
+-
+-static int iscsi_param_set(int tid, uint64_t sid, int type, uint32_t partial,
+-			   struct iscsi_param *param)
+-{
+-	struct iet_msg *msg;
+-	struct nlmsghdr *nlh;
+-	struct iscsi_param_info *info;
+-	int err, i;
+-
+-	nlh = get_iet_msg(tid, &amp;msg);
+-	if (!nlh)
+-		return -ENOMEM;
+-
+-	info = &amp;msg-&gt;u.param_info;
+-	info-&gt;tid = tid;
+-	info-&gt;sid = sid;
+-	info-&gt;param_type = type;
+-	info-&gt;partial = partial;
+-
+-	if (type == key_session)
+-		for (i = 0; i &lt; session_key_last; i++)
+-			info-&gt;session_param[i] = param[i].val;
+-	else
+-		for (i = 0; i &lt; target_key_last; i++)
+-			info-&gt;target_param[i] = param[i].val;
+-	msg-&gt;msg_type = IET_ISCSI_PARAM_SET;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	if (err)
+-		eprintf(&quot;%d %d %u %&quot; PRIx64 &quot;%d %u\n&quot;,
+-			err, errno, tid, sid, type, partial);
+-	free(nlh);
+-	return err;
+-}
+-
+-static int iscsi_param_partial_set(int tid, uint64_t sid, int type, int key,
+-				   uint32_t val)
+-{
+-	struct iscsi_param *param;
+-	struct iscsi_param s_param[session_key_last];
+-	struct iscsi_param t_param[target_key_last];
+-
+-	if (type == key_session)
+-		param = s_param;
+-	else
+-		param = t_param;
+-
+-	param[key].val = val;
+-
+-	return iscsi_param_set(tid, sid, type, 1 &lt;&lt; key, param);
+-}
+-
+-static int trgt_mgmt_params(int tid, uint64_t sid, char *params)
+-{
+-	char *p, *q;
+-	uint32_t s_partial = 0, t_partial = 0;
+-	struct iscsi_param s_param[session_key_last];
+-	struct iscsi_param t_param[target_key_last];
+-
+-	while ((p = strsep(&amp;params, &quot;,&quot;)) != NULL) {
+-		int idx;
+-		uint32_t val;
+-		if (!*p)
+-			continue;
+-		if (!(q = strchr(p, '=')))
+-			continue;
+-		*q++ = '\0';
+-		val = strtol(q, NULL, 0);
+-
+-		if (!((idx = param_index_by_name(p, target_keys)) &lt; 0)) {
+-			if (!param_check_val(target_keys, idx, &amp;val))
+-				t_partial |= (1 &lt;&lt; idx);
+-			else
+-				eprintf(&quot;invalid val %s, %u\n&quot;,
+-					target_keys[idx].name, val);
+-			t_param[idx].val = val;
+-
+-			continue;
+-		}
+-
+-		if (!((idx = param_index_by_name(p, session_keys)) &lt; 0)) {
+-			if (!param_check_val(session_keys, idx, &amp;val))
+-				s_partial |= (1 &lt;&lt; idx);
+-			else
+-				eprintf(&quot;invalid val %s, %u\n&quot;,
+-					session_keys[idx].name, val);
+-			s_param[idx].val = val;
+-		}
+-	}
+-
+-	if (t_partial &amp;&amp; s_partial) {
+-		eprintf(&quot;%s&quot;, &quot;Cannot change both at the same time\n&quot;);
+-		return -EINVAL;
+-	} else if (t_partial)
+-		return iscsi_param_set(tid, sid, key_target, t_partial, t_param);
+-	else if (s_partial)
+-		return iscsi_param_set(tid, sid, key_session, s_partial, s_param);
+-	else
+-		eprintf(&quot;%s&quot;, &quot;Nothing to do\n&quot;);
+-
+-	return 0;
+-}
+-
+-static int istgt_ktarget_destroy(int tid)
+-{
+-	int err;
+-	struct target* target;
+-
+-	if (!(target = target_find_by_id(tid)))
+-		return -ENOENT;
+-
+-	if (target-&gt;nr_sessions)
+-		return -EBUSY;
+-
+-	if (!list_empty(&amp;target-&gt;sessions_list)) {
+-		eprintf(&quot;bug still have sessions %d\n&quot;, tid);
+-		exit(-1);
+-	}
+-
+-	err = ktarget_destroy(tid);
+-	if (err &lt; 0)
+-		return err;
+-
+-	remque(&amp;target-&gt;tlist);
+-
+-	free(target);
+-
+-	return 0;
+-}
+-
+-static int istgt_ktarget_create(int typeid, char *name)
+-{
+-	struct target *target;
+-	int err;
+-
+-	if (!name)
+-		return -EINVAL;
+-
+-	if (!(target = malloc(sizeof(*target))))
+-		return -ENOMEM;
+-
+-	memset(target, 0, sizeof(*target));
+-	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+-
+-	err = ktarget_create(typeid);
+-	if (err &lt; 0) {
+-		eprintf(&quot;can't create a target %d\n&quot;, err);
+-		goto out;
+-	}
+-
+-	INIT_LIST_HEAD(&amp;target-&gt;tlist);
+-	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
+-	target-&gt;tid = err;
+-	insque(&amp;target-&gt;tlist, &amp;targets_list);
+-
+-	return err;
+-out:
+-	free(target);
+-	return err;
+-}
+-
+-static int istgt_target_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	int err = -EINVAL, tid = req-&gt;tid;
+-
+-	switch (req-&gt;op) {
+-	case OP_NEW:
+-		err = istgt_ktarget_create(typeid, params);
+-		break;
+-	case OP_DELETE:
+-		err = istgt_ktarget_destroy(tid);
+-		break;
+-	case OP_UPDATE:
+-		err = trgt_mgmt_params(tid, req-&gt;sid, params);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	return err;
+-}
+-
+-static int user_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int conn_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-static int session_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	return 0;
+-}
+-
+-int ipc_mgmt(char *sbuf, char *rbuf)
+-{
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+-	struct tgtadm_req *req;
+-	struct tgtadm_res *res;
+-	int err = -EINVAL, rlen = 0;
+-	char *params;
+-
+-	req = NLMSG_DATA(nlh);
+-	params = (char *) req + sizeof(*req);
+-
+-	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
+-		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
+-
+-	switch (req-&gt;mode) {
+-	case MODE_DEVICE:
+-	case MODE_SYSTEM:
+-		err = tgt_mgmt(sbuf, rbuf);
+-		break;
+-	case MODE_TARGET:
+-		err = istgt_target_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_SESSION:
+-		err = session_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_CONNECTION:
+-		err = conn_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	case MODE_USER:
+-		err = user_mgmt(req, params, rbuf, &amp;rlen);
+-		break;
+-	default:
+-		eprintf(&quot;Unknown mode %d\n&quot;, req-&gt;mode);
+-		break;
+-	}
+-
+-	nlh = (struct nlmsghdr *) rbuf;
+-	nlh-&gt;nlmsg_len = NLMSG_LENGTH(rlen);
+-	res = NLMSG_DATA(nlh);
+-	res-&gt;err = err;
+-
+-	return err;
+-}
+-
+ #endif
+ 
+ static int __nl_read(int fd, void *data, int size, int flags)
+
+Modified: branches/use-scsi-ml/istgt/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/istgt/usr/target.c	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/istgt/usr/target.c	2006-05-05 09:14:39 UTC (rev 450)
+@@ -10,7 +10,11 @@
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;sys/un.h&gt;
++#include &lt;linux/netlink.h&gt;
++#include &lt;sys/socket.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+@@ -57,3 +61,180 @@
+ 
+ 	return NULL;
+ }
++
++static int destroy_target(int tid)
++{
++	struct target* target;
++
++	if (!(target = target_find_by_id(tid)))
++		return -ENOENT;
++
++	if (target-&gt;nr_sessions)
++		return -EBUSY;
++
++	if (!list_empty(&amp;target-&gt;sessions_list)) {
++		eprintf(&quot;bug still have sessions %d\n&quot;, tid);
++		exit(-1);
++	}
++
++	remque(&amp;target-&gt;tlist);
++
++	free(target);
++
++	return 0;
++}
++
++static int create_target(int tid, char *name)
++{
++	struct target *target;
++
++	if (!name)
++		return -EINVAL;
++
++	dprintf(&quot;%d %s\n&quot;, tid, name);
++
++	if (!(target = malloc(sizeof(*target))))
++		return -ENOMEM;
++
++	memset(target, 0, sizeof(*target));
++	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
++
++	INIT_LIST_HEAD(&amp;target-&gt;tlist);
++	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
++	target-&gt;tid = tid;
++	insque(&amp;target-&gt;tlist, &amp;targets_list);
++
++	return 0;
++}
++
++static int istgt_target_mgmt(struct tgtadm_req *req, char *params)
++{
++	int err = -EINVAL, tid = req-&gt;tid;
++
++	switch (req-&gt;op) {
++	case OP_NEW:
++		err = create_target(tid, params);
++		break;
++	case OP_DELETE:
++		err = destroy_target(tid);
++		break;
++	default:
++		break;
++	}
++
++	return err;
++}
++
++static int ipc_accept(int afd)
++{
++	struct sockaddr addr;
++	socklen_t len;
++
++	len = sizeof(addr);
++	return accept(afd, (struct sockaddr *) &amp;addr, &amp;len);
++}
++
++static int ipc_perm(int fd)
++{
++	struct ucred cred;
++	socklen_t len;
++	int err;
++
++	len = sizeof(cred);
++	err = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, (void *) &amp;cred, &amp;len);
++	if (err &lt; 0)
++		goto out;
++
++	if (cred.uid || cred.gid) {
++		err = -EPERM;
++		goto out;
++	}
++out:
++	return err;
++}
++
++void ipc_event(void)
++{
++	int fd, err;
++	char sbuf[4096], rbuf[4096];
++	struct nlmsghdr *nlh;
++	struct iovec iov;
++	struct msghdr msg;
++	struct tgtadm_req *req;
++
++	dprintf(&quot;ipc\n&quot;);
++
++	fd = ipc_accept(ipc_fd);
++	if (fd &lt; 0) {
++		eprintf(&quot;%d\n&quot;, fd);
++		return;
++	}
++
++	err = ipc_perm(fd);
++	if (err &lt; 0)
++		goto fail;
++
++	memset(sbuf, 0, sizeof(sbuf));
++	memset(rbuf, 0, sizeof(rbuf));
++
++	nlh = (struct nlmsghdr *) sbuf;
++	iov.iov_base = nlh;
++	iov.iov_len = NLMSG_ALIGN(sizeof(struct nlmsghdr));
++	memset(&amp;msg, 0, sizeof(msg));
++	msg.msg_iov = &iov;
++	msg.msg_iovlen = 1;
++
++	err = recvmsg(fd, &amp;msg, MSG_PEEK);
++	if (err != NLMSG_ALIGN(sizeof(struct nlmsghdr))) {
++		err = -EIO;
++		goto fail;
++	}
++
++	iov.iov_base = nlh;
++	iov.iov_len = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
++	memset(&amp;msg, 0, sizeof(msg));
++	msg.msg_iov = &iov;
++	msg.msg_iovlen = 1;
++
++	err = recvmsg(fd, &amp;msg, MSG_DONTWAIT);
++	if (err &lt; 0)
++		goto fail;
++
++	req = NLMSG_DATA(nlh);
++	dprintf(&quot;%d %d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
++
++	if (req-&gt;mode == MODE_TARGET)
++		err = istgt_target_mgmt(req, (char *) req + sizeof(*req));
++
++fail:
++	if (fd &gt; 0)
++		close(fd);
++
++	return;
++}
++
++/* should be moved somewhere */
++int ipc_init(void)
++{
++	int fd, err;
++	struct sockaddr_un addr;
++
++	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
++	if (fd &lt; 0)
++		return fd;
++
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.sun_family = AF_LOCAL;
++	memcpy((char *) &amp;addr.sun_path + 1, ISTGT_NAMESPACE,
++	       strlen(ISTGT_NAMESPACE));
++
++	if ((err = bind(fd, (struct sockaddr *) &amp;addr, sizeof(addr))) &lt; 0)
++		return err;
++
++	if ((err = listen(fd, 32)) &lt; 0)
++		return err;
++
++	ipc_fd = fd;
++
++	return 0;
++}
+
+Modified: branches/use-scsi-ml/usr/mgmt.c
+===================================================================
+--- branches/use-scsi-ml/usr/mgmt.c	2006-05-04 17:53:08 UTC (rev 449)
++++ branches/use-scsi-ml/usr/mgmt.c	2006-05-05 09:14:39 UTC (rev 450)
+@@ -224,11 +224,13 @@
+ 	req = NLMSG_DATA(nlh);
+ 	dprintf(&quot;%d %d %d %d %d\n&quot;, req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
+ 
++	err = tgt_mgmt((char *) nlh, rbuf);
++	if (err)
++		eprintf(&quot;%d %d %d %d %d\n&quot;,
++			req-&gt;mode, req-&gt;typeid, err, nlh-&gt;nlmsg_len, fd);
+ 	fn = dl_fn(dinfo, req-&gt;typeid, DL_FN_IPC_MGMT);
+ 	if (fn)
+ 		err = fn((char *) nlh, rbuf);
+-	else
+-		err = tgt_mgmt((char *) nlh, rbuf);
+ 
+ send:
+ 	err = write(fd, nlh, nlh-&gt;nlmsg_len);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000436.html">[Stgt-svn] r449 - branches/use-scsi-ml/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000438.html">[Stgt-svn] r451 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#437">[ date ]</a>
+              <a href="thread.html#437">[ thread ]</a>
+              <a href="subject.html#437">[ subject ]</a>
+              <a href="author.html#437">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

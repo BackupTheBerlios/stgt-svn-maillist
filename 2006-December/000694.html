@@ -1,0 +1,164 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r707 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r707%20-%20trunk/usr&In-Reply-To=%3C200612250356.kBP3uE8p007017%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000693.html">
+   <LINK REL="Next"  HREF="000695.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r707 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r707%20-%20trunk/usr&In-Reply-To=%3C200612250356.kBP3uE8p007017%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r707 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Dec 25 04:56:14 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000693.html">[Stgt-svn] r706 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000695.html">[Stgt-svn] r708 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#694">[ date ]</a>
+              <a href="thread.html#694">[ thread ]</a>
+              <a href="subject.html#694">[ subject ]</a>
+              <a href="author.html#694">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-25 04:56:14 +0100 (Mon, 25 Dec 2006)
+New Revision: 707
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Rename tgtadm_res tgtadm_rsp
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-12-24 16:58:58 UTC (rev 706)
++++ trunk/usr/mgmt.c	2006-12-25 03:56:14 UTC (rev 707)
+@@ -56,10 +56,10 @@
+ 	char *buf;
+ /* 	struct tgt_work work; */
+ 	struct tgtadm_req *req;
+-	struct tgtadm_res *rsp;
++	struct tgtadm_rsp *rsp;
+ };
+ 
+-static void set_show_results(struct tgtadm_res *res, int *err)
++static void set_show_results(struct tgtadm_rsp *res, int *err)
+ {
+ 	if (err &lt; 0)
+ 		res-&gt;err = *err;
+@@ -71,7 +71,7 @@
+ }
+ 
+ static int target_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+-		       struct tgtadm_res *res, int *rlen)
++		       struct tgtadm_rsp *res, int *rlen)
+ {
+ 	int err = -EINVAL;
+ 
+@@ -130,7 +130,7 @@
+ }
+ 
+ static int device_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+-		       struct tgtadm_res *res, int *rlen)
++		       struct tgtadm_rsp *res, int *rlen)
+ {
+ 	int err = -EINVAL;
+ 
+@@ -162,7 +162,7 @@
+ 	return err;
+ }
+ 
+-static int tgt_mgmt(struct tgtadm_req *req, struct tgtadm_res *res, int len)
++static int tgt_mgmt(struct tgtadm_req *req, struct tgtadm_rsp *res, int len)
+ {
+ 	int lld_no, err = -EINVAL;
+ 	char *params = (char *) req-&gt;data;
+@@ -256,7 +256,7 @@
+ 	char *pdu;
+ 	struct mgmt_task *mtask = data;
+ 	struct tgtadm_req *req = (struct tgtadm_req *) mtask-&gt;buf;
+-	struct tgtadm_res *rsp = (struct tgtadm_res *) mtask-&gt;buf;
++	struct tgtadm_rsp *rsp = (struct tgtadm_rsp *) mtask-&gt;buf;
+ 
+ 	switch (mtask-&gt;mtask_state) {
+ 	case MTASK_STATE_HDR_RECV:
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-24 16:58:58 UTC (rev 706)
++++ trunk/usr/tgtadm.c	2006-12-25 03:56:14 UTC (rev 707)
+@@ -162,7 +162,7 @@
+ 
+ static int ipc_mgmt_res(int fd)
+ {
+-	struct tgtadm_res *res;
++	struct tgtadm_rsp *res;
+ 	char buf[BUFSIZE];
+ 	int err, len;
+ 
+@@ -172,7 +172,7 @@
+ 		return -1;
+ 	}
+ 
+-	res = (struct tgtadm_res *) buf;
++	res = (struct tgtadm_rsp *) buf;
+ 	if (res-&gt;err) {
+ 		eprintf(&quot;Error %d\n&quot;, res-&gt;err);
+ 		return -1;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-24 16:58:58 UTC (rev 706)
++++ trunk/usr/tgtadm.h	2006-12-25 03:56:14 UTC (rev 707)
+@@ -51,7 +51,7 @@
+ 	uint64_t data[0];
+ };
+ 
+-struct tgtadm_res {
++struct tgtadm_rsp {
+ 	uint32_t err;
+ 	uint32_t len;
+ 	uint64_t data[0];
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000693.html">[Stgt-svn] r706 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000695.html">[Stgt-svn] r708 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#694">[ date ]</a>
+              <a href="thread.html#694">[ thread ]</a>
+              <a href="subject.html#694">[ subject ]</a>
+              <a href="author.html#694">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

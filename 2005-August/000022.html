@@ -1,0 +1,197 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r28 - in trunk/iscsi: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r28%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508301723.j7UHNmYc024274%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000021.html">
+   <LINK REL="Next"  HREF="000023.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r28 - in trunk/iscsi: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r28%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200508301723.j7UHNmYc024274%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r28 - in trunk/iscsi: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Aug 30 19:23:48 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000021.html">[Stgt-svn] r27 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000023.html">[Stgt-svn] r29 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#22">[ date ]</a>
+              <a href="thread.html#22">[ thread ]</a>
+              <a href="subject.html#22">[ subject ]</a>
+              <a href="author.html#22">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-30 19:23:46 +0200 (Tue, 30 Aug 2005)
+New Revision: 28
+
+Modified:
+   trunk/iscsi/include/iet_u.h
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/iscsi/usr/ctldev.c
+Log:
+Kill iscsi_target-&gt;name.
+
+Modified: trunk/iscsi/include/iet_u.h
+===================================================================
+--- trunk/iscsi/include/iet_u.h	2005-08-30 15:39:21 UTC (rev 27)
++++ trunk/iscsi/include/iet_u.h	2005-08-30 17:23:46 UTC (rev 28)
+@@ -11,8 +11,7 @@
+ #define SCSI_ID_LEN	24
+ 
+ struct target_info {
+-	u32 tid;
+-	char name[ISCSI_NAME_LEN];
++	int tid;
+ };
+ 
+ struct session_info {
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-08-30 15:39:21 UTC (rev 27)
++++ trunk/iscsi/kernel/iscsi.h	2005-08-30 17:23:46 UTC (rev 28)
+@@ -64,11 +64,9 @@
+ };
+ 
+ struct iscsi_target {
++	int tid;
+ 	struct list_head t_list;
+-	u32 tid;
+ 
+-	char name[ISCSI_NAME_LEN];
+-
+ 	struct iscsi_sess_param sess_param;
+ 	struct iscsi_trgt_param trgt_param;
+ 
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-08-30 15:39:21 UTC (rev 27)
++++ trunk/iscsi/kernel/target.c	2005-08-30 17:23:46 UTC (rev 28)
+@@ -75,17 +75,6 @@
+ 	return NULL;
+ }
+ 
+-static struct iscsi_target *__target_lookup_by_name(char *name)
+-{
+-	struct iscsi_target *target;
+-
+-	list_for_each_entry(target, &amp;target_list, t_list) {
+-		if (!strcmp(target-&gt;name, name))
+-			return target;
+-	}
+-	return NULL;
+-}
+-
+ struct iscsi_target *target_lookup_by_id(u32 id)
+ {
+ 	struct iscsi_target *target;
+@@ -114,17 +103,9 @@
+ 
+ static int iscsi_target_create(struct target_info *info)
+ {
+-	int err = -EINVAL, len;
+-	char *name = info-&gt;name;
++	int err = -EINVAL;
+ 	struct iscsi_target *target;
+ 
+-	dprintk(D_SETUP, &quot;%s\n&quot;, name);
+-
+-	if (!(len = strlen(name))) {
+-		eprintk(&quot;%s&quot;, &quot;The length of the target name is zero&quot;);
+-		return err;
+-	}
+-
+ 	if (!(target = kmalloc(sizeof(*target), GFP_KERNEL))) {
+ 		err = -ENOMEM;
+ 		goto out;
+@@ -134,8 +115,6 @@
+ 	memcpy(&amp;target-&gt;sess_param, &amp;default_session_param, sizeof(default_session_param));
+ 	memcpy(&amp;target-&gt;trgt_param, &amp;default_target_param, sizeof(default_target_param));
+ 
+-	strncpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+-
+ 	init_MUTEX(&amp;target-&gt;target_sem);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;session_list);
+@@ -150,7 +129,6 @@
+ 
+ 	target-&gt;stt = stgt_target_create(&quot;iet&quot;, DEFAULT_NR_QUEUED_CMNDS);
+ 
+-	/* FIXME: We shouldn't access stt inside. */
+ 	target-&gt;tid = info-&gt;tid = target-&gt;stt-&gt;tid;
+ 
+ 	return 0;
+@@ -171,9 +149,6 @@
+ 		goto out;
+ 	}
+ 
+-	if (__target_lookup_by_name(info-&gt;name))
+-		goto out;
+-
+ 	if (info-&gt;tid)
+ 		goto out;
+ 
+@@ -240,7 +215,7 @@
+ 		return err;
+ 
+ 	list_for_each_entry(target, &amp;target_list, t_list) {
+-		seq_printf(seq, &quot;tid:%u name:%s\n&quot;, target-&gt;tid, target-&gt;name);
++		seq_printf(seq, &quot;tid:%u\n&quot;, target-&gt;tid);
+ 
+ 		if ((err = target_lock(target, 1)) &lt; 0)
+ 			break;
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-08-30 15:39:21 UTC (rev 27)
++++ trunk/iscsi/usr/ctldev.c	2005-08-30 17:23:46 UTC (rev 28)
+@@ -89,7 +89,6 @@
+ 
+ 	memset(&amp;info, 0, sizeof(info));
+ 
+-	memcpy(info.name, name, sizeof(info.name) - 1);
+ 	info.tid = *tid;
+ 	if ((err = ioctl(ctrl_fd, ADD_TARGET, &amp;info)) &lt; 0)
+ 		log_warning(&quot;can't create a target %d %u\n&quot;, errno, info.tid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000021.html">[Stgt-svn] r27 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000023.html">[Stgt-svn] r29 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#22">[ date ]</a>
+              <a href="thread.html#22">[ thread ]</a>
+              <a href="subject.html#22">[ subject ]</a>
+              <a href="author.html#22">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,151 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r135 - in trunk: ibmvstgt istgt
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r135%20-%20in%20trunk%3A%20ibmvstgt%20istgt&In-Reply-To=%3C200510281540.j9SFeCwR000148%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000128.html">
+   <LINK REL="Next"  HREF="000130.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r135 - in trunk: ibmvstgt istgt</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r135%20-%20in%20trunk%3A%20ibmvstgt%20istgt&In-Reply-To=%3C200510281540.j9SFeCwR000148%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r135 - in trunk: ibmvstgt istgt">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 17:40:12 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000128.html">[Stgt-svn] r134 - trunk/ibmvstgt
+</A></li>
+        <LI>Next message: <A HREF="000130.html">[Stgt-svn] r136 - in trunk: . istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#129">[ date ]</a>
+              <a href="thread.html#129">[ thread ]</a>
+              <a href="subject.html#129">[ subject ]</a>
+              <a href="author.html#129">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 17:40:12 +0200 (Fri, 28 Oct 2005)
+New Revision: 135
+
+Modified:
+   trunk/ibmvstgt/Makefile
+   trunk/istgt/Makefile
+Log:
+Clean up Makefiles.
+
+
+Modified: trunk/ibmvstgt/Makefile
+===================================================================
+--- trunk/ibmvstgt/Makefile	2005-10-28 15:36:18 UTC (rev 134)
++++ trunk/ibmvstgt/Makefile	2005-10-28 15:40:12 UTC (rev 135)
+@@ -1,14 +1,9 @@
+-#
+-# Makefile for the Linux kernel device drivers.
+-#
+-# Note! Dependencies are done automagically by 'make dep', which also
+-# removes any old dependencies. DON'T put your own dependencies here
+-# unless it's something special (not a .c file).
+-#
+-# Note 2! The CFLAGS definitions are now in the main makefile.
+-
+ SUBDIRS := $(shell pwd)
+ 
++ifeq ($(KERNELSRC),)
++	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
++endif
++
+ all: mods
+ 
+ mods:
+
+Modified: trunk/istgt/Makefile
+===================================================================
+--- trunk/istgt/Makefile	2005-10-28 15:36:18 UTC (rev 134)
++++ trunk/istgt/Makefile	2005-10-28 15:40:12 UTC (rev 135)
+@@ -1,47 +1,17 @@
+-#
+-# Makefile for the Linux kernel device drivers.
+-#
+-# Note! Dependencies are done automagically by 'make dep', which also
+-# removes any old dependencies. DON'T put your own dependencies here
+-# unless it's something special (not a .c file).
+-#
+-# Note 2! The CFLAGS definitions are now in the main makefile.
+-
+-#export KERNELSRC := /usr/src/linux
+-
+ SUBDIRS := $(shell pwd)
+ 
+ ifeq ($(KERNELSRC),)
+ 	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+ endif
+ 
+-all: progs mods
++all: libs mods
+ 
+ mods:
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel modules
+ 
+-progs:
++libs:
+ 	$(MAKE) -C usr
+ 
+-install: kernel/iscsi_trgt.ko usr/ietd usr/ietadm
+-	@install -vD usr/ietd $(DISTDIR)/usr/sbin/ietd
+-	@install -vD usr/ietadm $(DISTDIR)/usr/sbin/ietadm
+-	if [ -f /etc/debian_version ]; then \
+-		install -vD -m 755 etc/initd/initd.debian $(DISTDIR)/etc/init.d/iscsi-target; \
+-	elif [ -f /etc/redhat-release ]; then \
+-		install -vD -m 755 etc/initd/initd.redhat $(DISTDIR)/etc/init.d/iscsi-target; \
+-	elif [ -f /etc/gentoo-release ]; then \
+-		install -vD -m 755 etc/initd/initd.gentoo $(DISTDIR)/etc/init.d/iscsi-target; \
+-	elif [ -f /etc/slackware-version ]; then \
+-		install -vD -m 755 etc/initd/initd $(DISTDIR)/etc/rc.d/iscsi-target; \
+-	else \
+-		install -vD -m 755 etc/initd/initd $(DISTDIR)/etc/init.d/iscsi-target; \
+-	fi
+-	@eval `sed -n 's/#define UTS_RELEASE /KERNELRELEASE=/p' $(KERNELSRC)/include/linux/version.h`; \
+-	install -vD kernel/iscsi_trgt.ko \
+-	$(DISTDIR)$(INSTALL_MOD_PATH)/lib/modules/$$KERNELRELEASE/kernel/iscsi/iscsi_trgt.ko
+-	-depmod -aq
+-
+ clean:
+ 	$(MAKE) -C usr clean
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel clean
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000128.html">[Stgt-svn] r134 - trunk/ibmvstgt
+</A></li>
+	<LI>Next message: <A HREF="000130.html">[Stgt-svn] r136 - in trunk: . istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#129">[ date ]</a>
+              <a href="thread.html#129">[ thread ]</a>
+              <a href="subject.html#129">[ subject ]</a>
+              <a href="author.html#129">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

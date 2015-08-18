@@ -1,0 +1,158 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r105 - in trunk/iscsi: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r105%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200509251200.j8PC0EXa016836%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000098.html">
+   <LINK REL="Next"  HREF="000100.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r105 - in trunk/iscsi: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r105%20-%20in%20trunk/iscsi%3A%20include%20kernel%20usr&In-Reply-To=%3C200509251200.j8PC0EXa016836%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r105 - in trunk/iscsi: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 14:00:14 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000098.html">[Stgt-svn] r104 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000100.html">[Stgt-svn] r106 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#99">[ date ]</a>
+              <a href="thread.html#99">[ thread ]</a>
+              <a href="subject.html#99">[ subject ]</a>
+              <a href="author.html#99">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 14:00:13 +0200 (Sun, 25 Sep 2005)
+New Revision: 105
+
+Modified:
+   trunk/iscsi/include/iet_u.h
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/iscsi/usr/ctldev.c
+   trunk/iscsi/usr/iscsid.h
+Log:
+Kill unused code.
+
+Modified: trunk/iscsi/include/iet_u.h
+===================================================================
+--- trunk/iscsi/include/iet_u.h	2005-09-25 11:44:19 UTC (rev 104)
++++ trunk/iscsi/include/iet_u.h	2005-09-25 12:00:13 UTC (rev 105)
+@@ -14,7 +14,6 @@
+ 	u32 tid;
+ 
+ 	u64 sid;
+-	char initiator_name[ISCSI_NAME_LEN];
+ 	u32 exp_cmd_sn;
+ 	u32 max_cmd_sn;
+ };
+@@ -59,7 +58,6 @@
+ };
+ 
+ enum {
+-	key_target_type,
+ 	key_queued_cmnds,
+ 	target_key_last,
+ };
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-25 11:44:19 UTC (rev 104)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-25 12:00:13 UTC (rev 105)
+@@ -39,7 +39,6 @@
+ };
+ 
+ struct iscsi_trgt_param {
+-	int target_type;
+ 	int queued_cmnds;
+ };
+ 
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-09-25 11:44:19 UTC (rev 104)
++++ trunk/iscsi/kernel/target.c	2005-09-25 12:00:13 UTC (rev 105)
+@@ -38,7 +38,6 @@
+ };
+ 
+ static struct iscsi_trgt_param default_target_param = {
+-	.target_type = 0,
+ 	.queued_cmnds = DEFAULT_NR_QUEUED_CMNDS,
+ };
+ 
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-09-25 11:44:19 UTC (rev 104)
++++ trunk/iscsi/usr/ctldev.c	2005-09-25 12:00:13 UTC (rev 105)
+@@ -221,7 +221,6 @@
+ 	info-&gt;sid = sid;
+ 	info-&gt;exp_cmd_sn = exp_cmd_sn;
+ 	info-&gt;max_cmd_sn = max_cmd_sn;
+-	strncpy(info-&gt;initiator_name, name, sizeof(info-&gt;initiator_name) - 1);
+ 	msg-&gt;msg_type = IET_ADD_SESSION;
+ 
+ 	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-09-25 11:44:19 UTC (rev 104)
++++ trunk/iscsi/usr/iscsid.h	2005-09-25 12:00:13 UTC (rev 105)
+@@ -197,18 +197,6 @@
+ /* param.c */
+ int param_index_by_name(char *name, struct iscsi_key *keys);
+ 
+-/* #define log_error(fmt, args...)						\ */
+-/* do {									\ */
+-/* } while (0) */
+-
+-/* #define log_warning(fmt, args...)					\ */
+-/* do {									\ */
+-/* } while (0) */
+-
+-/* #define log_debug(fmt, args...)						\ */
+-/* do {									\ */
+-/* } while (0) */
+-
+ #define log_pdu(x, y)							\
+ do {									\
+ } while (0)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000098.html">[Stgt-svn] r104 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000100.html">[Stgt-svn] r106 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#99">[ date ]</a>
+              <a href="thread.html#99">[ thread ]</a>
+              <a href="subject.html#99">[ subject ]</a>
+              <a href="author.html#99">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

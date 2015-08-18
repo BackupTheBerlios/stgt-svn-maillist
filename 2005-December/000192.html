@@ -1,0 +1,99 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r205 - in trunk: istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r205%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200512220041.jBM0fEUe023930%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000191.html">
+   <LINK REL="Next"  HREF="000193.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r205 - in trunk: istgt/kernel kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r205%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200512220041.jBM0fEUe023930%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r205 - in trunk: istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Dec 22 01:41:14 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000191.html">[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000193.html">[Stgt-svn] r206 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#192">[ date ]</a>
+              <a href="thread.html#192">[ thread ]</a>
+              <a href="subject.html#192">[ subject ]</a>
+              <a href="author.html#192">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-22 01:40:54 +0100 (Thu, 22 Dec 2005)
+New Revision: 205
+
+Modified:
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt_nl.c
+Log:
+Replace wrong eprintk with dprintk.
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-12-19 15:12:43 UTC (rev 204)
++++ trunk/istgt/kernel/iscsi.c	2005-12-22 00:40:54 UTC (rev 205)
+@@ -164,7 +164,7 @@
+ 	expsize = cmnd_read_size(cmnd);
+ 	BUG_ON(!cmnd-&gt;tc);
+ 	size = min(expsize, cmnd-&gt;tc-&gt;bufflen);
+-	eprintk(&quot;%u %u\n&quot;, expsize, cmnd-&gt;tc-&gt;bufflen);
++	dprintk(&quot;%u %u\n&quot;, expsize, cmnd-&gt;tc-&gt;bufflen);
+ 	offset = 0;
+ 	sn = 0;
+ 
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2005-12-19 15:12:43 UTC (rev 204)
++++ trunk/kernel/tgt_nl.c	2005-12-22 00:40:54 UTC (rev 205)
+@@ -196,7 +196,7 @@
+ 			rlen = skb-&gt;len;
+ 		err = event_recv_msg(skb, nlh);
+ 
+-		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
++		dprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+ 		/*
+ 		 * TODO for passthru commands the lower level should
+ 		 * probably handle the result or we should modify this
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000191.html">[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000193.html">[Stgt-svn] r206 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#192">[ date ]</a>
+              <a href="thread.html#192">[ thread ]</a>
+              <a href="subject.html#192">[ subject ]</a>
+              <a href="author.html#192">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

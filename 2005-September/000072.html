@@ -1,0 +1,172 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r79 - in trunk: iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r79%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509170456.j8H4ugxU000837%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000071.html">
+   <LINK REL="Next"  HREF="000073.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r79 - in trunk: iscsi/kernel kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r79%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509170456.j8H4ugxU000837%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r79 - in trunk: iscsi/kernel kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Sep 17 06:56:42 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000071.html">[Stgt-svn] r78 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000073.html">[Stgt-svn] r80 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#72">[ date ]</a>
+              <a href="thread.html#72">[ thread ]</a>
+              <a href="subject.html#72">[ subject ]</a>
+              <a href="author.html#72">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-17 06:56:28 +0200 (Sat, 17 Sep 2005)
+New Revision: 79
+
+Modified:
+   trunk/iscsi/kernel/event.c
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi_dbg.h
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_sysfs.c
+Log:
+make compile on 2.6.14-rc1
+
+Modified: trunk/iscsi/kernel/event.c
+===================================================================
+--- trunk/iscsi/kernel/event.c	2005-09-13 17:21:12 UTC (rev 78)
++++ trunk/iscsi/kernel/event.c	2005-09-17 04:56:28 UTC (rev 79)
+@@ -95,7 +95,8 @@
+ 
+ int event_init(void)
+ {
+-	if (!(nl = netlink_kernel_create(NETLINK_IET, event_recv)))
++	nl = netlink_kernel_create(NETLINK_IET, 1, event_recv, THIS_MODULE);
++	if (!nl)
+ 		return -ENOMEM;
+ 	else
+ 		return 0;
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-13 17:21:12 UTC (rev 78)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-17 04:56:28 UTC (rev 79)
+@@ -1107,7 +1107,7 @@
+ 	rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 	rsp_hdr-&gt;itt = req_hdr-&gt;itt;
+ /* 	rsp_hdr-&gt;response = ISCSI_TMF_RSP_COMPLETE; */
+-	rsp_hdr-&gt;response = ISCSI_RESPONSE_FUNCTION_REJECTED;
++	rsp_hdr-&gt;response = ISCSI_TMF_RSP_REJECTED;
+ 
+ 	eprintk(&quot;%x %d %x\n&quot;, cmnd_itt(req), function, req_hdr-&gt;rtt);
+ 
+
+Modified: trunk/iscsi/kernel/iscsi_dbg.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi_dbg.h	2005-09-13 17:21:12 UTC (rev 78)
++++ trunk/iscsi/kernel/iscsi_dbg.h	2005-09-17 04:56:28 UTC (rev 79)
+@@ -36,7 +36,7 @@
+ 	}							\
+ } while (0)
+ 
+-#if D_IOV
++#ifdef D_IOV
+ static inline void iscsi_dump_iov(struct msghdr *msg)
+ {
+ 	int i;
+@@ -48,7 +48,7 @@
+ #define iscsi_dump_iov(x) do {} while (0)
+ #endif
+ 
+-#if D_DUMP_PDU
++#ifdef D_DUMP_PDU
+ static void iscsi_dump_char(int ch)
+ {
+ 	static unsigned char text[16];
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-13 17:21:12 UTC (rev 78)
++++ trunk/kernel/tgt.c	2005-09-17 04:56:28 UTC (rev 79)
+@@ -926,7 +926,7 @@
+ 	if (!cmnd_slab)
+ 		goto out;
+ 
+-	nls = netlink_kernel_create(NETLINK_TGT, event_recv);
++	nls = netlink_kernel_create(NETLINK_TGT, 1, event_recv, THIS_MODULE);
+ 	if (!nls)
+ 		goto out;
+ 
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-09-13 17:21:12 UTC (rev 78)
++++ trunk/kernel/tgt_sysfs.c	2005-09-17 04:56:28 UTC (rev 79)
+@@ -23,10 +23,26 @@
+ 	tgt_target_show_fn(field, format_string)		\
+ static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+ 
++#define tgt_target_template_show_fn(field, format_string)		\
++static ssize_t								\
++show_##field (struct class_device *cdev, char *buf)			\
++{									\
++	struct tgt_target *target = cdev_to_tgt_target(cdev);		\
++	return snprintf (buf, 20, format_string, target-&gt;tt-&gt;field);	\
++}
++
++#define tgt_target_template_rd_attr(field, format_string)		\
++	tgt_target_template_show_fn(field, format_string)		\
++static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
++
+ tgt_target_rd_attr(queued_cmnds, &quot;%u\n&quot;);
++tgt_target_template_rd_attr(name, &quot;%s\n&quot;);
++tgt_target_template_rd_attr(protocol, &quot;%s\n&quot;);
+ 
+ static struct class_device_attribute *tgt_target_attrs[] = {
+ 	&amp;class_device_attr_queued_cmnds,
++	&amp;class_device_attr_name,
++	&amp;class_device_attr_protocol,
+ 	NULL
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000071.html">[Stgt-svn] r78 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000073.html">[Stgt-svn] r80 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#72">[ date ]</a>
+              <a href="thread.html#72">[ thread ]</a>
+              <a href="subject.html#72">[ subject ]</a>
+              <a href="author.html#72">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

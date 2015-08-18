@@ -1,0 +1,219 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r497 - trunk
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-July/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r497%20-%20trunk&In-Reply-To=%3C200607080700.k6870SNA015034%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000488.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r497 - trunk</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r497%20-%20trunk&In-Reply-To=%3C200607080700.k6870SNA015034%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r497 - trunk">tomo at berlios.de
+       </A><BR>
+    <I>Sat Jul  8 09:00:28 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000488.html">[Stgt-svn] r498 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#485">[ date ]</a>
+              <a href="thread.html#485">[ thread ]</a>
+              <a href="subject.html#485">[ subject ]</a>
+              <a href="author.html#485">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-07-08 09:00:06 +0200 (Sat, 08 Jul 2006)
+New Revision: 497
+
+Modified:
+   trunk/initd
+Log:
+Update the init script.
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2006-06-27 05:49:03 UTC (rev 496)
++++ trunk/initd	2006-07-08 07:00:06 UTC (rev 497)
+@@ -1,31 +1,85 @@
+ #!/bin/bash
+ #
+-# Temporary script to start tgt and istgt
++# Temporary script to start tgt
+ #
+ 
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ MEM_SIZE=1048576
+ export LD_LIBRARY_PATH=${PWD}/usr:${PWD}/istgt/usr:${PWD}/ibmvstgt/usr:${LD_LIBRARY_PATH}
+ 
+-if [ -f ${PWD}/istgt/kernel/iscsi_tcp_tgt.ko ] ; then
+-	TARGET=istgt
+-fi
++#
++# Need to select one
++#
++#TARGET=ibmvio
++TARGET=iscsi_tcp
+ 
++#
++# IBM pSeries VIO server
++#
++start_ibmvio()
++{
++	insmod ${PWD}/ibmvstgt/kernel/libsrp.ko
++	insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
++}
++
++stop_ibmvio()
++{
++	rmmod libsrp
++	rmmod ibmvstgt
++}
++
++
++#
++# iSCSI stuff
++#
++start_iscsi_core()
++{
++	insmod ${PWD}/istgt/kernel/scsi_transport_iscsi.ko
++	insmod ${PWD}/istgt/kernel/libiscsi.ko
++}
++
++stop_iscsi_core()
++{
++	rmmod libiscsi
++	rmmod scsi_transport_iscsi
++}
++
++start_iscsi_tcp()
++{
++	modprobe -q crc32c
++
++	start_iscsi_core
++
++	insmod ${PWD}/istgt/kernel/iscsi_tcp.ko
++	insmod ${PWD}/istgt/kernel/iscsi_tcp_target.ko
++	${PWD}/istgt/usr/istgtd
++}
++
++stop_iscsi_tcp()
++{
++	rmmod iscsi_tcp_target
++	rmmod iscsi_tcp
++}
++
++start_iscsi_iser()
++{
++    	start_iscsi_core
++}
++
+ start_server()
+ {
+ 	insmod ${PWD}/kernel/scsi_tgt.ko
+ 
+-	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+-		modprobe -q crc32c
+-		insmod ${PWD}/istgt/kernel/scsi_transport_iscsi.ko
+-		insmod ${PWD}/istgt/kernel/libiscsi.ko
+-		insmod ${PWD}/istgt/kernel/iscsi_tcp.ko
+-		insmod ${PWD}/istgt/kernel/iscsi_tcp_tgt.ko
+-		${PWD}/istgt/usr/istgtd
+-	else
+-		insmod ${PWD}/ibmvstgt/kernel/libsrp.ko
+-		insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
+-	fi
++	case &quot;$TARGET&quot; in
++	    iscsi_tcp)
++		start_iscsi_tcp
++		;;
++	    ibmvio)
++		start_ibmvio
++		;;
++	    *)
++		;;
++	esac
+ 
+ 	${PWD}/usr/tgtd -d0
+ 
+@@ -34,26 +88,32 @@
+ 	
+ stop_server()
+ {
+-	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
++	case &quot;$TARGET&quot; in
++	    iscsi_tcp)
+ 		${PWD}/usr/tgtadm --driver istgt --op delete
+ 		killall -9 istgtd
+-	else
++		;;
++	    ibmvio)
+ 		${PWD}/usr/tgtadm --driver ibmvstgt --op delete
+-	fi
++		;;
++	    *)
++		;;
++	esac
+ 
+ 	killall -9 tgtd
+ 
+ 	sleep 1
+ 
+-	if [ &quot;$TARGET&quot; = &quot;istgt&quot; ] ; then
+-		rmmod iscsi_tcp_tgt
+-		rmmod iscsi_tcp
+-		rmmod libiscsi
+-		rmmod scsi_transport_iscsi
+-	else
+-		rmmod libsrp
+-		rmmod ibmvstgt
+-	fi
++	case &quot;$TARGET&quot; in
++	    iscsi_tcp)
++		stop_iscsi_tcp
++		;;
++	    ibmvio)
++		stop_ibmvio
++		;;
++	    *)
++		;;
++	esac
+ 
+ 	rmmod scsi_tgt
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000488.html">[Stgt-svn] r498 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#485">[ date ]</a>
+              <a href="thread.html#485">[ thread ]</a>
+              <a href="subject.html#485">[ subject ]</a>
+              <a href="author.html#485">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,92 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r114 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r114%20-%20trunk/kernel&In-Reply-To=%3C200510010902.j91929hP026331%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000107.html">
+   <LINK REL="Next"  HREF="000109.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r114 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r114%20-%20trunk/kernel&In-Reply-To=%3C200510010902.j91929hP026331%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r114 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Oct  1 11:02:09 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000107.html">[Stgt-svn] r113 - trunk/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000109.html">[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#108">[ date ]</a>
+              <a href="thread.html#108">[ thread ]</a>
+              <a href="subject.html#108">[ subject ]</a>
+              <a href="author.html#108">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-01 11:02:09 +0200 (Sat, 01 Oct 2005)
+New Revision: 114
+
+Modified:
+   trunk/kernel/tgt_scsi.c
+Log:
+Trivial cleanups.
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-10-01 08:56:02 UTC (rev 113)
++++ trunk/kernel/tgt_scsi.c	2005-10-01 09:02:09 UTC (rev 114)
+@@ -5,7 +5,6 @@
+  * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  * This code is licenced under the GPL.
+  */
+-#include &lt;linux/fs.h&gt;
+ #include &lt;linux/module.h&gt;
+ #include &lt;linux/mm.h&gt;
+ #include &lt;linux/highmem.h&gt;
+@@ -119,7 +118,7 @@
+ 	int len;
+ 
+ 	memset(data, 0, sizeof(scmd-&gt;sense_buff));
+-	len = min(cmd-&gt;bufflen, sizeof(scmd-&gt;sense_buff));
++	len = min_t(int, cmd-&gt;bufflen, sizeof(scmd-&gt;sense_buff));
+ 
+ 	/* userspace did everything for us */
+ 	memcpy(data, page_address(cmd-&gt;sg[0].page), len);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000107.html">[Stgt-svn] r113 - trunk/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000109.html">[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#108">[ date ]</a>
+              <a href="thread.html#108">[ thread ]</a>
+              <a href="subject.html#108">[ subject ]</a>
+              <a href="author.html#108">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

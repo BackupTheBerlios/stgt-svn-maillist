@@ -1,0 +1,105 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r603 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r603%20-%20trunk/usr/iscsi&In-Reply-To=%3C200610311011.k9VABrrI013180%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000589.html">
+   <LINK REL="Next"  HREF="000591.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r603 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r603%20-%20trunk/usr/iscsi&In-Reply-To=%3C200610311011.k9VABrrI013180%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r603 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Oct 31 11:11:53 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000589.html">[Stgt-svn] r602 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000591.html">[Stgt-svn] r604 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#590">[ date ]</a>
+              <a href="thread.html#590">[ thread ]</a>
+              <a href="subject.html#590">[ subject ]</a>
+              <a href="author.html#590">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-10-31 11:11:53 +0100 (Tue, 31 Oct 2006)
+New Revision: 603
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+Log:
+Merge Mike's tmf fix
+
+tgtd returns 0 or a -Exyz value. For the iscsi tmf response we want to
+translate those values to a iscsi value. The attached patch does this.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-10-31 10:10:36 UTC (rev 602)
++++ trunk/usr/iscsi/iscsid.c	2006-10-31 10:11:53 UTC (rev 603)
+@@ -964,7 +964,24 @@
+ {
+ 	struct iscsi_task *task = (struct iscsi_task *) (unsigned long) mid;
+ 
+-	task-&gt;result = result;
++	switch (result) {
++	case 0:
++		task-&gt;result = ISCSI_TMF_RSP_COMPLETE;
++		break;
++	case -EINVAL:
++		task-&gt;result = ISCSI_TMF_RSP_NOT_SUPPORTED;
++		break;
++	case -EEXIST:
++		/*
++		 * the command completed or we could not find it so
++		 * we retrun  no task here
++		 */
++		task-&gt;result = ISCSI_TMF_RSP_NO_TASK;
++		break;
++	default:
++		task-&gt;result = ISCSI_TMF_RSP_REJECTED;
++		break;
++	}
+ 	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 	return 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000589.html">[Stgt-svn] r602 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000591.html">[Stgt-svn] r604 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#590">[ date ]</a>
+              <a href="thread.html#590">[ thread ]</a>
+              <a href="subject.html#590">[ subject ]</a>
+              <a href="author.html#590">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

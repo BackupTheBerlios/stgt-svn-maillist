@@ -1,0 +1,158 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r366 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r366%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603040215.k242Fl9o027709%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000352.html">
+   <LINK REL="Next"  HREF="000354.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r366 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r366%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603040215.k242Fl9o027709%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r366 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Mar  4 03:15:47 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000352.html">[Stgt-svn] r365 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000354.html">[Stgt-svn] r367 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#353">[ date ]</a>
+              <a href="thread.html#353">[ thread ]</a>
+              <a href="subject.html#353">[ subject ]</a>
+              <a href="author.html#353">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-04 03:15:18 +0100 (Sat, 04 Mar 2006)
+New Revision: 366
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+Log:
+Clean up the queue state.
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-04 00:45:16 UTC (rev 365)
++++ branches/use-scsi-ml/usr/target.c	2006-03-04 02:15:18 UTC (rev 366)
+@@ -55,6 +55,7 @@
+ 
+ enum {
+ 	TGT_QUEUE_BLOCKED,
++	TGT_QUEUE_DELETED,
+ };
+ 
+ struct cmd {
+@@ -88,6 +89,28 @@
+ static struct target *tgtt[MAX_NR_TARGET];
+ static struct target *hostt[MAX_NR_HOST];
+ 
++#define QUEUE_FNS(bit, name)						\
++static inline void set_queue_##name(struct tgt_cmd_queue *q)		\
++{									\
++	(q)-&gt;state |= (1UL &lt;&lt; TGT_QUEUE_##bit);				\
++}									\
++static inline void clear_queue_##name(struct tgt_cmd_queue *q)		\
++{									\
++	(q)-&gt;state &amp;= ~(1UL &lt;&lt; TGT_QUEUE_##bit);			\
++}									\
++static inline int queue_##name(const struct tgt_cmd_queue *q)		\
++{									\
++	return ((q)-&gt;state &amp; (1UL &lt;&lt; TGT_QUEUE_##bit));			\
++}
++
++static inline int queue_active(const struct tgt_cmd_queue *q)		\
++{									\
++	return ((q)-&gt;active_cmd);					\
++}
++
++QUEUE_FNS(BLOCKED, blocked)
++QUEUE_FNS(DELETED, deleted)
++
+ static struct target *target_get(int tid)
+ {
+ 	if (tid &gt;= MAX_NR_TARGET) {
+@@ -287,12 +310,11 @@
+ 
+ 	switch (cmd-&gt;attribute) {
+ 	case MSG_SIMPLE_TAG:
+-		if (!(q-&gt;state &amp; (1UL &lt;&lt; TGT_QUEUE_BLOCKED)))
++		if (!queue_blocked(q))
+ 			enabled = 1;
+ 		break;
+ 	case MSG_ORDERED_TAG:
+-		if (!(q-&gt;state &amp; (1UL &lt;&lt; TGT_QUEUE_BLOCKED)) &amp;&amp;
+-		    !q-&gt;active_cmd)
++		if (!queue_blocked(q) &amp;&amp; !queue_active(q))
+ 			enabled = 1;
+ 		break;
+ 	case MSG_HEAD_TAG:
+@@ -300,9 +322,8 @@
+ 		break;
+ 	default:
+ 		eprintf(&quot;unknown command attribute %x\n&quot;, cmd-&gt;attribute);
+-		cmd-&gt;attribute = MSG_HEAD_TAG;
+-		if (!(q-&gt;state &amp; (1UL &lt;&lt; TGT_QUEUE_BLOCKED)) &amp;&amp;
+-		    !q-&gt;active_cmd)
++		cmd-&gt;attribute = MSG_ORDERED_TAG;
++		if (!queue_blocked(q) &amp;&amp; !queue_active(q))
+ 			enabled = 1;
+ 	}
+ 
+@@ -321,7 +342,7 @@
+ 	switch (cmd-&gt;attribute) {
+ 	case MSG_ORDERED_TAG:
+ 	case MSG_HEAD_TAG:
+-		q-&gt;state |= (1UL &lt;&lt; TGT_QUEUE_BLOCKED);
++		set_queue_blocked(q);
+ 		break;
+ 	}
+ }
+@@ -500,7 +521,8 @@
+ 	switch (cmd-&gt;attribute) {
+ 	case MSG_ORDERED_TAG:
+ 	case MSG_HEAD_TAG:
+-		q-&gt;state &amp;= ~(1UL &lt;&lt; TGT_QUEUE_BLOCKED);
++		clear_queue_blocked(q);
++		break;
+ 	}
+ 
+ 	free(cmd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000352.html">[Stgt-svn] r365 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000354.html">[Stgt-svn] r367 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#353">[ date ]</a>
+              <a href="thread.html#353">[ thread ]</a>
+              <a href="subject.html#353">[ subject ]</a>
+              <a href="author.html#353">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

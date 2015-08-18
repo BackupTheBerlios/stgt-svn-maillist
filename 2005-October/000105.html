@@ -1,0 +1,297 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r111 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r111%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200510010818.j918IZD5018510%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000104.html">
+   <LINK REL="Next"  HREF="000106.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r111 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r111%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200510010818.j918IZD5018510%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r111 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Oct  1 10:18:35 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000104.html">[Stgt-svn] r110 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000106.html">[Stgt-svn] r112 - in trunk: . usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#105">[ date ]</a>
+              <a href="thread.html#105">[ thread ]</a>
+              <a href="subject.html#105">[ subject ]</a>
+              <a href="author.html#105">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-01 10:18:34 +0200 (Sat, 01 Oct 2005)
+New Revision: 111
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi.h
+Log:
+Changed the iSCSI software target for the new APIs.
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-10-01 08:17:53 UTC (rev 110)
++++ trunk/iscsi/kernel/iscsi.c	2005-10-01 08:18:34 UTC (rev 111)
+@@ -73,6 +73,7 @@
+ 	cmnd-&gt;conn = conn;
+ 	spin_lock(&amp;conn-&gt;list_lock);
+ 	atomic_inc(&amp;conn-&gt;nr_cmnds);
++	init_completion(&amp;cmnd-&gt;event);
+ 	if (req)
+ 		list_add_tail(&amp;cmnd-&gt;conn_list, &amp;conn-&gt;pdu_list);
+ 	spin_unlock(&amp;conn-&gt;list_lock);
+@@ -368,10 +369,8 @@
+ 	list_del(&amp;cmnd-&gt;conn_list);
+ 	spin_unlock(&amp;conn-&gt;list_lock);
+ 
+-	if (cmnd-&gt;tc) {
+-		struct tgt_protocol *proto = cmnd-&gt;tc-&gt;session-&gt;target-&gt;proto;
+-		proto-&gt;destroy_cmd(cmnd-&gt;tc);
+-	}
++	if (cmnd-&gt;tc)
++		cmnd-&gt;tc-&gt;done(cmnd-&gt;tc);
+ 	kmem_cache_free(iscsi_cmnd_cache, cmnd);
+ }
+ 
+@@ -704,9 +703,10 @@
+ 	iscsi_cmnds_init_write(&amp;send);
+ }
+ 
+-static void scsi_cmnd_done(struct tgt_cmd *tc)
++static void __scsi_cmnd_done(void *data)
+ {
+-	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) tc-&gt;private;
++	struct tgt_cmd *tc = (struct tgt_cmd *) data;
++	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) tc-&gt;private;;
+ 	struct iscsi_cmd *req = cmnd_hdr(cmnd);
+ 
+ 	if (tc-&gt;result != SAM_STAT_GOOD) {
+@@ -750,16 +750,70 @@
+ 	}
+ }
+ 
++/* TODO : merge this with nthread. */
++static int scsi_cmnd_done(struct tgt_cmd *tc)
++{
++	int err;
++	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) tc-&gt;private;
++
++	INIT_WORK(&amp;cmnd-&gt;work, __scsi_cmnd_done, tc);
++	err = schedule_work(&amp;cmnd-&gt;work);
++	BUG_ON(!err);
++
++	return TGT_CMD_XMIT_OK;
++}
++
++static void tgt_scsi_cmd_create(struct iscsi_cmnd *req)
++{
++	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
++	struct iscsi_conn *conn = req-&gt;conn;
++	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
++	enum dma_data_direction data_dir;
++
++	/*
++	 * handle bidi later
++	 */
++	if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
++		data_dir = DMA_TO_DEVICE;
++	else if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_READ)
++		data_dir = DMA_FROM_DEVICE;
++	else
++		data_dir = DMA_NONE;
++
++	req-&gt;tc = proto-&gt;create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
++				    be32_to_cpu(req_hdr-&gt;data_length),
++				    data_dir, req_hdr-&gt;lun,
++				    sizeof(req_hdr-&gt;lun),
++				    req-&gt;pdu.bhs.flags &amp; ISCSI_FLAG_CMD_ATTR_MASK);
++	BUG_ON(!req-&gt;tc);
++
++	if (data_dir == DMA_TO_DEVICE &amp;&amp; be32_to_cpu(req_hdr-&gt;data_length)) {
++		switch (req_hdr-&gt;cdb[0]) {
++		case WRITE_6:
++		case WRITE_10:
++		case WRITE_16:
++		case WRITE_VERIFY:
++			break;
++		default:
++			eprintk(&quot;%x\n&quot;, req_hdr-&gt;cdb[0]);
++			break;
++		}
++	}
++}
++
+ static void scsi_cmnd_exec(struct iscsi_cmnd *cmnd)
+ {
++	struct tgt_cmd *cmd = cmnd-&gt;tc;
++
+ 	if (cmnd-&gt;r2t_length) {
+ 		if (!cmnd-&gt;is_unsolicited_data)
+ 			send_r2t(cmnd);
+ 	} else {
+-		struct tgt_protocol *proto = cmnd-&gt;tc-&gt;session-&gt;target-&gt;proto;
+-
+ 		set_cmnd_waitio(cmnd);
+-		proto-&gt;queue_cmd(cmnd-&gt;tc, scsi_cmnd_done);
++		if (cmnd-&gt;tc)
++			cmd-&gt;done(cmd);
++		else
++			tgt_scsi_cmd_create(cmnd);
+ 	}
+ }
+ 
+@@ -840,30 +894,10 @@
+ 
+ static void scsi_cmnd_start(struct iscsi_conn *conn, struct iscsi_cmnd *req)
+ {
+-	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
+-	enum dma_data_direction data_dir;
+ 
+ 	dprintk(D_GENERIC, &quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+-	eprintk(&quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+-
+-	/*
+-	 * handle bidi later
+-	 */
+-	if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
+-		data_dir = DMA_TO_DEVICE;
+-	else if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_READ)
+-		data_dir = DMA_FROM_DEVICE;
+-	else
+-		data_dir = DMA_NONE;
+-
+-	req-&gt;tc = proto-&gt;create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
+-				    be32_to_cpu(req_hdr-&gt;data_length),
+-				    data_dir, req_hdr-&gt;lun,
+-				    sizeof(req_hdr-&gt;lun), NULL);
+-	BUG_ON(!req-&gt;tc);
+-
+ 	switch (req_hdr-&gt;cdb[0]) {
+ 	case SERVICE_ACTION_IN:
+ 		if ((req_hdr-&gt;cdb[1] &amp; 0x1f) != 0x10)
+@@ -883,16 +917,6 @@
+ 	case RELEASE:
+ 	case RESERVE_10:
+ 	case RELEASE_10:
+-	{
+-		if (!(req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) ||
+-		      req-&gt;pdu.datasize) {
+-			/* unexpected unsolicited data */
+-			eprintk(&quot;%x %x\n&quot;, cmnd_itt(req), req_hdr-&gt;cdb[0]);
+-			create_sense_rsp(req, ABORTED_COMMAND, 0xc, 0xc);
+-			cmnd_skip_data(req);
+-		}
+-		break;
+-	}
+ 	case READ_6:
+ 	case READ_10:
+ 	case READ_16:
+@@ -904,7 +928,6 @@
+ 			create_sense_rsp(req, ABORTED_COMMAND, 0xc, 0xc);
+ 			cmnd_skip_data(req);
+ 		}
+-
+ 		break;
+ 	}
+ 	case WRITE_6:
+@@ -914,6 +937,16 @@
+ 	{
+ 		struct iscsi_sess_param *param = &amp;conn-&gt;session-&gt;param;
+ 
++		/*
++		 * We don't know this command arrives in order,
++		 * however we need to allocate buffer for immediate
++		 * and unsolicited data. tgt will not start to perform
++		 * this command until we call cmd-&gt;done so we don't
++		 * need to worry about the order of the command.
++		 */
++		tgt_scsi_cmd_create(req);
++		wait_for_completion(&amp;req-&gt;event);
++
+ 		req-&gt;r2t_length = be32_to_cpu(req_hdr-&gt;data_length) - req-&gt;pdu.datasize;
+ 		req-&gt;is_unsolicited_data = !(req_hdr-&gt;flags &amp;
+ 						ISCSI_FLAG_CMD_FINAL);
+@@ -1580,6 +1613,15 @@
+ 	}
+ }
+ 
++static int buffer_ready(struct tgt_cmd *tc)
++{
++	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) tc-&gt;private;
++
++	complete(&amp;cmnd-&gt;event);
++
++	return 0;
++}
++
+ static struct tgt_target_template iet_tgt_target_template = {
+ 	.name = &quot;iet&quot;,
+ 	.module = THIS_MODULE,
+@@ -1587,6 +1629,8 @@
+ 	.target_create = target_add,
+ 	.target_destroy = target_del,
+ 	.msg_recv = iet_msg_recv,
++	.transfer_response = scsi_cmnd_done,
++	.transfer_write_data = buffer_ready,
+ 	.priv_data_size = sizeof(struct iscsi_target),
+ };
+ 
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-10-01 08:17:53 UTC (rev 110)
++++ trunk/iscsi/kernel/iscsi.h	2005-10-01 08:18:34 UTC (rev 111)
+@@ -180,6 +180,9 @@
+ 	u32 hdigest;
+ 	u32 ddigest;
+ 
++	struct work_struct work;
++	struct completion event;
++
+ 	struct iscsi_cmnd *req;
+ 	struct tgt_cmd *tc;
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000104.html">[Stgt-svn] r110 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000106.html">[Stgt-svn] r112 - in trunk: . usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#105">[ date ]</a>
+              <a href="thread.html#105">[ thread ]</a>
+              <a href="subject.html#105">[ subject ]</a>
+              <a href="author.html#105">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

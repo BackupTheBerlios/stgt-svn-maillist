@@ -1,0 +1,266 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r384 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r384%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200603140714.k2E7Eh1G015055%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000370.html">
+   <LINK REL="Next"  HREF="000372.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r384 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r384%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200603140714.k2E7Eh1G015055%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r384 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Mar 14 08:14:43 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000370.html">[Stgt-svn] r383 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000372.html">[Stgt-svn] r385 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#371">[ date ]</a>
+              <a href="thread.html#371">[ thread ]</a>
+              <a href="subject.html#371">[ subject ]</a>
+              <a href="author.html#371">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-14 08:14:36 +0100 (Tue, 14 Mar 2006)
+New Revision: 384
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Add TMF support to ibmvstgt LLD.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-03-14 07:13:35 UTC (rev 383)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-03-14 07:14:36 UTC (rev 384)
+@@ -75,6 +75,15 @@
+ #define dprintk eprintk
+ /* #define dprintk(fmt, args...) */
+ 
++/* TODO: use include/scsi/srp.h instead of drivers/scsi/ibmvscsi/srp.h */
++enum {
++	SRP_TSK_ABORT_TASK	= 0x01,
++	SRP_TSK_ABORT_TASK_SET	= 0x02,
++	SRP_TSK_CLEAR_TASK_SET	= 0x04,
++	SRP_TSK_LUN_RESET	= 0x08,
++	SRP_TSK_CLEAR_ACA	= 0x40
++};
++
+ /*
+  * an RPA command/response transport queue.  This is our structure
+  * that points to the actual queue (not architected by firmware)
+@@ -376,7 +385,8 @@
+ 	scmd-&gt;request_bufflen = len;
+ 	scmd-&gt;tag= tag;
+ 	iue-&gt;scmd = scmd;
+-	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun, 0);
++	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun,
++			       iu-&gt;srp.cmd.tag);
+ 
+ 	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;,
+ 		iue, scmd, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, tag);
+@@ -755,63 +765,41 @@
+ 	handle_cmd_queue(adapter);
+ }
+ 
+-/* TODO */
+-static void process_device_reset(struct iu_entry *iue)
++static int process_tsk_mgmt(struct iu_entry *iue)
+ {
+-	send_rsp(iue, NO_SENSE, 0x00);
+-}
++	union viosrp_iu *iu = vio_iu(iue);
++	int fn;
+ 
+-static void process_abort(struct iu_entry *iue)
+-{
+-	union viosrp_iu *iu = vio_iu(iue), *tmp_iu = NULL;
+-	struct iu_entry *tmp_iue;
+-	unsigned char status = ABORTED_COMMAND;
+-	uint64_t tag = iu-&gt;srp.tsk_mgmt.managed_task_tag;
+-	unsigned long flags;
++	eprintk(&quot;%p %d\n&quot;, iue, iu-&gt;srp.tsk_mgmt.task_mgmt_flags);
+ 
+-	eprintk(&quot;Not supported yet %p %llx\n&quot;, iue, (unsigned long long) tag);
+-
+-	spin_lock_irqsave(&amp;iue-&gt;adapter-&gt;lock, flags);
+-
+-	list_for_each_entry(tmp_iue, &amp;iue-&gt;adapter-&gt;cmd_queue, ilist) {
+-		tmp_iu = vio_iu(tmp_iue);
+-		if (tmp_iu-&gt;srp.cmd.tag != tag)
+-			continue;
+-
+-		__set_bit(V_ABORTED, &amp;tmp_iue-&gt;req.flags);
+-		status = NO_SENSE;
++	switch (iu-&gt;srp.tsk_mgmt.task_mgmt_flags) {
++	case SRP_TSK_ABORT_TASK:
++		fn = ABORT_TASK;
+ 		break;
++	case SRP_TSK_ABORT_TASK_SET:
++		fn = ABORT_TASK_SET;
++		break;
++	case SRP_TSK_CLEAR_TASK_SET:
++		fn = CLEAR_TASK_SET;
++		break;
++	case SRP_TSK_LUN_RESET:
++		fn = LOGICAL_UNIT_RESET;
++		break;
++	case SRP_TSK_CLEAR_ACA:
++		fn = CLEAR_ACA;
++		break;
++	default:
++		fn = 0;
+ 	}
+-
+-	spin_unlock_irqrestore(&amp;iue-&gt;adapter-&gt;lock, flags);
+-
+-	if (status == NO_SENSE) {
+-		int len;
+-		len = vscsis_data_length(&amp;tmp_iu-&gt;srp.cmd,
+-					 tmp_iu-&gt;srp.cmd.data_out_format);
+-		dprintk(&quot;abort cmd: %p %p %lx %x %lx %d\n&quot;,
+-			tmp_iue, tmp_iue-&gt;scmd,
+-			tmp_iue-&gt;scmd-&gt;request-&gt;flags,
+-			tmp_iu-&gt;srp.cmd.cdb[0],
+-			tmp_iu-&gt;srp.cmd.lun, len);
+-		BUG();
+-	} else
+-		dprintk(&quot;unable to abort cmd\n&quot;);
+-
+-	send_rsp(iue, status, 0x14);
+-}
+-
+-static void process_tsk_mgmt(struct iu_entry *iue)
+-{
+-	union viosrp_iu *iu = vio_iu(iue);
+-	uint8_t flags = iu-&gt;srp.tsk_mgmt.task_mgmt_flags;
+-
+-	if (flags == 0x01)
+-		process_abort(iue);
+-	else if (flags == 0x08)
+-		process_device_reset(iue);
++	if (fn)
++		scsi_tgt_tsk_mgmt_request(iue-&gt;adapter-&gt;shost, fn,
++					  iu-&gt;srp.tsk_mgmt.managed_task_tag,
++					  (struct scsi_lun *) &amp;iu-&gt;srp.tsk_mgmt.lun,
++					  iue);
+ 	else
+ 		send_rsp(iue, ILLEGAL_REQUEST, 0x20);
++
++	return !fn;
+ }
+ 
+ static int process_mad_iu(struct iu_entry *iue)
+@@ -863,7 +851,7 @@
+ 		process_login(iue);
+ 		break;
+ 	case SRP_TSK_MGMT_TYPE:
+-		process_tsk_mgmt(iue);
++		done = process_tsk_mgmt(iue);
+ 		break;
+ 	case SRP_CMD_TYPE:
+ 		queue_cmd(iue);
+@@ -1097,15 +1085,49 @@
+ 	handle_cmd_queue(adapter);
+ }
+ 
+-/*
+- * TODO: just for cheating scsi_host_alloc now.
+- */
+-static int ibmvstgt_eh_abort_handler(struct scsi_cmnd *cmd)
++static int ibmvstgt_eh_abort_handler(struct scsi_cmnd *scmd)
+ {
+-	BUG();
++	unsigned long flags;
++	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
++	struct server_adapter *adapter = iue-&gt;adapter;
++
++	dprintk(&quot;%p %p %x\n&quot;, iue, adapter, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
++
++	spin_lock_irqsave(&amp;adapter-&gt;lock, flags);
++	list_del(&amp;iue-&gt;ilist);
++	spin_unlock_irqrestore(&amp;adapter-&gt;lock, flags);
++
++	put_iu(iue);
++
+ 	return 0;
+ }
+ 
++static int ibmvstgt_tsk_mgmt_response(u64 mid, int result)
++{
++	struct iu_entry *iue = (struct iu_entry *) ((void *) mid);
++	union viosrp_iu *iu = vio_iu(iue);
++	unsigned char status, asc;
++
++	eprintk(&quot;%p %d\n&quot;, iue, result);
++	status = NO_SENSE;
++	asc = 0;
++
++	switch (iu-&gt;srp.tsk_mgmt.task_mgmt_flags) {
++	case SRP_TSK_ABORT_TASK:
++		asc = 0x14;
++		if (result)
++			status = ABORTED_COMMAND;
++		break;
++	default:
++		break;
++	}
++
++	send_rsp(iue, status, asc);
++	put_iu(iue);
++
++	return 0;
++}
++
+ #define	host_to_adapter(x)	(((struct server_adapter *) x-&gt;hostdata))
+ 
+ static ssize_t
+@@ -1149,6 +1171,7 @@
+ 	.transfer_response	= ibmvstgt_cmd_done,
+ 	.transfer_data		= recv_cmd_data,
+ 	.eh_abort_handler	= ibmvstgt_eh_abort_handler,
++	.tsk_mgmt_response	= ibmvstgt_tsk_mgmt_response,
+ 	.shost_attrs		= ibmvstgt_attrs,
+ 	.proc_name		= TGT_NAME,
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000370.html">[Stgt-svn] r383 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000372.html">[Stgt-svn] r385 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#371">[ date ]</a>
+              <a href="thread.html#371">[ thread ]</a>
+              <a href="subject.html#371">[ subject ]</a>
+              <a href="author.html#371">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

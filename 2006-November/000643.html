@@ -1,0 +1,175 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r656 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r656%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611170311.kAH3BGv7020918%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000642.html">
+   <LINK REL="Next"  HREF="000644.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r656 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r656%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611170311.kAH3BGv7020918%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r656 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov 17 04:11:16 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000642.html">[Stgt-svn] r655 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000644.html">[Stgt-svn] r657 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#643">[ date ]</a>
+              <a href="thread.html#643">[ thread ]</a>
+              <a href="subject.html#643">[ subject ]</a>
+              <a href="author.html#643">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-17 04:11:15 +0100 (Fri, 17 Nov 2006)
+New Revision: 656
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/transport.c
+   trunk/usr/tgtd.c
+Log:
+Fix tgt_target_bind arg in conn_take_fd
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/driver.h	2006-11-17 03:11:15 UTC (rev 656)
+@@ -4,7 +4,7 @@
+ 	const char *name;
+ 	int use_kernel;
+ 
+-	int (*init) (void);
++	int (*init) (int);
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/iscsi/conn.c	2006-11-17 03:11:15 UTC (rev 656)
+@@ -157,14 +157,17 @@
+ int conn_take_fd(struct iscsi_connection *conn, int fd)
+ {
+ 	uint64_t sid = sid64(conn-&gt;isid, conn-&gt;tsih);
++	int err;
+ 
+ 	dprintf(&quot;conn_take_fd: %d %u %u %u %&quot; PRIx64 &quot;\n&quot;,
+ 		  fd, conn-&gt;cid, conn-&gt;stat_sn, conn-&gt;exp_stat_sn, sid);
+ 
+ 	conn-&gt;session-&gt;conn_cnt++;
+ 
+-	/* FIXME: Use appropriate lid. */
+-	return tgt_target_bind(conn-&gt;session-&gt;target-&gt;tid, conn-&gt;tsih, 0);
++	err = tgt_target_bind(conn-&gt;session-&gt;target-&gt;tid, conn-&gt;tsih, lld_index);
++	if (err)
++		eprintf(&quot;fail to bind %d\n&quot;, err);
++	return err;
+ }
+ 
+ void conn_read_pdu(struct iscsi_connection *conn)
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/iscsi/iscsi.h	2006-11-17 03:11:15 UTC (rev 656)
+@@ -1,4 +1,4 @@
+-extern int iscsi_init(void);
++extern int iscsi_init(int);
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
+ extern int iscsi_target_show(int mode, int tid, uint64_t sid, uint32_t cid,
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/iscsi/iscsid.h	2006-11-17 03:11:15 UTC (rev 656)
+@@ -233,6 +233,8 @@
+ #define clear_task_pending(t)	((t)-&gt;flags &amp;= ~(1 &lt;&lt; TASK_pending))
+ #define task_pending(t)		((t)-&gt;flags &amp; (1 &lt;&lt; TASK_pending))
+ 
++extern int lld_index;
++
+ /* chap.c */
+ extern int cmnd_exec_auth_chap(struct iscsi_connection *conn);
+ 
+
+Modified: trunk/usr/iscsi/transport.c
+===================================================================
+--- trunk/usr/iscsi/transport.c	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/iscsi/transport.c	2006-11-17 03:11:15 UTC (rev 656)
+@@ -10,10 +10,14 @@
+ 	NULL,
+ };
+ 
+-int iscsi_init(void)
++int lld_index;
++
++int iscsi_init(int index)
+ {
+ 	int i, err, nr = 0;
+ 
++	lld_index = index;
++
+ 	for (i = 0; iscsi_transports[i]; i++) {
+ 		err = iscsi_transports[i]-&gt;ep_init();
+ 		if (!err)
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-11-17 02:42:53 UTC (rev 655)
++++ trunk/usr/tgtd.c	2006-11-17 03:11:15 UTC (rev 656)
+@@ -241,7 +241,7 @@
+ 
+ 	for (i = nr = 0; tgt_drivers[i]; i++) {
+ 		if (tgt_drivers[i]-&gt;init) {
+-			err = tgt_drivers[i]-&gt;init();
++			err = tgt_drivers[i]-&gt;init(i);
+ 			if (err)
+ 				continue;
+ 		}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000642.html">[Stgt-svn] r655 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000644.html">[Stgt-svn] r657 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#643">[ date ]</a>
+              <a href="thread.html#643">[ thread ]</a>
+              <a href="subject.html#643">[ subject ]</a>
+              <a href="author.html#643">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

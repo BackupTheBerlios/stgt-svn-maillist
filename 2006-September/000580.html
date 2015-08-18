@@ -1,0 +1,598 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r593 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r593%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609031057.k83AvFOG016593%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000579.html">
+   <LINK REL="Next"  HREF="000581.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r593 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r593%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609031057.k83AvFOG016593%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r593 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Sep  3 12:57:15 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000579.html">[Stgt-svn] r592 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000581.html">[Stgt-svn] r594 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#580">[ date ]</a>
+              <a href="thread.html#580">[ thread ]</a>
+              <a href="subject.html#580">[ subject ]</a>
+              <a href="author.html#580">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-03 12:57:13 +0200 (Sun, 03 Sep 2006)
+New Revision: 593
+
+Added:
+   trunk/usr/iscsi/iscsi_tcp.c
+   trunk/usr/iscsi/transport.c
+   trunk/usr/iscsi/transport.h
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+Add initial transport code (for iSER).
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/Makefile	2006-09-03 10:57:13 UTC (rev 593)
+@@ -10,7 +10,8 @@
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+-TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o chap.o)
++TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o chap.o transport.o)
++TGTD_OBJS += $(addprefix iscsi/, iscsi_tcp.o)
+ LIBS += -lcrypto
+ BD_AIO=1
+ endif
+
+Added: trunk/usr/iscsi/iscsi_tcp.c
+===================================================================
+--- trunk/usr/iscsi/iscsi_tcp.c	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/iscsi/iscsi_tcp.c	2006-09-03 10:57:13 UTC (rev 593)
+@@ -0,0 +1,199 @@
++/*
++ * Software iSCSI target over TCP/IP Data-Path
++ *
++ * (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;netdb.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;netinet/in.h&gt;
++#include &lt;netinet/tcp.h&gt;
++#include &lt;sys/epoll.h&gt;
++#include &lt;sys/socket.h&gt;
++
++#include &quot;iscsid.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;util.h&quot;
++
++#define ISCSI_LISTEN_PORT	3260
++#define LISTEN_MAX		4
++#define INCOMING_MAX		32
++
++static void set_non_blocking(int fd)
++{
++	int err;
++
++	err = fcntl(fd, F_GETFL);
++	if (err &lt; 0) {
++		eprintf(&quot;unable to get fd flags, %m\n&quot;);
++	} else {
++		err = fcntl(fd, F_SETFL, err | O_NONBLOCK);
++		if (err == -1)
++			eprintf(&quot;unable to set fd flags, %m\n&quot;);
++	}
++}
++
++static void accept_connection(int afd, int events, void *data)
++{
++	struct sockaddr_storage from;
++	socklen_t namesize;
++	struct connection *conn;
++	int fd, err;
++
++	eprintf(&quot;%d\n&quot;, afd);
++
++	namesize = sizeof(from);
++	fd = accept(afd, (struct sockaddr *) &amp;from, &amp;namesize);
++	if (fd &lt; 0) {
++		eprintf(&quot;can't accept, %m\n&quot;);
++		return;
++	}
++
++	conn = conn_alloc();
++	if (!conn)
++		goto out;
++
++	conn-&gt;fd = fd;
++	conn-&gt;tp = &amp;iscsi_tcp;
++
++	conn_read_pdu(conn);
++	set_non_blocking(fd);
++
++	err = tgt_event_add(fd, EPOLLIN, iscsi_event_handler, conn);
++	if (err)
++		goto free_conn;
++
++	return;
++free_conn:
++	free(conn);
++out:
++	close(fd);
++	return;
++}
++
++static int iscsi_tcp_init(void)
++{
++	struct addrinfo hints, *res, *res0;
++	char servname[64];
++	int err, i, fd, opt, nr_sock = 0;
++
++	memset(servname, 0, sizeof(servname));
++	snprintf(servname, sizeof(servname), &quot;%d&quot;, ISCSI_LISTEN_PORT);
++
++	memset(&amp;hints, 0, sizeof(hints));
++	hints.ai_socktype = SOCK_STREAM;
++	hints.ai_flags = AI_PASSIVE;
++
++	err = getaddrinfo(NULL, servname, &amp;hints, &amp;res0);
++	if (err) {
++		eprintf(&quot;unable to get address info, %m\n&quot;);
++		return -errno;
++	}
++
++	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
++		fd = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
++		if (fd &lt; 0) {
++			if (res-&gt;ai_family == AF_INET6)
++				dprintf(&quot;IPv6 support is disabled.\n&quot;);
++			else
++				eprintf(&quot;unable to create fdet %d %d %d, %m\n&quot;,
++					res-&gt;ai_family,	res-&gt;ai_socktype,
++					res-&gt;ai_protocol);
++			continue;
++		}
++
++		opt = 1;
++		err = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;opt,
++				 sizeof(opt));
++		if (err)
++			dprintf(&quot;unable to set SO_REUSEADDR, %m\n&quot;);
++
++		opt = 1;
++		if (res-&gt;ai_family == AF_INET6) {
++			err = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &amp;opt,
++					 sizeof(opt));
++			if (err) {
++				close(fd);
++				continue;
++			}
++		}
++
++		err = bind(fd, res-&gt;ai_addr, res-&gt;ai_addrlen);
++		if (err) {
++			close(fd);
++			eprintf(&quot;unable to bind server socket, %m\n&quot;);
++			continue;
++		}
++
++		err = listen(fd, INCOMING_MAX);
++		if (err) {
++			eprintf(&quot;unable to listen to server socket, %m\n&quot;);
++			close(fd);
++			continue;
++		}
++
++		set_non_blocking(fd);
++		err = tgt_event_add(fd, EPOLLIN, accept_connection, NULL);
++		if (err)
++			close(fd);
++		else
++			nr_sock++;
++	}
++
++	freeaddrinfo(res0);
++
++	return !nr_sock;
++}
++
++static size_t iscsi_tcp_read (int ep, void *buf, size_t nbytes)
++{
++	return read(ep, buf, nbytes);
++}
++
++static size_t iscsi_tcp_write_begin(int ep, void *buf, size_t nbytes)
++{
++	int opt = 1;
++	setsockopt(ep, SOL_TCP, TCP_CORK, &amp;opt, sizeof(opt));
++	return write(ep, buf, nbytes);
++}
++
++static void iscsi_tcp_write_end(int ep)
++{
++	int opt = 0;
++	setsockopt(ep, SOL_TCP, TCP_CORK, &amp;opt, sizeof(opt));
++}
++
++static size_t iscsi_tcp_close(int ep)
++{
++	return close(ep);
++}
++
++struct iscsi_transport iscsi_tcp = {
++	.name		= &quot;iscsi&quot;,
++	.rdma		= 0,
++	.init		= iscsi_tcp_init,
++	.ep_read	= iscsi_tcp_read,
++	.ep_write_begin	= iscsi_tcp_write_begin,
++	.ep_write_end	= iscsi_tcp_write_end,
++	.ep_close	= iscsi_tcp_close,
++};
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/iscsi/iscsid.c	2006-09-03 10:57:13 UTC (rev 593)
+@@ -16,11 +16,8 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;netinet/in.h&gt;
+-#include &lt;netinet/tcp.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;sys/epoll.h&gt;
+-#include &lt;sys/socket.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtd.h&quot;
+@@ -1453,25 +1450,6 @@
+ 	return -EAGAIN;
+ }
+ 
+-
+-#define ISCSI_LISTEN_PORT	3260
+-#define LISTEN_MAX		4
+-#define INCOMING_MAX		32
+-
+-static void set_non_blocking(int fd)
+-{
+-	int err;
+-
+-	err = fcntl(fd, F_GETFL);
+-	if (err &lt; 0) {
+-		eprintf(&quot;unable to get fd flags, %m\n&quot;);
+-	} else {
+-		err = fcntl(fd, F_SETFL, err | O_NONBLOCK);
+-		if (err == -1)
+-			eprintf(&quot;unable to set fd flags, %m\n&quot;);
+-	}
+-}
+-
+ static void iscsi_rx_handler(int fd, struct connection *conn)
+ {
+ 	int res;
+@@ -1480,7 +1458,7 @@
+ 	case IOSTATE_READ_BHS:
+ 	case IOSTATE_READ_AHS_DATA:
+ 	read_again:
+-		res = read(fd, conn-&gt;rx_buffer, conn-&gt;rx_size);
++		res = conn-&gt;tp-&gt;ep_read(fd, conn-&gt;rx_buffer, conn-&gt;rx_size);
+ 		if (res &lt;= 0) {
+ 			if (res == 0 || (errno != EINTR &amp;&amp; errno != EAGAIN)) {
+ 				conn-&gt;state = STATE_CLOSE;
+@@ -1546,7 +1524,7 @@
+ 
+ static void iscsi_tx_handler(int fd, struct connection *conn)
+ {
+-	int res, opt;
++	int res;
+ 
+ 	if (conn-&gt;state == STATE_SCSI &amp;&amp; !conn-&gt;tx_task) {
+ 		res = iscsi_task_tx_start(conn);
+@@ -1559,9 +1537,8 @@
+ 	case IOSTATE_WRITE_AHS:
+ 	case IOSTATE_WRITE_DATA:
+ 	write_again:
+-		opt = 1;
+-		setsockopt(fd, SOL_TCP, TCP_CORK, &amp;opt, sizeof(opt));
+-		res = write(fd, conn-&gt;tx_buffer, conn-&gt;tx_size);
++		res = conn-&gt;tp-&gt;ep_write_begin(fd, conn-&gt;tx_buffer,
++					       conn-&gt;tx_size);
+ 		if (res &lt; 0) {
+ 			if (errno != EINTR &amp;&amp; errno != EAGAIN)
+ 				conn-&gt;state = STATE_CLOSE;
+@@ -1600,8 +1577,7 @@
+ 				goto write_again;
+ 			}
+ 		case IOSTATE_WRITE_DATA:
+-			opt = 0;
+-			setsockopt(fd, SOL_TCP, TCP_CORK, &amp;opt, sizeof(opt));
++			conn-&gt;tp-&gt;ep_write_end(fd);
+ 			cmnd_finish(conn);
+ 
+ 			switch (conn-&gt;state) {
+@@ -1638,9 +1614,10 @@
+ 
+ }
+ 
+-static void iscsi_event_handler(int fd, int events, void *data)
++void iscsi_event_handler(int fd, int events, void *data)
+ {
+ 	struct connection *conn = (struct connection *) data;
++	size_t (*ep_close) (int);
+ 
+ 	if (events &amp; EPOLLIN)
+ 		iscsi_rx_handler(fd, conn);
+@@ -1652,120 +1629,12 @@
+ 		iscsi_tx_handler(fd, conn);
+ 
+ 	if (conn-&gt;state == STATE_CLOSE) {
++		/* TODO: we cannot wait for ongoing tasks. */
++
+ 		dprintf(&quot;connection closed\n&quot;);
++		ep_close = conn-&gt;tp-&gt;ep_close;
+ 		conn_free(conn);
+ 		tgt_event_del(fd);
+-		close(fd);
++		ep_close(fd);
+ 	}
+ }
+-
+-static void accept_connection(int afd, int events, void *data)
+-{
+-	struct sockaddr_storage from;
+-	socklen_t namesize;
+-	struct connection *conn;
+-	int fd, err;
+-
+-	eprintf(&quot;%d\n&quot;, afd);
+-
+-	namesize = sizeof(from);
+-	fd = accept(afd, (struct sockaddr *) &amp;from, &amp;namesize);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;can't accept, %m\n&quot;);
+-		return;
+-	}
+-
+-	conn = conn_alloc();
+-	if (!conn)
+-		goto out;
+-
+-	conn-&gt;fd = fd;
+-
+-	conn_read_pdu(conn);
+-	set_non_blocking(fd);
+-
+-	err = tgt_event_add(fd, EPOLLIN, iscsi_event_handler, conn);
+-	if (err)
+-		goto free_conn;
+-
+-	return;
+-free_conn:
+-	free(conn);
+-out:
+-	close(fd);
+-	return;
+-}
+-
+-int iscsi_init(void)
+-{
+-	struct addrinfo hints, *res, *res0;
+-	char servname[64];
+-	int err, i, fd, opt, nr_sock = 0;
+-
+-	memset(servname, 0, sizeof(servname));
+-	snprintf(servname, sizeof(servname), &quot;%d&quot;, ISCSI_LISTEN_PORT);
+-
+-	memset(&amp;hints, 0, sizeof(hints));
+-	hints.ai_socktype = SOCK_STREAM;
+-	hints.ai_flags = AI_PASSIVE;
+-
+-	err = getaddrinfo(NULL, servname, &amp;hints, &amp;res0);
+-	if (err) {
+-		eprintf(&quot;unable to get address info, %m\n&quot;);
+-		return -errno;
+-	}
+-
+-	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
+-		fd = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
+-		if (fd &lt; 0) {
+-			if (res-&gt;ai_family == AF_INET6)
+-				dprintf(&quot;IPv6 support is disabled.\n&quot;);
+-			else
+-				eprintf(&quot;unable to create fdet %d %d %d, %m\n&quot;,
+-					res-&gt;ai_family,	res-&gt;ai_socktype,
+-					res-&gt;ai_protocol);
+-			continue;
+-		}
+-
+-		opt = 1;
+-		err = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &amp;opt,
+-				 sizeof(opt));
+-		if (err)
+-			dprintf(&quot;unable to set SO_REUSEADDR, %m\n&quot;);
+-
+-		opt = 1;
+-		if (res-&gt;ai_family == AF_INET6) {
+-			err = setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &amp;opt,
+-					 sizeof(opt));
+-			if (err) {
+-				close(fd);
+-				continue;
+-			}
+-		}
+-
+-		err = bind(fd, res-&gt;ai_addr, res-&gt;ai_addrlen);
+-		if (err) {
+-			close(fd);
+-			eprintf(&quot;unable to bind server socket, %m\n&quot;);
+-			continue;
+-		}
+-
+-		err = listen(fd, INCOMING_MAX);
+-		if (err) {
+-			eprintf(&quot;unable to listen to server socket, %m\n&quot;);
+-			close(fd);
+-			continue;
+-		}
+-
+-		set_non_blocking(fd);
+-		err = tgt_event_add(fd, EPOLLIN, accept_connection, NULL);
+-		if (err)
+-			close(fd);
+-		else
+-			nr_sock++;
+-	}
+-
+-	freeaddrinfo(res0);
+-
+-	return !nr_sock;
+-}
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/iscsi/iscsid.h	2006-09-03 10:57:13 UTC (rev 593)
+@@ -12,6 +12,7 @@
+ #include &lt;linux/types.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+ 
++#include &quot;transport.h&quot;
+ #include &quot;list.h&quot;
+ #include &quot;param.h&quot;
+ #include &quot;log.h&quot;
+@@ -155,6 +156,8 @@
+ 			unsigned char *challenge;
+ 		} chap;
+ 	} auth;
++
++	struct iscsi_transport *tp;
+ };
+ 
+ #define IOSTATE_FREE		0
+@@ -230,6 +233,7 @@
+ extern void conn_add_to_session(struct connection *conn, struct session *session);
+ 
+ /* iscsid.c */
++extern void iscsi_event_handler(int fd, int events, void *data);
+ extern char *text_key_find(struct connection *conn, char *searchKey);
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
+
+Added: trunk/usr/iscsi/transport.c
+===================================================================
+--- trunk/usr/iscsi/transport.c	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/iscsi/transport.c	2006-09-03 10:57:13 UTC (rev 593)
+@@ -0,0 +1,23 @@
++#include &lt;stdio.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;sys/types.h&gt;
++
++#include &quot;transport.h&quot;
++
++struct iscsi_transport *iscsi_transports[] = {
++	&amp;iscsi_tcp,
++	NULL,
++};
++
++int iscsi_init(void)
++{
++	int i, err, nr = 0;
++
++	for (i = 0; iscsi_transports[i]; i++) {
++		err = iscsi_transports[i]-&gt;init();
++		if (!err)
++			nr++;
++	}
++	return !nr;
++}
+
+Added: trunk/usr/iscsi/transport.h
+===================================================================
+--- trunk/usr/iscsi/transport.h	2006-09-03 08:09:19 UTC (rev 592)
++++ trunk/usr/iscsi/transport.h	2006-09-03 10:57:13 UTC (rev 593)
+@@ -0,0 +1,17 @@
++#ifndef __TRANSPORT_H
++#define __TRANSPORT_H
++
++struct iscsi_transport {
++	const char *name;
++	int rdma;
++
++	int (*init) (void);
++	size_t (*ep_read) (int ep, void *buf, size_t nbytes);
++	size_t (*ep_write_begin) (int ep, void *buf, size_t nbytes);
++	void (*ep_write_end)(int ep);
++	size_t (*ep_close) (int ep);
++};
++
++extern struct iscsi_transport iscsi_tcp;
++
++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000579.html">[Stgt-svn] r592 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000581.html">[Stgt-svn] r594 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#580">[ date ]</a>
+              <a href="thread.html#580">[ thread ]</a>
+              <a href="subject.html#580">[ subject ]</a>
+              <a href="author.html#580">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

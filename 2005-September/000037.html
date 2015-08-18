@@ -1,0 +1,380 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r44 - in trunk: include iscsi/kernel iscsi/usr kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r44%20-%20in%20trunk%3A%20include%20iscsi/kernel%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200509060149.j861nO1t010154%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000036.html">
+   <LINK REL="Next"  HREF="000038.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r44 - in trunk: include iscsi/kernel iscsi/usr kernel usr</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r44%20-%20in%20trunk%3A%20include%20iscsi/kernel%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200509060149.j861nO1t010154%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r44 - in trunk: include iscsi/kernel iscsi/usr kernel usr">mnc at berlios.de
+       </A><BR>
+    <I>Tue Sep  6 03:49:24 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000036.html">[Stgt-svn] r43 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000038.html">[Stgt-svn] r45 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#37">[ date ]</a>
+              <a href="thread.html#37">[ thread ]</a>
+              <a href="subject.html#37">[ subject ]</a>
+              <a href="author.html#37">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-06 03:49:21 +0200 (Tue, 06 Sep 2005)
+New Revision: 44
+
+Modified:
+   trunk/include/stgt_if.h
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/usr/ctldev.c
+   trunk/kernel/stgt_sysfs.c
+   trunk/usr/netlink.c
+   trunk/usr/scsi.c
+   trunk/usr/stgtd.h
+Log:
+for some reason the iscsi and userspace files did not get updated from my scsi protocol checkin so here they are again
+
+Modified: trunk/include/stgt_if.h
+===================================================================
+--- trunk/include/stgt_if.h	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/include/stgt_if.h	2005-09-06 01:49:21 UTC (rev 44)
+@@ -25,13 +25,13 @@
+ 	union {
+ 		struct {
+ 			int tid;
+-			uint32_t lun;
++			uint64_t dev_id;
+ 			uint32_t flags;
+ 			char type[32];
+ 		} c_device;
+ 		struct {
+ 			int tid;
+-			uint32_t lun;
++			uint64_t dev_id;
+ 		} d_device;
+ 		struct {
+ 			uint64_t cid;
+@@ -48,7 +48,7 @@
+ 		struct {
+ 			uint64_t cid;
+ 			int tid;
+-			uint32_t lun;
++			uint64_t dev_id;
+ 		} cmnd_req;
+ 	} k;
+ };
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-06 01:49:21 UTC (rev 44)
+@@ -1574,6 +1574,7 @@
+ static struct stgt_target_template iet_stgt_target_template = {
+ 	.name = &quot;iet&quot;,
+ 	.module = THIS_MODULE,
++	.protocol = &quot;scsi&quot;,
+ };
+ 
+ static void iscsi_exit(void)
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/iscsi/usr/ctldev.c	2005-09-06 01:49:21 UTC (rev 44)
+@@ -443,7 +443,7 @@
+ 
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.c_device.tid = tid;
+-	ev-&gt;u.c_device.lun = lun;
++	ev-&gt;u.c_device.dev_id = lun;
+ 	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
+ 	memcpy((char *) ev + sizeof(*ev), path, strlen(path));
+ 
+@@ -467,7 +467,7 @@
+ 
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.d_device.tid = tid;
+-	ev-&gt;u.d_device.lun = lun;
++	ev-&gt;u.d_device.dev_id = lun;
+ 
+ 	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
+ 
+
+Modified: trunk/kernel/stgt_sysfs.c
+===================================================================
+--- trunk/kernel/stgt_sysfs.c	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/kernel/stgt_sysfs.c	2005-09-06 01:49:21 UTC (rev 44)
+@@ -130,7 +130,7 @@
+ show_##field (struct class_device *cdev, char *buf)			\
+ {									\
+ 	struct stgt_device *device = cdev_to_stgt_device(cdev);		\
+-	return sprintf (buf, format_string, device-&gt;field);	\
++	return sprintf(buf, format_string, device-&gt;field);	\
+ }
+ 
+ #define stgt_device_rd_attr(field, format_string)		\
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/usr/netlink.c	2005-09-06 01:49:21 UTC (rev 44)
+@@ -117,7 +117,7 @@
+ 	scb = reqbuf + sizeof(*ev);
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, scb[0]);
+ 
+-	result = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.lun,
++	result = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.dev_id,
+ 				scb, resbuf, &amp;len);
+ 
+ 	memset(ev, 0, sizeof(*ev));
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/usr/scsi.c	2005-09-06 01:49:21 UTC (rev 44)
+@@ -15,6 +15,7 @@
+ #include &lt;stdint.h&gt;
+ #include &lt;dirent.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;errno.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+ #include &lt;sys/stat.h&gt;
+@@ -56,12 +57,12 @@
+ #define max_t(type,x,y) \
+ 	({ type __x = (x); type __y = (y); __x &gt; __y ? __x: __y; })
+ 
+-static int device_info(int tid, uint32_t lun, uint64_t *size)
++static int device_info(int tid, uint64_t lun, uint64_t *size)
+ {
+ 	int fd, err;
+ 	char path[PATH_MAX], buf[128];
+ 
+-	sprintf(path, &quot;/sys/class/stgt_device/device%d:%u/size&quot;, tid, lun);
++	sprintf(path, &quot;/sys/class/stgt_device/device%d:%llu/size&quot;, tid, lun);
+ 
+ 	fd = open(path, O_RDONLY);
+ 	if (fd &lt; 0)
+@@ -150,7 +151,7 @@
+ 	return sizeof(geo_m_pg);
+ }
+ 
+-static int mode_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
++static int mode_sense(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t pcode = scb[2] &amp; 0x3f;
+@@ -219,7 +220,7 @@
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-static int inquiry(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
++static int inquiry(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	int result = SAM_STAT_CHECK_CONDITION;
+ 
+@@ -278,8 +279,8 @@
+ 			data[4] = 0x1;
+ 			data[5] = 0x1;
+ 			data[7] = tmp;
+-			if (lun != ~0UL)
+-				sprintf(data + 8, &quot;deadbeaf%d:%u&quot;, tid, lun);
++			if (lun != ~0ULL)
++				sprintf(data + 8, &quot;deadbeaf%d:%llu&quot;, tid, lun);
+ 			*len = tmp + 8;
+ 			result = SAM_STAT_GOOD;
+ 		}
+@@ -290,7 +291,7 @@
+ 
+ 	*len = min_t(int, *len, scb[4]);
+ 
+-	if (lun == ~0UL)
++	if (lun == ~0ULL)
+ 		data[0] = TYPE_NO_LUN;
+ 
+ 	return SAM_STAT_GOOD;
+@@ -303,6 +304,9 @@
+ 
+ static int report_luns(int tid, uint32_t unused, uint8_t *scb, uint8_t *p, int *len)
+ {
++	/*
++	 * TODO Convert to 64 bits
++	 */
+ 	uint32_t lun;
+ 	uint32_t *data = (uint32_t *) p;
+ 	int idx, alen, oalen, rbuflen, nr_luns;
+@@ -360,7 +364,7 @@
+ 	return result;
+ }
+ 
+-static int read_capacity(int tid, uint32_t lun, uint8_t *scb, uint8_t *p, int *len)
++static int read_capacity(int tid, uint64_t lun, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t size;
+@@ -387,17 +391,70 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
++static int sync_cache(int tid, uint64_t lun, uint8_t *scb, uint8_t *data,
++		      int *len)
++{
++	int fd, err;
++	/* yuck! - i need to learn which function to call to avoid this crap */
++	char path[PATH_MAX], buf[PATH_MAX], dev[PATH_MAX];
++
++	sprintf(path, &quot;/sys/class/stgt_device/device%d:%llu/path&quot;, tid, lun);
++
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		perror(&quot;scsi sync_cache could not get LU's path&quot;);
++		err = EINVAL;
++		goto einval;
++	}
++
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		perror(&quot;scsi sync_cache could not read LUN path&quot;);
++		err = EIO;
++		goto eio;
++	}
++	sscanf(buf, &quot;%s\n&quot;, dev);
++
++	fd = open(dev, O_RDWR);
++	if (fd &lt; 0) {
++		perror(&quot;scsi sync_cache could not open device&quot;);
++		err = EIO;
++		goto eio;
++	}
++	err = fsync(fd);
++	close(fd);
++
++	switch (err) {
++	case EROFS:
++	case EINVAL:
++	case EBADF:
++einval:
++		/* is this the right sense code? */
++		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	case EIO:
++eio:
++		/* what should I put for the asc/ascq? */
++		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	default:
++		*len = 0;
++		return SAM_STAT_GOOD;
++	}
++}
++
+ /*
+  * TODO: We always assume autosense.
+  */
+-static int request_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int* len)
++static int request_sense(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int* len)
+ {
+ 	*len = sense_data_build(data, 0x70, NO_SENSE, 0, 0);
+ 
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int sevice_action(int tid, uint32_t lun, uint8_t *scb, uint8_t *p, int *len)
++static int sevice_action(int tid, uint64_t lun, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t *data64, size;
+@@ -418,13 +475,13 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
++int scsi_cmnd_process(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 
+ 	dprintf(&quot;%x\n&quot;, scb[0]);
+ 
+-	if (lun == ~0UL)
++	if (lun == ~0ULL)
+ 		switch (scb[0]) {
+ 		case REQUEST_SENSE:
+ 		case INQUIRY:
+@@ -456,9 +513,11 @@
+ 	case SERVICE_ACTION_IN:
+ 		result = sevice_action(tid, lun, scb, data, len);
+ 		break;
++	case SYNCHRONIZE_CACHE:
++		result = sync_cache(tid, lun, scb, data, len);
++		break;
+ 	case START_STOP:
+ 	case TEST_UNIT_READY:
+-	case SYNCHRONIZE_CACHE:
+ 	case VERIFY:
+ 		*len = 0;
+ 		break;
+@@ -472,7 +531,7 @@
+ 	case RESERVE_10:
+ 	case RELEASE_10:
+ 	default:
+-		dprintf(&quot;BUG? %u %u\n&quot;, scb[0], lun);
++		dprintf(&quot;BUG? %u %llu\n&quot;, scb[0], lun);
+ 		*len = 0;
+ 		break;
+ 	}
+
+Modified: trunk/usr/stgtd.h
+===================================================================
+--- trunk/usr/stgtd.h	2005-09-06 01:45:35 UTC (rev 43)
++++ trunk/usr/stgtd.h	2005-09-06 01:49:21 UTC (rev 44)
+@@ -24,7 +24,7 @@
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+ 
+-extern int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb,
++extern int scsi_cmnd_process(int tid, uint64_t lun, uint8_t *scb,
+ 			     uint8_t *data, int *len);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000036.html">[Stgt-svn] r43 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000038.html">[Stgt-svn] r45 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#37">[ date ]</a>
+              <a href="thread.html#37">[ thread ]</a>
+              <a href="subject.html#37">[ subject ]</a>
+              <a href="author.html#37">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

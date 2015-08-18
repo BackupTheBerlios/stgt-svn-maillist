@@ -1,0 +1,231 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r62 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r62%20-%20trunk/kernel&In-Reply-To=%3C200509091017.j89AHLvc016357%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000054.html">
+   <LINK REL="Next"  HREF="000056.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r62 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r62%20-%20trunk/kernel&In-Reply-To=%3C200509091017.j89AHLvc016357%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r62 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Sep  9 12:17:21 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000054.html">[Stgt-svn] r61 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000056.html">[Stgt-svn] r63 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#55">[ date ]</a>
+              <a href="thread.html#55">[ thread ]</a>
+              <a href="subject.html#55">[ subject ]</a>
+              <a href="author.html#55">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-09 12:17:20 +0200 (Fri, 09 Sep 2005)
+New Revision: 62
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+   trunk/kernel/tgt_scsi.c
+Log:
+Change the way to handle sense data.
+But I'm not really sure what's the best way to handle it.
+
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-09 07:33:14 UTC (rev 61)
++++ trunk/kernel/stgt.c	2005-09-09 10:17:20 UTC (rev 62)
+@@ -720,7 +720,6 @@
+ 		len -= sg-&gt;length;
+ 	}
+ }
+-EXPORT_SYMBOL_GPL(__stgt_alloc_buffer);
+ 
+ static void stgt_alloc_buffer(void *data)
+ {
+@@ -786,24 +785,20 @@
+ 	return netlink_unicast(nls, skb, daemon_pid, 0);
+ }
+ 
+-static void cmnd_done(struct stgt_cmnd *cmnd)
++static void cmnd_done(struct stgt_cmnd *cmnd, int result)
+ {
++	struct stgt_target *target = cmnd-&gt;session-&gt;target;
++	struct tgt_protocol *proto = target-&gt;proto;
+ 	void (*done)(struct stgt_cmnd *);
+ 
++	proto-&gt;cmnd_done(cmnd, result);
++	cmnd-&gt;result = result;
++
+ 	done = cmnd-&gt;done;
+ 	cmnd-&gt;done = NULL;
+ 	done(cmnd);
+ }
+ 
+-static void kspace_cmnd_done(struct stgt_cmnd *cmnd, int result)
+-{
+-	struct stgt_target *target = cmnd-&gt;session-&gt;target;
+-	struct tgt_protocol *proto = target-&gt;proto;
+-
+-	proto-&gt;cmnd_done(cmnd, result);
+-	cmnd_done(cmnd);
+-}
+-
+ static void uspace_cmnd_done(struct stgt_cmnd *cmnd, char *data,
+ 			     int result, uint32_t len)
+ {
+@@ -825,8 +820,7 @@
+ 		}
+ 	}
+ 
+-	cmnd-&gt;result = result;
+-	cmnd_done(cmnd);
++	cmnd_done(cmnd, result);
+ }
+ 
+ static void queuecommand(void *data)
+@@ -850,10 +844,11 @@
+ 			return;
+ 	}
+ 
++	/* kspace command failure or failed to send commands to space. */
+ 	if (unlikely(err))
+ 		eprintk(&quot;failed cmnd %llu %d %d\n&quot;, cmnd-&gt;cid, err, cmnd-&gt;rw);
+ 
+-	kspace_cmnd_done(cmnd, err);
++	cmnd_done(cmnd, err);
+ }
+ 
+ int stgt_cmnd_queue(struct stgt_cmnd *cmnd, void (*done)(struct stgt_cmnd *))
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-09-09 07:33:14 UTC (rev 61)
++++ trunk/kernel/stgt.h	2005-09-09 10:17:20 UTC (rev 62)
+@@ -39,10 +39,15 @@
+ 
+ 	int result;
+ 
++	/* TODO: there should be a better way. */
++	uint8_t *error_buff;
++	int error_buff_len;
++
+ 	/*
+ 	 * target driver private
+ 	 */
+ 	void *private;
++
+ 	void *tgt_protocol_private;
+ };
+ 
+@@ -56,7 +61,6 @@
+ 					  uint8_t *proto_data,
+ 					  uint8_t *id_buff, int buff_size);
+ extern void stgt_cmnd_destroy(struct stgt_cmnd *cmnd);
+-extern void __stgt_alloc_buffer(struct stgt_cmnd *cmnd);
+ extern void stgt_cmnd_alloc_buffer(struct stgt_cmnd *cmnd,
+ 				  void (*done)(struct stgt_cmnd *));
+ extern int stgt_cmnd_queue(struct stgt_cmnd *cmnd,
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-09 07:33:14 UTC (rev 61)
++++ trunk/kernel/tgt_scsi.c	2005-09-09 10:17:20 UTC (rev 62)
+@@ -14,6 +14,7 @@
+ 
+ struct scsi_tgt_cmnd {
+ 	uint8_t scb[MAX_COMMAND_SIZE];
++	uint8_t sense_buff[SCSI_SENSE_BUFFERSIZE];
+ 	int tags;
+ };
+ 
+@@ -112,27 +113,31 @@
+ static int sense_data_build(struct stgt_cmnd *cmnd, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq)
+ {
+-	int i, len = 8, alen = 6;
+-	uint8_t *data;
++	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
++	int len = 8, alen = 6;
++	uint8_t *data = scsi_tgt_cmnd-&gt;sense_buff;
+ 
+-	/* It works, however, dirty. */
+-	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+-		__free_page(cmnd-&gt;sg[i].page);
+-	kfree(cmnd-&gt;sg);
++	memset(data, 0, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
+ 
+-	cmnd-&gt;bufflen = len + alen;
+-	cmnd-&gt;offset = 0;
++	if (cmnd-&gt;rw == READ || cmnd-&gt;rw == WRITE) {
++		/* kspace command failure */
+ 
+-	__stgt_alloc_buffer(cmnd);
+-	data = page_address(cmnd-&gt;sg[0].page);
+-	clear_page(data);
++		data[0] = 0x70 | 1U &lt;&lt; 7;
++		data[2] = key;
++		data[7] = alen;
++		data[12] = ascode;
++		data[13] = ascodeq;
++	} else {
++		/* uspace command failure */
+ 
+-	data[0] = 0x70 | 1U &lt;&lt; 7;
+-	data[2] = key;
+-	data[7] = alen;
+-	data[12] = ascode;
+-	data[13] = ascodeq;
++		len = min(cmnd-&gt;bufflen, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
++		alen = 0;
++		memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
++	}
+ 
++	cmnd-&gt;error_buff = data;
++	cmnd-&gt;error_buff_len = len + alen;
++
+ 	return len + alen;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000054.html">[Stgt-svn] r61 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000056.html">[Stgt-svn] r63 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#55">[ date ]</a>
+              <a href="thread.html#55">[ thread ]</a>
+              <a href="subject.html#55">[ subject ]</a>
+              <a href="author.html#55">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

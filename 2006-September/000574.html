@@ -1,0 +1,300 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r587 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r587%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609030710.k837AeZH017122%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000573.html">
+   <LINK REL="Next"  HREF="000575.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r587 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r587%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609030710.k837AeZH017122%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r587 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Sep  3 09:10:40 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000573.html">[Stgt-svn] r586 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000575.html">[Stgt-svn] r588 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#574">[ date ]</a>
+              <a href="thread.html#574">[ thread ]</a>
+              <a href="subject.html#574">[ subject ]</a>
+              <a href="author.html#574">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-03 09:10:38 +0200 (Sun, 03 Sep 2006)
+New Revision: 587
+
+Modified:
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+Log:
+Add task management support (not tested).
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-09-03 06:15:17 UTC (rev 586)
++++ trunk/usr/iscsi/iscsi.h	2006-09-03 07:10:38 UTC (rev 587)
+@@ -3,12 +3,14 @@
+ extern int iscsi_target_destroy(int);
+ extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
++extern int iscsi_tm_done(int host_no, uint64_t mid, int result);
+ 
+ struct tgt_driver iscsi = {
+-	.name		= &quot;iscsi&quot;,
+-	.init		= iscsi_init,
+-	.target_create	= iscsi_target_create,
+-	.target_destroy	= iscsi_target_destroy,
+-	.cmd_end_notify	= iscsi_scsi_cmd_done,
+-	.bdt		= &amp;aio_bdt,
++	.name			= &quot;iscsi&quot;,
++	.init			= iscsi_init,
++	.target_create		= iscsi_target_create,
++	.target_destroy		= iscsi_target_destroy,
++	.cmd_end_notify		= iscsi_scsi_cmd_done,
++	.mgmt_end_notify	= iscsi_tm_done,
++	.bdt			= &amp;aio_bdt,
+ };
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-09-03 06:15:17 UTC (rev 586)
++++ trunk/usr/iscsi/iscsid.c	2006-09-03 07:10:38 UTC (rev 587)
+@@ -907,6 +907,58 @@
+ 	return err;
+ }
+ 
++extern int iscsi_tm_done(int host_no, uint64_t mid, int result)
++{
++	struct iscsi_task *task = (struct iscsi_task *) (unsigned long) mid;
++
++	task-&gt;result = result;
++	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
++	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
++	return 0;
++}
++
++static int iscsi_tm_execute(struct iscsi_task *task)
++{
++	struct connection *conn = task-&gt;conn;
++	struct iscsi_tm *req = (struct iscsi_tm *) &amp;task-&gt;req;
++	int fn, err = 0;
++
++	switch (req-&gt;flags &amp; ISCSI_FLAG_TM_FUNC_MASK) {
++	case ISCSI_TM_FUNC_ABORT_TASK:
++		fn = ABORT_TASK;
++		break;
++	case ISCSI_TM_FUNC_ABORT_TASK_SET:
++		fn = ABORT_TASK_SET;
++		break;
++	case ISCSI_TM_FUNC_CLEAR_ACA:
++		fn = CLEAR_TASK_SET;
++		break;
++	case ISCSI_TM_FUNC_CLEAR_TASK_SET:
++		fn = CLEAR_ACA;
++		break;
++	case ISCSI_TM_FUNC_LOGICAL_UNIT_RESET:
++		fn = LOGICAL_UNIT_RESET;
++		break;
++	case ISCSI_TM_FUNC_TARGET_WARM_RESET:
++	case ISCSI_TM_FUNC_TARGET_COLD_RESET:
++	case ISCSI_TM_FUNC_TASK_REASSIGN:
++		err = ISCSI_TMF_RSP_NOT_SUPPORTED;
++		break;
++	default:
++		err = ISCSI_TMF_RSP_REJECTED;
++
++		eprintf(&quot;unknown task management function %d\n&quot;,
++			req-&gt;flags &amp; ISCSI_FLAG_TM_FUNC_MASK);
++	}
++
++	if (err)
++		task-&gt;result = err;
++	else
++		target_mgmt_request(conn-&gt;session-&gt;tsih, (unsigned long) task,
++				    fn, req-&gt;lun, req-&gt;itt);
++	return err;
++}
++
+ static int iscsi_task_execute(struct iscsi_task *task)
+ {
+ 	struct iscsi_hdr *hdr = (struct iscsi_hdr *) &amp;task-&gt;req;
+@@ -915,6 +967,7 @@
+ 
+ 	switch (op) {
+ 	case ISCSI_OP_NOOP_OUT:
++	case ISCSI_OP_LOGOUT:
+ 		list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 		tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 		break;
+@@ -922,11 +975,12 @@
+ 		err = iscsi_scsi_cmd_execute(task);
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+-/* 		execute_task_management(cmnd); */
++		err = iscsi_tm_execute(task);
++		if (err) {
++			list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
++			tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
++		}
+ 		break;
+-	case ISCSI_OP_LOGOUT:
+-/* 		logout_exec(cmnd); */
+-		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+ 		break;
+@@ -1083,7 +1137,7 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_logout_rx_start(struct connection *conn)
++static int iscsi_common_task_rx_start(struct connection *conn)
+ {
+ 	struct iscsi_hdr *req = (struct iscsi_hdr *) &amp;conn-&gt;req.bhs;
+ 	struct iscsi_task *task;
+@@ -1162,13 +1216,13 @@
+ 	switch (op) {
+ 	case ISCSI_OP_SCSI_CMD:
+ 	case ISCSI_OP_NOOP_OUT:
++	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+ 		err = iscsi_task_queue(task);
+ 		break;
+ 	case ISCSI_OP_SCSI_DATA_OUT:
+ 		err = iscsi_data_out_rx_done(task);
+ 		break;
+-	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+ 	default:
+@@ -1203,11 +1257,13 @@
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+-		err = iscsi_logout_rx_start(conn);
++		err = iscsi_common_task_rx_start(conn);
++		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+ 		eprintf(&quot;Cannot handle yet %x\n&quot;, op);
+ 		err = -EINVAL;
++		break;
+ 	default:
+ 		eprintf(&quot;Unknown op %x\n&quot;, op);
+ 		err = -EINVAL;
+@@ -1283,6 +1339,24 @@
+ 	return 0;
+ }
+ 
++static int iscsi_tm_tx_start(struct iscsi_task *task)
++{
++	struct connection *conn = task-&gt;conn;
++	struct iscsi_tm_rsp *rsp = (struct iscsi_tm_rsp *) &amp;conn-&gt;rsp.bhs;
++
++	memset(rsp, 0, sizeof(*rsp));
++	rsp-&gt;opcode = ISCSI_OP_SCSI_TMFUNC_RSP;
++	rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++	rsp-&gt;itt = task-&gt;req.itt;
++	rsp-&gt;response = task-&gt;result;
++
++	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
++
++	return 0;
++}
++
+ static int iscsi_scsi_cmd_tx_done(struct connection *conn)
+ {
+ 	struct iscsi_hdr *hdr = &amp;conn-&gt;rsp.bhs;
+@@ -1325,6 +1399,7 @@
+ 		break;
+ 	case ISCSI_OP_NOOP_OUT:
+ 	case ISCSI_OP_LOGOUT:
++	case ISCSI_OP_SCSI_TMFUNC:
+ 		if (task-&gt;c_buffer)
+ 			free(task-&gt;c_buffer);
+ 		free(task);
+@@ -1364,6 +1439,9 @@
+ 	case ISCSI_OP_LOGOUT:
+ 		err = iscsi_logout_tx_start(task);
+ 		break;
++	case ISCSI_OP_SCSI_TMFUNC:
++		err = iscsi_tm_tx_start(task);
++		break;
+ 	}
+ 
+ 	conn-&gt;tx_task = task;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-09-03 06:15:17 UTC (rev 586)
++++ trunk/usr/target.c	2006-09-03 07:10:38 UTC (rev 587)
+@@ -483,8 +483,8 @@
+ 	return count;
+ }
+ 
+-void target_mgmt_request(int host_no, int req_id, int function, uint8_t *lun,
+-			 uint64_t tag)
++void target_mgmt_request(int host_no, uint64_t req_id, int function,
++			 uint8_t *lun, uint64_t tag)
+ {
+ 	struct target *target;
+ 	struct mgmt_req *mreq;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-09-03 06:15:17 UTC (rev 586)
++++ trunk/usr/tgtd.h	2006-09-03 07:10:38 UTC (rev 587)
+@@ -57,7 +57,7 @@
+ 			    uint8_t *lun, uint32_t data_len,
+ 			    int attribute, uint64_t tag);
+ extern void target_cmd_done(int host_no, uint64_t tag);
+-extern void target_mgmt_request(int host_no, int req_id, int function,
++extern void target_mgmt_request(int host_no, uint64_t req_id, int function,
+ 				uint8_t *lun, uint64_t tag);
+ 
+ extern void target_cmd_io_done(void *key, int result);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000573.html">[Stgt-svn] r586 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000575.html">[Stgt-svn] r588 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#574">[ date ]</a>
+              <a href="thread.html#574">[ thread ]</a>
+              <a href="subject.html#574">[ subject ]</a>
+              <a href="author.html#574">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

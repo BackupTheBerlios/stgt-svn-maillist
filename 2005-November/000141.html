@@ -1,0 +1,1314 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r147 - in trunk: istgt/usr usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r147%20-%20in%20trunk%3A%20istgt/usr%20usr&In-Reply-To=%3C200511040551.jA45ptA0025737%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000140.html">
+   <LINK REL="Next"  HREF="000142.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r147 - in trunk: istgt/usr usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r147%20-%20in%20trunk%3A%20istgt/usr%20usr&In-Reply-To=%3C200511040551.jA45ptA0025737%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r147 - in trunk: istgt/usr usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Nov  4 06:51:55 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000140.html">[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000142.html">[Stgt-svn] r148 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#141">[ date ]</a>
+              <a href="thread.html#141">[ thread ]</a>
+              <a href="subject.html#141">[ subject ]</a>
+              <a href="author.html#141">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-04 06:51:37 +0100 (Fri, 04 Nov 2005)
+New Revision: 147
+
+Added:
+   trunk/usr/mgmt.c
+Modified:
+   trunk/istgt/usr/ctldev.c
+   trunk/istgt/usr/iscsid.h
+   trunk/istgt/usr/target.c
+   trunk/usr/Makefile
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/ipc.c
+   trunk/usr/log.h
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Add generic user-space management functions (create/destroy_target/device).
+
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/istgt/usr/ctldev.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -23,14 +23,18 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgt_if.h&quot;
+ #include &quot;tgtadm.h&quot;
++#include &quot;tgt_sysfs.h&quot;
+ 
+ #ifndef O_LARGEFILE
+ #define O_LARGEFILE	0100000
+ #endif
+ 
++extern struct qelem targets_list;
+ extern int nl_fd;
+ extern int nl_cmd_call(int fd, int type, char *data, int size, char *rbuf);
+ 
++static int typeid;
++
+ static int ipc_cmnd_execute(struct nlmsghdr *nlm_send, int len)
+ {
+ 	int err;
+@@ -348,165 +352,74 @@
+ 	return err;
+ }
+ 
+-static int iscsi_target_create(int *tid)
++static int istgt_ktarget_destroy(int tid)
+ {
+ 	int err;
+-	char nlm_ev[8912];
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++	struct target* target;
+ 
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
+-	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_TARGET_CREATE,
+-		   NLMSG_SPACE(sizeof(*ev)), 0);
++	if (!(target = target_find_by_id(tid)))
++		return -ENOENT;
+ 
+-	ev = NLMSG_DATA(nlh);
+-	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, THIS_NAME);
+-	ev-&gt;u.c_target.nr_cmds = DEFAULT_NR_QUEUED_CMNDS;
++	if (target-&gt;nr_sessions)
++		return -EBUSY;
+ 
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	if (err &gt; 0) {
+-		*tid = err;
+-		err = 0;
++	if (!list_empty(&amp;target-&gt;sessions_list)) {
++		eprintf(&quot;bug still have sessions %d\n&quot;, tid);
++		exit(-1);
+ 	}
+ 
+-	return err;
+-}
++	err = ktarget_destroy(tid);
++	if (err &lt; 0)
++		return err;
+ 
+-static int iscsi_target_destroy(int tid)
+-{
+-	int err;
+-	char nlm_ev[8912];
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++	remque(&amp;target-&gt;tlist);
+ 
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
+-	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_TARGET_DESTROY,
+-		   NLMSG_SPACE(sizeof(*ev)), 0);
++	free(target);
+ 
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.d_target.tid = tid;
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-
+-	return err;
++	return 0;
+ }
+ 
+-static int iscsi_lunit_create(int tid, uint64_t lun, char *args)
++static int istgt_ktarget_create(int typeid, char *name)
+ {
+-	int err, fd;
+-	char *p, *q, *type = NULL, *path = NULL;
+-	char dtype[] = &quot;tgt_vsd&quot;;
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
++	struct target *target;
++	int err;
+ 
+-	dprintf(&quot;%s\n&quot;, args);
+-
+-	if (isspace(*args))
+-		args++;
+-	if ((p = strchr(args, '\n')))
+-		*p = '\0';
+-
+-	while ((p = strsep(&amp;args, &quot;,&quot;))) {
+-		if (!p)
+-			continue;
+-
+-		if (!(q = strchr(p, '=')))
+-			continue;
+-		*q++ = '\0';
+-
+-		if (!strcmp(p, &quot;Path&quot;))
+-			path = q;
+-		else if (!strcmp(p, &quot;Type&quot;))
+-			type = q;
+-	}
+-
+-	if (!type)
+-		type = dtype;
+-	if (!path) {
+-		eprintf(&quot;%d %&quot; PRIu64 &quot;\n&quot;, tid, lun);
++	if (!name)
+ 		return -EINVAL;
+-	}
+ 
+-	dprintf(&quot;%s %s %Zd\n&quot;, type, path, strlen(path));
++	if (!(target = malloc(sizeof(*target))))
++		return -ENOMEM;
+ 
+-	fd = open(path, O_RDWR | O_LARGEFILE);
+-	if (fd &lt; 0) {
+-		eprintf(&quot;Could not open %s errno %d\n&quot;, path, errno);
+-		return errno;
+-	}
++	memset(target, 0, sizeof(*target));
++	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+ 
+-	nlh = calloc(1, NLMSG_SPACE(sizeof(*ev)));
+-	if (!nlh) {
+-		err = -ENOMEM;
+-		goto close_fd;
++	err = ktarget_create(typeid);
++	if (err &lt; 0) {
++		eprintf(&quot;can't create a target %d\n&quot;, err);
++		goto out;
+ 	}
+-	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_CREATE,
+-		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.c_device.tid = tid;
+-	ev-&gt;u.c_device.dev_id = lun;
+-	ev-&gt;u.c_device.fd = fd;
+-	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
++	INIT_LIST_HEAD(&amp;target-&gt;tlist);
++	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
++	target-&gt;tid = err;
++	insque(&amp;target-&gt;tlist, &amp;targets_list);
+ 
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-close_fd:
+-	if (err) {
+-		close(fd);
+-		free(nlh);
+-	}
+ 	return err;
+-}
+-
+-static int iscsi_lunit_destroy(int tid, uint64_t lun)
+-{
+-	int err, fd;
+-	char nlm_ev[8912];
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+-	char path[PATH_MAX], buf[PATH_MAX];
+-
+-	dprintf(&quot;%d %&quot; PRIu64 &quot;\n&quot;,tid, lun);
+-
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
+-	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_DESTROY,
+-		   NLMSG_SPACE(sizeof(*ev)), 0);
+-
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.d_device.tid = tid;
+-	ev-&gt;u.d_device.dev_id = lun;
+-
+-	sprintf(path, &quot;/sys/class/tgt_device/device%d:%&quot; PRIu64 &quot;/fd&quot;,
+-		tid, lun);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		perror(&quot;iscsi_lunit_destroy could not open fd file&quot;);
+-		return errno;
+-	}
+-
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		perror(&quot;iscsi_lunit_destroy could not read fd file&quot;);
+-		return errno;
+-	}
+-	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+-
+-	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+-	close(fd);
++out:
++	free(target);
+ 	return err;
+ }
+ 
+-static int target_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
++static int istgt_target_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+ {
+ 	int err = -EINVAL, tid = req-&gt;tid;
+ 
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+-		err = target_add(&amp;tid, params);
++		err = istgt_ktarget_create(typeid, params);
+ 		break;
+ 	case OP_DELETE:
+-		err = target_del(tid);
++		err = istgt_ktarget_destroy(tid);
+ 		break;
+ 	case OP_UPDATE:
+ 		err = trgt_mgmt_params(tid, req-&gt;sid, params);
+@@ -518,24 +431,6 @@
+ 	return err;
+ }
+ 
+-static int device_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	int err = -EINVAL;
+-
+-	switch (req-&gt;op) {
+-	case OP_NEW:
+-		err = iscsi_lunit_create(req-&gt;tid, req-&gt;lun, params);
+-		break;
+-	case OP_DELETE:
+-		err = iscsi_lunit_destroy(req-&gt;tid, req-&gt;lun);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	return err;
+-}
+-
+ static int user_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+ {
+ 	return 0;
+@@ -551,125 +446,6 @@
+ 	return 0;
+ }
+ 
+-static int filter(const struct dirent *dir)
+-{
+-	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
+-}
+-
+-static void all_devices_destroy(int tid)
+-{
+-	struct dirent **namelist;
+-	char *p;
+-	int i, nr;
+-	uint32_t lun;
+-
+-	nr = scandir(&quot;/sys/class/tgt_device&quot;, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-			;
+-		eprintf(&quot;%d\n&quot;, atoi(p));
+-		if (tid != atoi(p))
+-			continue;
+-		p = strchr(p, ':');
+-		if (!p)
+-			continue;
+-		lun = strtoul(++p, NULL, 10);
+-		iscsi_lunit_destroy(tid, lun);
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-}
+-
+-static int get_typeid(void)
+-{
+-	int err = -EINVAL, i, nr, fd, typeid = -EINVAL;
+-	struct dirent **namelist;
+-	char path[PATH_MAX], buf[PATH_MAX], *p;
+-
+-	nr = scandir(&quot;/sys/class/tgt_type&quot;, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -ENOENT;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		memset(path, 0, sizeof(path));
+-		strncpy(path, &quot;/sys/class/tgt_type/&quot;, sizeof(path));
+-		strncat(&amp;path[strlen(path)], namelist[i]-&gt;d_name, sizeof(path));
+-		strncat(&amp;path[strlen(path)], &quot;/name&quot;, sizeof(path));
+-		eprintf(&quot;%s\n&quot;, path);
+-		fd = open(path, O_RDONLY);
+-		if (fd &lt; 0)
+-			continue;
+-		err = read(fd, buf, sizeof(buf));
+-		close(fd);
+-		if (err &lt; 0)
+-			continue;
+-		eprintf(&quot;%s\n&quot;, buf);
+-		if (!strncmp(buf, THIS_NAME, strlen(THIS_NAME))) {
+-			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-				;
+-			typeid = atoi(p);
+-		}
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return typeid;
+-}
+-
+-static int system_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
+-{
+-	int err = -EINVAL, i, nr, fd, typeid;
+-	struct dirent **namelist;
+-	char path[PATH_MAX], buf[PATH_MAX], *p;
+-
+-	if (req-&gt;op != OP_DELETE)
+-		return err;
+-
+-	typeid = get_typeid();
+-
+-	nr = scandir(&quot;/sys/class/tgt_target&quot;, &amp;namelist, filter, alphasort);
+-	if (!nr)
+-		return -ENOENT;
+-
+-	for (i = 0; i &lt; nr; i++) {
+-		memset(path, 0, sizeof(path));
+-		strncpy(path, &quot;/sys/class/tgt_target/&quot;, sizeof(path));
+-		strncat(&amp;path[strlen(path)], namelist[i]-&gt;d_name, sizeof(path));
+-		strncat(&amp;path[strlen(path)], &quot;/typeid&quot;, sizeof(path));
+-		eprintf(&quot;%s\n&quot;, path);
+-		fd = open(path, O_RDONLY);
+-		if (fd &lt; 0)
+-			continue;
+-		err = read(fd, buf, sizeof(buf));
+-		close(fd);
+-		if (err &lt; 0)
+-			continue;
+-		eprintf(&quot;%s\n&quot;, buf);
+-		if (typeid == atoi(buf)) {
+-			int tid;
+-
+-			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
+-				;
+-			tid = atoi(p);
+-			all_devices_destroy(tid);
+-			target_del(tid);
+-		}
+-	}
+-
+-	for (i = 0; i &lt; nr; i++)
+-		free(namelist[i]);
+-	free(namelist);
+-
+-	return 0;
+-}
+-
+ int ipc_mgmt(char *sbuf, char *rbuf)
+ {
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
+@@ -681,21 +457,30 @@
+ 	req = NLMSG_DATA(nlh);
+ 	params = (char *) req + sizeof(*req);
+ 
+-	eprintf(&quot;%d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
+-		req-&gt;set, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
++	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
++		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
+ 
+-	if (req-&gt;set &amp; SET_USER)
+-		err = user_mgmt(req, params, rbuf, &amp;rlen);
+-	else if (req-&gt;set &amp; SET_DEVICE)
+-		err = device_mgmt(req, params, rbuf, &amp;rlen);
+-	else if (req-&gt;set &amp; SET_CONNECTION)
+-		err = conn_mgmt(req, params, rbuf, &amp;rlen);
+-	else if (req-&gt;set &amp; SET_SESSION)
++	switch (req-&gt;mode) {
++	case MODE_DEVICE:
++	case MODE_SYSTEM:
++		err = tgt_mgmt(sbuf, rbuf);
++		break;
++	case MODE_TARGET:
++		err = istgt_target_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	case MODE_SESSION:
+ 		err = session_mgmt(req, params, rbuf, &amp;rlen);
+-	else if (req-&gt;set &amp; SET_TARGET)
+-		err = target_mgmt(req, params, rbuf, &amp;rlen);
+-	else if (!req-&gt;set)
+-		err = system_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	case MODE_CONNECTION:
++		err = conn_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	case MODE_USER:
++		err = user_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	default:
++		eprintf(&quot;Unknown mode %d\n&quot;, req-&gt;mode);
++		break;
++	}
+ 
+ 	nlh = (struct nlmsghdr *) rbuf;
+ 	nlh-&gt;nlmsg_len = NLMSG_LENGTH(rlen);
+@@ -728,6 +513,61 @@
+ 	return p;
+ }
+ 
++static int filter(const struct dirent *dir)
++{
++	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
++}
++
++static int driver_to_typeid(char *name)
++{
++	int i, nr, err, fd, id = -ENOENT;
++	char *p, path[PATH_MAX], buf[PATH_MAX];
++	struct dirent **namelist;
++
++	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
++	for (i = 0; i &lt; nr; i++) {
++		snprintf(path, sizeof(path), TGT_TYPE_SYSFSDIR &quot;/%s/name&quot;,
++			 namelist[i]-&gt;d_name);
++
++		fd = open(path, O_RDONLY);
++		if (fd &lt; 0) {
++			eprintf(&quot;%s %d\n&quot;, path, errno);
++			continue;
++		}
++
++		err = read(fd, buf, sizeof(buf));
++		close(fd);
++		if (err &lt; 0) {
++			eprintf(&quot;%s %d\n&quot;, path, err);
++			continue;
++		}
++
++		if (strncmp(name, buf, strlen(name)))
++			continue;
++
++		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++			;
++		id = atoi(p);
++		break;
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return id;
++}
++
++void initial_device_create(int tid, int64_t lun, char *params)
++{
++	char *path, *devtype;
++	char d[] = &quot;tgt_vsd&quot;;
++
++	path = devtype = NULL;
++	kdevice_create_parser(params, &amp;path, &amp;devtype);
++	kdevice_create(tid, lun, path, devtype ? : d);
++}
++
+ void initial_config_load(void)
+ {
+ 	FILE *config;
+@@ -736,8 +576,10 @@
+ 	int idx, tid;
+ 	uint32_t val;
+ 
+-	eprintf(&quot;%s\n&quot;, &quot;load config&quot;);
++	typeid = driver_to_typeid(THIS_NAME);
+ 
++	dprintf(&quot;%d\n&quot;, typeid);
++
+ 	if (!(config = fopen(CONFIG_FILE, &quot;r&quot;)))
+ 		return;
+ 
+@@ -751,17 +593,15 @@
+ 			tid = 0;
+ 			if (!(p = target_sep_string(&amp;q)))
+ 				continue;
+-			eprintf(&quot;creaing target %s\n&quot;, p);
+-			if (target_add(&amp;tid, p) &lt; 0)
+-				tid = -1;
++			dprintf(&quot;creaing target %s\n&quot;, p);
++			tid = istgt_ktarget_create(typeid, p);
+ 		} else if (!strcasecmp(p, &quot;Alias&quot;) &amp;&amp; tid &gt;= 0) {
+ 			;
+ 		} else if (!strcasecmp(p, &quot;MaxSessions&quot;) &amp;&amp; tid &gt;= 0) {
+ 			/* target-&gt;max_sessions = strtol(q, &amp;q, 0); */
+ 		} else if (!strcasecmp(p, &quot;Lun&quot;) &amp;&amp; tid &gt;= 0) {
+ 			uint64_t lun = strtoull(q, &amp;q, 10);
+-			eprintf(&quot;creaing lun %d %&quot; PRIu64 &quot; %s\n&quot;, tid, lun, p);
+-			iscsi_lunit_create(tid, lun, q);
++			initial_device_create(tid, lun, q);
+ 		} else if (!((idx = param_index_by_name(p, target_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+ 			val = strtol(q, &amp;q, 0);
+ 			if (param_check_val(target_keys, idx, &amp;val) &lt; 0)
+@@ -783,12 +623,8 @@
+ }
+ 
+ struct iscsi_kernel_interface ioctl_ki = {
+-	.lunit_create = iscsi_lunit_create,
+-	.lunit_destroy = iscsi_lunit_destroy,
+ 	.param_get = iscsi_param_get,
+ 	.param_set = iscsi_param_set,
+-	.target_create = iscsi_target_create,
+-	.target_destroy = iscsi_target_destroy,
+ 	.session_create = iscsi_session_create,
+ 	.session_destroy = iscsi_session_destroy,
+ 	.conn_create = iscsi_conn_create,
+
+Modified: trunk/istgt/usr/iscsid.h
+===================================================================
+--- trunk/istgt/usr/iscsid.h	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/istgt/usr/iscsid.h	2005-11-04 05:51:37 UTC (rev 147)
+@@ -172,21 +172,15 @@
+ extern void session_remove(struct session *session);
+ 
+ /* target.c */
+-extern int target_add(int *tid, char *name);
+-extern int target_del(int tid);
+ extern int target_find_by_name(const char *name, int *tid);
+ struct target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+-	int (*lunit_create) (int tid, uint64_t lun, char *args);
+-	int (*lunit_destroy) (int tid, uint64_t lun);
+ 	int (*param_get) (int tid, uint64_t sid, struct iscsi_param *);
+ 	int (*param_set) (int tid, uint64_t sid, int type, uint32_t flags,
+ 			  struct iscsi_param *);
+-	int (*target_create) (int *tid);
+-	int (*target_destroy) (int tid);
+ 	int (*session_create) (int tid, uint64_t sid, uint32_t exp,
+ 			       uint32_t max);
+ 	int (*session_destroy) (int tid, uint64_t sid);
+
+Modified: trunk/istgt/usr/target.c
+===================================================================
+--- trunk/istgt/usr/target.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/istgt/usr/target.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -15,7 +15,7 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-static struct qelem targets_list = LIST_HEAD_INIT(targets_list);
++struct qelem targets_list = LIST_HEAD_INIT(targets_list);
+ 
+ void target_list_build(struct connection *conn, char *addr, char *name)
+ {
+@@ -57,59 +57,3 @@
+ 
+ 	return NULL;
+ }
+-
+-int target_del(int tid)
+-{
+-	int err;
+-	struct target* target;
+-
+-	if (!(target = target_find_by_id(tid)))
+-		return -ENOENT;
+-
+-	if (target-&gt;nr_sessions)
+-		return -EBUSY;
+-
+-	if ((err = ki-&gt;target_destroy(tid)) &lt; 0)
+-		return err;
+-
+-	remque(&amp;target-&gt;tlist);
+-
+-	if (!list_empty(&amp;target-&gt;sessions_list)) {
+-		fprintf(stderr, &quot;%s still have sessions %d\n&quot;, __FUNCTION__, tid);
+-		exit(-1);
+-	}
+-
+-	free(target);
+-
+-	return 0;
+-}
+-
+-int target_add(int *tid, char *name)
+-{
+-	struct target *target;
+-	int err;
+-
+-	if (!name)
+-		return -EINVAL;
+-
+-	if (!(target = malloc(sizeof(*target))))
+-		return -ENOMEM;
+-
+-	memset(target, 0, sizeof(*target));
+-	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+-
+-	if ((err = ki-&gt;target_create(tid)) &lt; 0) {
+-		log_warning(&quot;can't create a target %d %u\n&quot;, err, *tid);
+-		goto out;
+-	}
+-
+-	INIT_LIST_HEAD(&amp;target-&gt;tlist);
+-	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
+-	target-&gt;tid = *tid;
+-	insque(&amp;target-&gt;tlist, &amp;targets_list);
+-
+-	return 0;
+-out:
+-	free(target);
+-	return err;
+-}
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/Makefile	2005-11-04 05:51:37 UTC (rev 147)
+@@ -3,7 +3,7 @@
+ 
+ all: $(PROGRAMS)
+ 
+-tgtd: tgtd.o netlink.o ipc.o dl.o log.o
++tgtd: tgtd.o netlink.o ipc.o dl.o mgmt.o log.o
+ 	$(CC) -rdynamic -ldl $^ -o $@
+ 
+ tgtadm: tgtadm.o
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/dl.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -34,6 +34,11 @@
+ 
+ static struct driver_info dinfo[MAX_DL_HANDLES];
+ 
++char *typeid_to_name(int typeid)
++{
++	return dinfo[typeid].name;
++}
++
+ static char *dlname(char *d_name, char *entry)
+ {
+ 	int fd, err;
+
+Modified: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/dl.h	2005-11-04 05:51:37 UTC (rev 147)
+@@ -13,4 +13,6 @@
+ extern void *dl_event_fn(int tid, int typeid);
+ extern void *dl_proto_cmd_process(int tid, int typeid);
+ 
++extern char *typeid_to_name(int typeid);
++
+ #endif
+
+Modified: trunk/usr/ipc.c
+===================================================================
+--- trunk/usr/ipc.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/ipc.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -102,22 +102,19 @@
+ 	dprintf(&quot;%d %d %d\n&quot;, req-&gt;typeid, err, nlh-&gt;nlmsg_len);
+ 
+ 	fn = dl_ipc_fn(req-&gt;typeid);
+-	if (!fn) {
+-		eprintf(&quot;Cannot handle event %d\n&quot;, req-&gt;typeid);
+-		err = -EINVAL;
+-		goto fail;
+-	}
+-	err = fn((char *) nlh, rbuf);
++	if (fn)
++		err = fn((char *) nlh, rbuf);
++	else
++		err = tgt_mgmt((char *) nlh, rbuf);
+ 
+ send:
+ 	err = write(fd, nlh, nlh-&gt;nlmsg_len);
++	if (err &lt; 0)
++		eprintf(&quot;%d\n&quot;, err);
+ 
+ 	if (fd &gt; 0)
+ 		close(fd);
+ 
+-	if (err &lt; 0)
+-		eprintf(&quot;%d\n&quot;, err);
+-
+ 	return;
+ fail:
+ 	nlh = (struct nlmsghdr *) rbuf;
+
+Modified: trunk/usr/log.h
+===================================================================
+--- trunk/usr/log.h	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/log.h	2005-11-04 05:51:37 UTC (rev 147)
+@@ -73,12 +73,12 @@
+ 
+ #define eprintf(fmt, args...)						\
+ do {									\
+-	log_error(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
++	log_error(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
+ 
+ #define dprintf(fmt, args...)						\
+ do {									\
+-	log_debug(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
++	log_debug(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
+ 
+ #endif	/* LOG_H */
+
+Added: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/mgmt.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -0,0 +1,362 @@
++/*
++ * Generic management functions
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;ctype.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;sys/socket.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;linux/netlink.h&gt;
++
++#include &lt;tgt_if.h&gt;
++#include &quot;tgtd.h&quot;
++#include &quot;dl.h&quot;
++#include &quot;log.h&quot;
++#include &quot;tgtadm.h&quot;
++#include &quot;tgt_sysfs.h&quot;
++
++#ifndef O_LARGEFILE
++#define O_LARGEFILE	0100000
++#endif
++
++static void nlmsg_init(struct nlmsghdr *nlh, uint32_t seq,
++		       uint16_t type, uint32_t len, uint16_t flags)
++{
++	nlh-&gt;nlmsg_pid = getpid();
++	nlh-&gt;nlmsg_len = len;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_type = type;
++	nlh-&gt;nlmsg_seq = seq;
++}
++
++typedef void (init_tgt_event_t) (struct tgt_event *ev, struct tgtadm_req *req);
++
++int tgt_event_execute(struct tgtadm_req *req, int event, init_tgt_event_t *func)
++{
++	int err;
++	struct tgt_event *ev;
++	struct nlmsghdr *nlh;
++	char nlm_sev[NLMSG_SPACE(sizeof(struct tgt_event))];
++	char nlm_rev[NLMSG_SPACE(sizeof(struct tgt_event))];
++
++	memset(nlm_sev, 0, sizeof(nlm_sev));
++	memset(nlm_rev, 0, sizeof(nlm_rev));
++
++	nlh = (struct nlmsghdr *) nlm_sev;
++
++	nlmsg_init(nlh, 0, event, NLMSG_SPACE(sizeof(*ev)), 0);
++	ev = NLMSG_DATA(nlh);
++	func(ev, req);
++
++	err = nl_cmd_call(nl_fd, nlh-&gt;nlmsg_type, (char *) nlh,
++			  nlh-&gt;nlmsg_len, nlm_rev);
++	if (err &lt; 0)
++		eprintf(&quot;%d\n&quot;, err);
++	else
++		err = ((struct tgt_event *) NLMSG_DATA(nlm_rev))-&gt;k.event_res.err;
++
++	return err;
++}
++
++static void __ktarget_create(struct tgt_event *ev, struct tgtadm_req *req)
++{
++	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, typeid_to_name(req-&gt;typeid));
++}
++
++int ktarget_create(int typeid)
++{
++	struct tgtadm_req req;
++	req.typeid = typeid;
++
++	return tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_CREATE,
++				 __ktarget_create);
++}
++
++static void __ktarget_destroy(struct tgt_event *ev, struct tgtadm_req *req)
++{
++	ev-&gt;u.d_target.tid = req-&gt;tid;
++}
++
++int ktarget_destroy(int tid)
++{
++	struct tgtadm_req req;
++	req.tid = tid;
++
++	return tgt_event_execute(&amp;req, TGT_UEVENT_TARGET_DESTROY,
++				 __ktarget_destroy);
++}
++
++struct kdevice_create_info {
++	int fd;
++	char devtype[256];
++};
++
++static void __kdevice_create(struct tgt_event *ev, struct tgtadm_req *req)
++{
++	struct kdevice_create_info *info =
++		(struct kdevice_create_info *) ((char *) req + sizeof(*req));
++
++	ev-&gt;u.c_device.tid = req-&gt;tid;
++	ev-&gt;u.c_device.dev_id = req-&gt;lun;
++	ev-&gt;u.c_device.fd = info-&gt;fd;
++	strncpy(ev-&gt;u.c_device.type, info-&gt;devtype,
++		sizeof(ev-&gt;u.c_device.type));
++}
++
++void kdevice_create_parser(char *args, char **path, char **devtype)
++{
++	char *p, *q;
++
++	if (isspace(*args))
++		args++;
++	if ((p = strchr(args, '\n')))
++		*p = '\0';
++
++	while ((p = strsep(&amp;args, &quot;,&quot;))) {
++		if (!p)
++			continue;
++
++		if (!(q = strchr(p, '=')))
++			continue;
++		*q++ = '\0';
++
++		if (!strcmp(p, &quot;Path&quot;))
++			*path = q;
++		else if (!strcmp(p, &quot;Type&quot;))
++			*devtype = q;
++	}
++}
++
++int kdevice_create(int tid, uint64_t devid, char *path, char *devtype)
++{
++	int fd;
++	char buf[sizeof(struct tgtadm_req) + sizeof(struct kdevice_create_info)];
++	struct tgtadm_req *req;
++	struct kdevice_create_info *info;
++
++	dprintf(&quot;%d %&quot; PRIu64 &quot; %s %s\n&quot;, tid, devid, path, devtype);
++
++	req = (struct tgtadm_req *) buf;
++	info = (struct kdevice_create_info *) (buf + sizeof(*req));
++
++	req-&gt;tid = tid;
++	req-&gt;lun = devid;
++
++	fd = open(path, O_RDWR | O_LARGEFILE);
++	if (fd &lt; 0) {
++		eprintf(&quot;Could not open %s errno %d\n&quot;, path, errno);
++		return -errno;
++	}
++	info-&gt;fd = fd;
++	strncpy(info-&gt;devtype, devtype, sizeof(info-&gt;devtype));
++
++	return tgt_event_execute(req, TGT_UEVENT_DEVICE_CREATE,
++				 __kdevice_create);
++}
++
++static void __kdevice_destroy(struct tgt_event *ev, struct tgtadm_req *req)
++{
++	ev-&gt;u.d_device.tid = req-&gt;tid;
++	ev-&gt;u.d_device.dev_id = req-&gt;lun;
++}
++
++int kdevice_destroy(int tid, uint64_t devid)
++{
++	int fd, err;
++	struct tgtadm_req req;
++	char path[PATH_MAX], buf[PATH_MAX];
++
++	req.tid = tid;
++	req.lun = devid;
++
++	dprintf(&quot;%u %&quot; PRIu64 &quot;\n&quot;, tid, devid);
++
++	snprintf(path, sizeof(path),
++		 TGT_DEVICE_SYSFSDIR &quot;/device%d:%&quot; PRIu64 &quot;/fd&quot;, tid, devid);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		eprintf(&quot;%s %d\n&quot;, path, errno);
++		return -errno;
++	}
++
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;%d\n&quot;, err);
++		return err;
++	}
++	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
++
++	err = tgt_event_execute(&amp;req, TGT_UEVENT_DEVICE_DESTROY,
++				__kdevice_destroy);
++	if (!err)
++		close(fd);
++
++	return err;
++}
++
++static int target_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
++{
++	int err = -EINVAL;
++
++	switch (req-&gt;op) {
++	case OP_NEW:
++		err = ktarget_create(req-&gt;typeid);
++		break;
++	case OP_DELETE:
++		err = ktarget_destroy(req-&gt;tid);
++		break;
++	default:
++		break;
++	}
++
++	return err;
++}
++
++static int device_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
++{
++	int err = -EINVAL;
++	char *path, *devtype;
++
++	switch (req-&gt;op) {
++	case OP_NEW:
++		path = devtype = NULL;
++		kdevice_create_parser(params, &amp;path, &amp;devtype);
++		if (!path || !devtype)
++			eprintf(&quot;Invalid path or device type\n&quot;);
++		else
++			err = kdevice_create(req-&gt;tid, req-&gt;lun, path,devtype);
++		break;
++	case OP_DELETE:
++		err = kdevice_destroy(req-&gt;tid, req-&gt;lun);
++		break;
++	default:
++		break;
++	}
++
++	return err;
++}
++
++static int filter(const struct dirent *dir)
++{
++	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
++}
++
++static void all_devices_destroy(int tid)
++{
++	struct dirent **namelist;
++	char *p;
++	int i, nr;
++	uint64_t devid;
++
++	nr = scandir(TGT_DEVICE_SYSFSDIR, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return;
++
++	for (i = 0; i &lt; nr; i++) {
++
++		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++			;
++		if (tid != atoi(p))
++			continue;
++		p = strchr(p, ':');
++		if (!p)
++			continue;
++		devid = strtoull(++p, NULL, 10);
++		kdevice_destroy(tid, devid);
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++}
++
++static int system_mgmt(struct tgtadm_req *req, char *params, char *rbuf, int *rlen)
++{
++	int err = -EINVAL, i, nr, fd;
++	struct dirent **namelist;
++	char path[PATH_MAX], buf[PATH_MAX], *p;
++
++	if (req-&gt;op != OP_DELETE)
++		return err;
++
++	nr = scandir(TGT_TARGET_SYSFSDIR, &amp;namelist, filter, alphasort);
++	if (!nr)
++		return -ENOENT;
++
++	for (i = 0; i &lt; nr; i++) {
++		snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/%s/typeid&quot;,
++			 namelist[i]-&gt;d_name);
++
++		fd = open(path, O_RDONLY);
++		if (fd &lt; 0)
++			continue;
++		err = read(fd, buf, sizeof(buf));
++		close(fd);
++		if (err &lt; 0)
++			continue;
++
++		if (req-&gt;typeid == atoi(buf)) {
++			int tid;
++
++			for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++				;
++			tid = atoi(p);
++			all_devices_destroy(tid);
++			ktarget_destroy(tid);
++		}
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return 0;
++}
++
++int tgt_mgmt(char *sbuf, char *rbuf)
++{
++	struct nlmsghdr *nlh = (struct nlmsghdr *) sbuf;
++	struct tgtadm_req *req;
++	struct tgtadm_res *res;
++	int err = -EINVAL, rlen = 0;
++	char *params;
++
++	req = NLMSG_DATA(nlh);
++	params = (char *) req + sizeof(*req);
++
++	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s\n&quot;, nlh-&gt;nlmsg_len,
++		req-&gt;typeid, req-&gt;mode, req-&gt;op, req-&gt;tid, req-&gt;sid, req-&gt;lun, params);
++
++	switch (req-&gt;mode) {
++	case MODE_SYSTEM:
++		err = system_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	case MODE_TARGET:
++		err = target_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	case MODE_DEVICE:
++		err = device_mgmt(req, params, rbuf, &amp;rlen);
++		break;
++	default:
++		break;
++	}
++
++	nlh = (struct nlmsghdr *) rbuf;
++	nlh-&gt;nlmsg_len = NLMSG_LENGTH(rlen);
++	res = NLMSG_DATA(nlh);
++	res-&gt;err = err;
++
++	return err;
++}
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/tgtadm.c	2005-11-04 05:51:37 UTC (rev 147)
+@@ -32,8 +32,8 @@
+ #include &quot;tgtadm.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
+-#define eprintf(fmt, args...)					\
+-do {								\
++#define eprintf(fmt, args...)						\
++do {									\
+ 	fprintf(stderr, &quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
+ 
+@@ -264,6 +264,24 @@
+ 	return err;
+ }
+ 
++static int set_to_mode(uint32_t set)
++{
++	int mode = MODE_SYSTEM;
++
++	if (set &amp; (1 &lt;&lt; MODE_USER))
++		mode = MODE_USER;
++	else if (set &amp; (1 &lt;&lt; MODE_DEVICE))
++		mode = MODE_DEVICE;
++	else if (set &amp; (1 &lt;&lt; MODE_CONNECTION))
++		mode = MODE_CONNECTION;
++	else if (set &amp; (1 &lt;&lt; MODE_SESSION))
++		mode = MODE_SESSION;
++	else if (set &amp; (1 &lt;&lt; MODE_TARGET))
++		mode = MODE_TARGET;
++
++	return mode;
++}
++
+ static int str_to_op(char *str)
+ {
+ 	int op;
+@@ -308,25 +326,25 @@
+ 			break;
+ 		case 't':
+ 			tid = strtol(optarg, NULL, 10);
+-			set |= SET_TARGET;
++			set |= (1 &lt;&lt; MODE_TARGET);
+ 			break;
+ 		case 's':
+ 			sid = strtoull(optarg, NULL, 10);
+-			set |= SET_SESSION;
++			set |= (1 &lt;&lt; MODE_SESSION);
+ 			break;
+ 		case 'c':
+ 			cid = strtoul(optarg, NULL, 10);
+-			set |= SET_CONNECTION;
++			set |= (1 &lt;&lt; MODE_CONNECTION);
+ 			break;
+ 		case 'l':
+ 			lun = strtoull(optarg, NULL, 10);
+-			set |= SET_DEVICE;
++			set |= (1 &lt;&lt; MODE_DEVICE);
+ 			break;
+ 		case 'p':
+ 			params = optarg;
+ 			break;
+ 		case 'u':
+-			set |= SET_USER;
++			set |= (1 &lt;&lt; MODE_USER);
+ 			break;
+ 		case 'v':
+ 			printf(&quot;%s\n&quot;, program_name);
+@@ -357,8 +375,8 @@
+ 
+ 	req = (struct tgtadm_req *) sbuf;
+ 	req-&gt;typeid = typeid;
++	req-&gt;mode = set_to_mode(set);
+ 	req-&gt;op = op;
+-	req-&gt;set = set;
+ 	req-&gt;tid = tid;
+ 	req-&gt;sid = sid;
+ 	req-&gt;lun = lun;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2005-11-03 06:31:56 UTC (rev 146)
++++ trunk/usr/tgtadm.h	2005-11-04 05:51:37 UTC (rev 147)
+@@ -3,12 +3,6 @@
+ 
+ #define TGT_IPC_NAMESPACE &quot;TGT_IPC_ABSTRACT_NAMESPACE&quot;
+ 
+-#define	SET_TARGET	(1 &lt;&lt; 0)
+-#define	SET_SESSION	(1 &lt;&lt; 1)
+-#define	SET_CONNECTION	(1 &lt;&lt; 2)
+-#define	SET_DEVICE	(1 &lt;&lt; 3)
+-#define	SET_USER	(1 &lt;&lt; 4)
+-
+ enum tgtadm_op {
+ 	OP_NEW,
+ 	OP_DELETE,
+@@ -16,11 +10,22 @@
+ 	OP_SHOW,
+ };
+ 
++enum tgtadm_mode {
++	MODE_SYSTEM,
++	MODE_TARGET,
++	MODE_DEVICE,
++
++	MODE_SESSION,
++	MODE_CONNECTION,
++	MODE_USER,
++};
++
+ struct tgtadm_req {
+ 	int typeid;
+-	int op;
+-	uint32_t set;
+ 
++	enum tgtadm_mode mode;
++	enum tgtadm_op op;
++
+ 	int tid;
+ 	uint64_t sid;
+ 	int cid;
+@@ -31,4 +36,11 @@
+ 	int err;
+ };
+ 
++extern int tgt_mgmt(char *sbuf, char *rbuf);
++extern int ktarget_destroy(int tid);
++extern int ktarget_create(int typeid);
++extern int kdevice_destroy(int tid, uint64_t devid);
++extern int kdevice_create(int tid, uint64_t devid, char *path, char *devtype);
++extern void kdevice_create_parser(char *args, char **path, char **devtype);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000140.html">[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000142.html">[Stgt-svn] r148 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#141">[ date ]</a>
+              <a href="thread.html#141">[ thread ]</a>
+              <a href="subject.html#141">[ subject ]</a>
+              <a href="author.html#141">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

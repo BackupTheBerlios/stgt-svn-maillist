@@ -1,0 +1,117 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r339 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r339%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602271343.k1RDhKBo020848%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000325.html">
+   <LINK REL="Next"  HREF="000327.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r339 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r339%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602271343.k1RDhKBo020848%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r339 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 27 14:43:20 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000325.html">[Stgt-svn] r338 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000327.html">[Stgt-svn] r340 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#326">[ date ]</a>
+              <a href="thread.html#326">[ thread ]</a>
+              <a href="subject.html#326">[ subject ]</a>
+              <a href="author.html#326">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-27 14:43:17 +0100 (Mon, 27 Feb 2006)
+New Revision: 339
+
+Modified:
+   branches/use-scsi-ml/usr/mgmt.c
+   branches/use-scsi-ml/usr/target.c
+Log:
+Add some debug message.
+
+Modified: branches/use-scsi-ml/usr/mgmt.c
+===================================================================
+--- branches/use-scsi-ml/usr/mgmt.c	2006-02-27 12:19:23 UTC (rev 338)
++++ branches/use-scsi-ml/usr/mgmt.c	2006-02-27 13:43:17 UTC (rev 339)
+@@ -124,7 +124,7 @@
+ 	req = NLMSG_DATA(nlh);
+ 	params = (char *) req + sizeof(*req);
+ 
+-	eprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s %d\n&quot;,
++	dprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s %d\n&quot;,
+ 		nlh-&gt;nlmsg_len,	req-&gt;typeid, req-&gt;mode, req-&gt;op,
+ 		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
+ 
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-27 12:19:23 UTC (rev 338)
++++ branches/use-scsi-ml/usr/target.c	2006-02-27 13:43:17 UTC (rev 339)
+@@ -234,6 +234,9 @@
+ 		eprintf(&quot;Succeed to mmap the device %&quot; PRIx64 &quot;\n&quot;,
+ 			device-&gt;addr);
+ 
++	eprintf(&quot;Succeed to add a logical unit %&quot; PRIu64 &quot; to the target %d\n&quot;,
++		dev_id, tid);
++
+ 	return 0;
+ close_dev_fd:
+ 	close(dev_fd);
+@@ -510,6 +513,8 @@
+ 	if (err &lt; 0)
+ 		return -EINVAL;
+ 
++	eprintf(&quot;Succeed to bind the target %d to the scsi host %d\n&quot;,
++		tid, host_no);
+ 	hostt[host_no] = tgtt[tid];
+ 	return 0;
+ }
+@@ -564,6 +569,7 @@
+ 	if (err &lt; 0)
+ 		goto free_device_table;
+ 
++	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+ 	tgtt[tid] = target;
+ 	return 0;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000325.html">[Stgt-svn] r338 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000327.html">[Stgt-svn] r340 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#326">[ date ]</a>
+              <a href="thread.html#326">[ thread ]</a>
+              <a href="subject.html#326">[ subject ]</a>
+              <a href="author.html#326">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

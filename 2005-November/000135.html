@@ -1,0 +1,365 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r141 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r141%20-%20trunk/usr&In-Reply-To=%3C200511021640.jA2Geb7C013359%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000134.html">
+   <LINK REL="Next"  HREF="000136.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r141 - trunk/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r141%20-%20trunk/usr&In-Reply-To=%3C200511021640.jA2Geb7C013359%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r141 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Wed Nov  2 17:40:37 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000134.html">[Stgt-svn] r140 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000136.html">[Stgt-svn] r142 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#135">[ date ]</a>
+              <a href="thread.html#135">[ thread ]</a>
+              <a href="subject.html#135">[ subject ]</a>
+              <a href="author.html#135">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-02 17:40:36 +0100 (Wed, 02 Nov 2005)
+New Revision: 141
+
+Modified:
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/netlink.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Changes in tgt user-space code for /sys/class/tgt_type directory.
+
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-02 16:38:07 UTC (rev 140)
++++ trunk/usr/dl.c	2005-11-02 16:40:36 UTC (rev 141)
+@@ -12,6 +12,7 @@
+ #include &lt;string.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;dlfcn.h&gt;
++#include &lt;ctype.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;unistd.h&gt;
+@@ -22,11 +23,11 @@
+ 
+ #include &quot;log.h&quot;
+ #include &quot;dl.h&quot;
++#include &quot;tgtd.h&quot;
+ 
+-#define	MAX_DL_HANDLES	32
+-
+ struct driver_info {
+ 	char *name;
++	char *proto;
+ 	void *dl;
+ 	void *pdl;
+ };
+@@ -46,62 +47,102 @@
+ 	return -ENOENT;
+ }
+ 
++/* This function will be killed soon. */
+ static int tid_to_did(int tid)
+ {
+-	char path[PATH_MAX], name[PATH_MAX];
+-	int idx, fd, err;
++	char path[PATH_MAX], buf[PATH_MAX];
++	int fd, err;
+ 
+-	memset(path, 0, sizeof(path));
+-
+-	sprintf(path, &quot;/sys/class/tgt_target/target%d/name&quot;, tid);
++	sprintf(path, TGT_TARGET_SYSFSDIR &quot;/target%d/typeid&quot;, tid);
+ 	fd = open(path, O_RDONLY);
+ 	if (fd &lt; 0)
+ 		return fd;
+ 
+-	err = read(fd, name, sizeof(name));
++	err = read(fd, buf, sizeof(buf));
+ 	close(fd);
+ 	if (err &lt; 0)
+ 		return err;
+ 
+-	idx = driver_find_by_name(name);
+-	if (idx &lt; 0)
+-		eprintf(&quot;%d %s\n&quot;, idx, name);
++	return atoi(buf);
++}
+ 
+-	return idx;
++static char *dlname(char *d_name, char *entry)
++{
++	int fd, err;
++	char *p, path[PATH_MAX], buf[PATH_MAX];
++
++	snprintf(path, sizeof(path),
++		 TGT_TYPE_SYSFSDIR &quot;/%s/%s&quot;, d_name, entry);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		eprintf(&quot;%s\n&quot;, path);
++		return NULL;
++	}
++	memset(buf, 0, sizeof(buf));
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		eprintf(&quot;%s %d\n&quot;, path, errno);
++		return NULL;
++	}
++
++	p = strchr(buf, '\n');
++	if (p)
++		*p = '\0';
++
++	return strdup(buf);
+ }
+ 
+-int dl_init(char *p)
++static int filter(const struct dirent *dir)
+ {
+-	int i;
+-	char path[PATH_MAX], *driver, *proto;
++	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
++}
+ 
+-	for (i = 0; (driver = strsep(&amp;p, &quot;,&quot;)); i++) {
+-		proto = strchr(driver, ':');
+-		if (!proto)
++int dl_init(void)
++{
++	int i, nr, idx;
++	char path[PATH_MAX], *p;
++	struct dirent **namelist;
++	struct driver_info *di;
++
++	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
++	for (i = 0; i &lt; nr; i++) {
++		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++			;
++		idx = atoi(p);
++		if (idx &gt; MAX_DL_HANDLES) {
++			eprintf(&quot;Cannot load %s %d\n&quot;,
++				namelist[i]-&gt;d_name, idx);
+ 			continue;
++		}
+ 
+-		*proto++ = '\0';
+-		dprintf(&quot;%s %s\n&quot;, driver, proto);
++		p = dlname(namelist[i]-&gt;d_name, &quot;name&quot;);
++		if (!p)
++			continue;
+ 
+-		memset(path, 0, sizeof(path));
+-		strcpy(path, driver);
+-		strcat(path, &quot;.so&quot;);
+-		dinfo[i].name = strdup(driver);
+-		dinfo[i].dl = dlopen(path, RTLD_LAZY);
+-		if (!dinfo[i].dl) {
+-			fprintf(stderr, &quot;%s %s\n&quot;, path, dlerror());
++		di = &amp;dinfo[idx];
++
++		di-&gt;name = p;
++		snprintf(path, sizeof(path), &quot;%s.so&quot;, p);
++		di-&gt;dl = dlopen(path, RTLD_LAZY);
++		if (!di-&gt;dl) {
++			eprintf(&quot;%s %s\n&quot;, path, dlerror());
+ 			continue;
+ 		}
+ 
+-		memset(path, 0, sizeof(path));
+-		strcpy(path, proto);
+-		strcat(path, &quot;.so&quot;);
+-		dinfo[i].pdl = dlopen(path, RTLD_LAZY);
+-		if (!dinfo[i].pdl)
+-			fprintf(stderr, &quot;%s %s\n&quot;, path, dlerror());
++		p = dlname(namelist[i]-&gt;d_name, &quot;protocol&quot;);
++		if (!p)
++			continue;
++		di-&gt;proto = p;
++		snprintf(path, sizeof(path), &quot;%s.so&quot;, p);
++		di-&gt;pdl = dlopen(path, RTLD_LAZY);
++		if (!di-&gt;pdl) {
++			eprintf(&quot;%s %s\n&quot;, path, dlerror());
++			continue;
++		}
+ 	}
+ 
+-	return i;
++	return 0;
+ }
+ 
+ void dl_config_load(void)
+
+Modified: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-11-02 16:38:07 UTC (rev 140)
++++ trunk/usr/dl.h	2005-11-02 16:40:36 UTC (rev 141)
+@@ -1,7 +1,9 @@
+ #ifndef __DL_H
+ #define __DL_H
+ 
+-extern int dl_init(char *data);
++#define	MAX_DL_HANDLES	16
++
++extern int dl_init(void);
+ extern void dl_config_load(void);
+ extern struct pollfd * dl_poll_init(int *nr);
+ 
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-11-02 16:38:07 UTC (rev 140)
++++ trunk/usr/netlink.c	2005-11-02 16:40:36 UTC (rev 141)
+@@ -200,25 +200,22 @@
+ {
+ 	int err;
+ 	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	char rbuf[8192];
+ 	char nlmsg[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 
+ 	err = nl_cmd_call(fd, TGT_UEVENT_START, nlmsg,
+-			  NLMSG_SPACE(sizeof(struct tgt_event)), rbuf);
++			  NLMSG_SPACE(sizeof(struct tgt_event)), NULL);
+ 
+-	nlh = (struct nlmsghdr *) rbuf;
+-	ev = (struct tgt_event *) NLMSG_DATA(nlh);
++	ev = (struct tgt_event *) NLMSG_DATA(nlmsg);
+ 
+ 	if (err &lt; 0 || ev-&gt;k.event_res.err &lt; 0) {
+ 		eprintf(&quot;%d %d\n&quot;, err, ev-&gt;k.event_res.err);
+-		exit(-1);
++		return -EINVAL;
+ 	}
+ 
+-	return dl_init((char *) ev-&gt;data);
++	return 0;
+ }
+ 
+-int nl_open(int *nr)
++int nl_open(void)
+ {
+ 	int fd, err;
+ 
+@@ -249,7 +246,9 @@
+ 	dest_addr.nl_pid = 0; /* kernel */
+ 	dest_addr.nl_groups = 0; /* unicast */
+ 
+-	*nr = nl_start(fd);
++	err = nl_start(fd);
++	if (err &lt; 0)
++		goto out;
+ 
+ 	return fd;
+ 
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2005-11-02 16:38:07 UTC (rev 140)
++++ trunk/usr/tgtd.c	2005-11-02 16:40:36 UTC (rev 141)
+@@ -26,7 +26,7 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;dl.h&quot;
+ 
+-#define	POLLS_PER_DRV	64
++#define	POLLS_PER_DRV	32
+ 
+ int nl_fd, ipc_fd;
+ 
+@@ -154,9 +154,8 @@
+ 
+ int main(int argc, char **argv)
+ {
+-	int ch, longindex;
++	int ch, longindex, nr;
+ 	int is_daemon = 1, is_debug = 1;
+-	int nr;
+ 	pid_t pid;
+ 	struct pollfd *poll_array;
+ 
+@@ -198,7 +197,7 @@
+ 		setsid();
+ 	}
+ 
+-	nl_fd = nl_open(&amp;nr);
++	nl_fd = nl_open();
+ 	if (nl_fd &lt; 0)
+ 		exit(nl_fd);
+ 
+@@ -206,6 +205,9 @@
+ 	if (ipc_fd &lt; 0)
+ 		exit(ipc_fd);
+ 
++	dl_init();
++
++	nr = MAX_DL_HANDLES;
+ 	poll_array = poll_init(nr);
+ 
+ 	dl_config_load();
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2005-11-02 16:38:07 UTC (rev 140)
++++ trunk/usr/tgtd.h	2005-11-02 16:40:36 UTC (rev 141)
+@@ -5,11 +5,14 @@
+ 
+ extern int nl_fd;
+ 
+-extern int nl_open(int *nr_drivers);
++extern int nl_open(void);
+ extern void nl_event_handle(int fd);
+ extern int nl_cmd_call(int fd, int type, char *data, int size, char *rbuf);
+ 
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+ 
++#define	TGT_TYPE_SYSFSDIR	&quot;/sys/class/tgt_type&quot;
++#define	TGT_TARGET_SYSFSDIR	&quot;/sys/class/tgt_target&quot;
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000134.html">[Stgt-svn] r140 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000136.html">[Stgt-svn] r142 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#135">[ date ]</a>
+              <a href="thread.html#135">[ thread ]</a>
+              <a href="subject.html#135">[ subject ]</a>
+              <a href="author.html#135">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

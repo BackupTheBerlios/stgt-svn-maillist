@@ -1,0 +1,502 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r140 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r140%20-%20trunk/kernel&In-Reply-To=%3C200511021638.jA2Gc9pP013027%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000135.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r140 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r140%20-%20trunk/kernel&In-Reply-To=%3C200511021638.jA2Gc9pP013027%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r140 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Nov  2 17:38:09 CET 2005</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000135.html">[Stgt-svn] r141 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#134">[ date ]</a>
+              <a href="thread.html#134">[ thread ]</a>
+              <a href="subject.html#134">[ subject ]</a>
+              <a href="author.html#134">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-02 17:38:07 +0100 (Wed, 02 Nov 2005)
+New Revision: 140
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_sysfs.c
+   trunk/kernel/tgt_target.h
+Log:
+Add /sys/class/tgt_driver directory to route requests to correct
+protocol libraries. I chose this way because it is the easiest
+way. However, there are better alternatives. We will rewrite sysfs
+code after the sysfs stuff in mainline settles.
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-29 09:18:48 UTC (rev 139)
++++ trunk/kernel/tgt.c	2005-11-02 16:38:07 UTC (rev 140)
+@@ -44,12 +44,6 @@
+ #define	cmd_hashfn(key)	hash_long((key), TGT_HASH_ORDER)
+ static struct list_head cmd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+ 
+-struct target_type_internal {
+-	struct list_head list;
+-	struct tgt_target_template *tt;
+-	struct tgt_protocol *proto;
+-};
+-
+ static struct target_type_internal *target_template_get(const char *name)
+ {
+ 	unsigned long flags;
+@@ -77,8 +71,10 @@
+ 
+ int tgt_target_template_register(struct tgt_target_template *tt)
+ {
++	static int target_type_id;
+ 	unsigned long flags;
+ 	struct target_type_internal *ti;
++	int err;
+ 
+ 	ti = kzalloc(sizeof(*ti), GFP_KERNEL);
+ 	if (!ti)
+@@ -94,11 +90,22 @@
+ 		return -EINVAL;
+ 	}
+ 
++	err = tgt_sysfs_register_type(ti);
++	if (err)
++		goto proto_put;
++
+ 	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+ 	list_add_tail(&amp;ti-&gt;list, &amp;target_tmpl_list);
++	ti-&gt;typeid = target_type_id++;
+ 	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+ 
+ 	return 0;
++
++proto_put:
++	tgt_protocol_put(ti-&gt;proto);
++	kfree(ti);
++
++	return err;
+ }
+ EXPORT_SYMBOL_GPL(tgt_target_template_register);
+ 
+@@ -112,12 +119,16 @@
+ 	list_for_each_entry(ti, &amp;target_tmpl_list, list)
+ 		if (ti-&gt;tt == tt) {
+ 			list_del(&amp;ti-&gt;list);
+-			tgt_protocol_put(ti-&gt;proto);
+-			kfree(ti);
+-			break;
++			goto found;
+ 		}
+-
++	ti = NULL;
++found:
+ 	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
++
++	if (ti) {
++		tgt_protocol_put(ti-&gt;proto);
++		tgt_sysfs_unregister_type(ti);
++	}
+ }
+ EXPORT_SYMBOL_GPL(tgt_target_template_unregister);
+ 
+@@ -154,6 +165,7 @@
+ 
+ 	target-&gt;tt = ti-&gt;tt;
+ 	target-&gt;proto = ti-&gt;proto;
++	target-&gt;typeid = ti-&gt;typeid;
+ 	target-&gt;tid = target_id++;
+ 	spin_lock_init(&amp;target-&gt;lock);
+ 
+@@ -861,44 +873,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
+-static void tgt_start(void)
+-{
+-	struct tgt_event ev;
+-	struct target_type_internal *ti;
+-	unsigned long flags;
+-	int n, err, done, rest = PAGE_SIZE;
+-	char *p;
+-
+-	p = kzalloc(rest, GFP_KERNEL);
+-	if (!p)
+-		rest = 0;
+-
+-	n = done = 0;
+-
+-	spin_lock_irqsave(&amp;target_tmpl_lock, flags);
+-	list_for_each_entry(ti, &amp;target_tmpl_list, list) {
+-		dprintk(&quot;%s %s\n&quot;, ti-&gt;tt-&gt;name, ti-&gt;proto-&gt;name);
+-		if (strlen(ti-&gt;tt-&gt;name) + strlen(ti-&gt;proto-&gt;name) + 2 &gt; rest)
+-			break;
+-		err = snprintf(p + done, rest, &quot;%s:%s,&quot;,
+-			       ti-&gt;tt-&gt;name, ti-&gt;proto-&gt;name);
+-		if (err &lt; 0)
+-			break;
+-		rest -= err;
+-		done += err;
+-		n++;
+-	}
+-	spin_unlock_irqrestore(&amp;target_tmpl_lock, flags);
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-	send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, p, done,
+-		       GFP_KERNEL | __GFP_NOFAIL);
+-
+-	kfree(p);
+-
+-	eprintk(&quot;start %d target drivers\n&quot;, n);
+-}
+-
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	int err = 0;
+@@ -912,7 +886,7 @@
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
+ 		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
+-		tgt_start();
++		eprintk(&quot;start target drivers\n&quot;);
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+ 		target = tgt_target_create(ev-&gt;u.c_target.type,
+@@ -992,8 +966,7 @@
+ 		 * TODO for passthru commands the lower level should
+ 		 * probably handle the result or we should modify this
+ 		 */
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_START &amp;&amp;
+-		    nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
++		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES &amp;&amp;
+ 		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
+ 			struct tgt_event ev;
+ 
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-10-29 09:18:48 UTC (rev 139)
++++ trunk/kernel/tgt_sysfs.c	2005-11-02 16:38:07 UTC (rev 140)
+@@ -9,56 +9,6 @@
+ #include &lt;tgt_target.h&gt;
+ #include &lt;tgt_device.h&gt;
+ 
+-/*
+- * Target files
+- */
+-#define tgt_target_show_fn(field, format_string)			\
+-static ssize_t								\
+-show_##field (struct class_device *cdev, char *buf)			\
+-{									\
+-	struct tgt_target *target = cdev_to_tgt_target(cdev);		\
+-	return snprintf (buf, 20, format_string, target-&gt;field);	\
+-}
+-
+-#define tgt_target_rd_attr(field, format_string)		\
+-	tgt_target_show_fn(field, format_string)		\
+-static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+-
+-#define tgt_target_template_show_fn(field, format_string)		\
+-static ssize_t								\
+-show_##field (struct class_device *cdev, char *buf)			\
+-{									\
+-	struct tgt_target *target = cdev_to_tgt_target(cdev);		\
+-	return snprintf (buf, 20, format_string, target-&gt;tt-&gt;field);	\
+-}
+-
+-#define tgt_target_template_rd_attr(field, format_string)		\
+-	tgt_target_template_show_fn(field, format_string)		\
+-static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+-
+-tgt_target_rd_attr(queued_cmds, &quot;%u\n&quot;);
+-tgt_target_template_rd_attr(name, &quot;%s\n&quot;);
+-tgt_target_template_rd_attr(protocol, &quot;%s\n&quot;);
+-
+-static struct class_device_attribute *tgt_target_attrs[] = {
+-	&amp;class_device_attr_queued_cmds,
+-	&amp;class_device_attr_name,
+-	&amp;class_device_attr_protocol,
+-	NULL
+-};
+-
+-static void tgt_target_class_release(struct class_device *cdev)
+-{
+-	struct tgt_target *target = cdev_to_tgt_target(cdev);
+-	kfree(target-&gt;tt_data);
+-	kfree(target);
+-}
+-
+-static struct class tgt_target_class = {
+-	.name = &quot;tgt_target&quot;,
+-	.release = tgt_target_class_release,
+-};
+-
+ static struct class_device_attribute *class_attr_overridden(
+ 				struct class_device_attribute **attrs,
+ 				struct class_device_attribute *attr)
+@@ -75,6 +25,7 @@
+ }
+ 
+ static int class_attr_add(struct class_device *classdev,
++			  struct class_device_attribute **attrs,
+ 			  struct class_device_attribute *attr)
+ {
+ 	struct class_device_attribute *base_attr;
+@@ -82,7 +33,7 @@
+ 	/*
+ 	 * Spare the caller from having to copy things it's not interested in.
+ 	*/
+-	base_attr = class_attr_overridden(tgt_target_attrs, attr);
++	base_attr = class_attr_overridden(attrs, attr);
+ 	if (base_attr) {
+ 		/* extend permissions */
+ 		attr-&gt;attr.mode |= base_attr-&gt;attr.mode;
+@@ -97,6 +48,109 @@
+ 	return class_device_create_file(classdev, attr);
+ }
+ 
++#define cdev_to_tgt_type(cdev) \
++	container_of(cdev, struct target_type_internal, cdev)
++
++#define tgt_target_template_show_fn(field, format_string)		\
++static ssize_t								\
++show_##field (struct class_device *cdev, char *buf)			\
++{									\
++	struct target_type_internal *ti = cdev_to_tgt_type(cdev);	\
++	return snprintf (buf, 20, format_string, ti-&gt;tt-&gt;field);	\
++}
++
++#define tgt_target_template_rd_attr(field, format_string)		\
++	tgt_target_template_show_fn(field, format_string)		\
++static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
++
++tgt_target_template_rd_attr(name, &quot;%s\n&quot;);
++tgt_target_template_rd_attr(protocol, &quot;%s\n&quot;);
++
++static struct class_device_attribute *tgt_type_attrs[] = {
++	&amp;class_device_attr_name,
++	&amp;class_device_attr_protocol,
++	NULL,
++};
++
++static void tgt_type_class_release(struct class_device *cdev)
++{
++	struct target_type_internal *ti = cdev_to_tgt_type(cdev);
++	kfree(ti);
++}
++
++static struct class tgt_type_class = {
++	.name = &quot;tgt_type&quot;,
++	.release = tgt_type_class_release,
++};
++
++int tgt_sysfs_register_type(struct target_type_internal *ti)
++{
++	struct class_device *cdev = &amp;ti-&gt;cdev;
++	int i, err;
++
++	cdev-&gt;class = &amp;tgt_type_class;
++	snprintf(cdev-&gt;class_id, BUS_ID_SIZE, &quot;driver%d&quot;, ti-&gt;typeid);
++
++	err = class_device_register(cdev);
++	if (err)
++		return err;
++
++	for (i = 0; tgt_type_attrs[i]; i++) {
++		err = class_device_create_file(&amp;ti-&gt;cdev,
++					       tgt_type_attrs[i]);
++		if (err)
++			goto cleanup;
++	}
++
++	return 0;
++
++cleanup:
++	class_device_unregister(cdev);
++
++	return err;
++}
++
++void tgt_sysfs_unregister_type(struct target_type_internal *ti)
++{
++	class_device_unregister(&amp;ti-&gt;cdev);
++}
++
++/*
++ * Target files
++ */
++#define tgt_target_show_fn(field, format_string)			\
++static ssize_t								\
++show_##field (struct class_device *cdev, char *buf)			\
++{									\
++	struct tgt_target *target = cdev_to_tgt_target(cdev);		\
++	return snprintf (buf, 20, format_string, target-&gt;field);	\
++}
++
++#define tgt_target_rd_attr(field, format_string)		\
++	tgt_target_show_fn(field, format_string)		\
++static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
++
++tgt_target_rd_attr(queued_cmds, &quot;%u\n&quot;);
++tgt_target_rd_attr(typeid, &quot;%d\n&quot;);
++
++static struct class_device_attribute *tgt_target_attrs[] = {
++	&amp;class_device_attr_queued_cmds,
++	&amp;class_device_attr_typeid,
++	NULL
++};
++
++static void tgt_target_class_release(struct class_device *cdev)
++{
++	struct tgt_target *target = cdev_to_tgt_target(cdev);
++	kfree(target-&gt;tt_data);
++	kfree(target);
++}
++
++static struct class tgt_target_class = {
++	.name = &quot;tgt_target&quot;,
++	.release = tgt_target_class_release,
++};
++
+ int tgt_sysfs_register_target(struct tgt_target *target)
+ {
+ 	struct class_device *cdev = &amp;target-&gt;cdev;
+@@ -112,9 +166,10 @@
+ 	if (target-&gt;tt-&gt;target_attrs) {
+ 		for (i = 0; target-&gt;tt-&gt;target_attrs[i]; i++) {
+ 			err = class_attr_add(&amp;target-&gt;cdev,
++					     tgt_target_attrs,
+ 					     target-&gt;tt-&gt;target_attrs[i]);
+-                        if (err)
+-                                goto cleanup;
++			if (err)
++				goto cleanup;
+ 		}
+ 	}
+ 
+@@ -203,6 +258,7 @@
+ 	if (device-&gt;dt-&gt;device_attrs) {
+ 		for (i = 0; device-&gt;dt-&gt;device_attrs[i]; i++) {
+ 			err = class_attr_add(&amp;device-&gt;cdev,
++					     tgt_target_attrs,
+ 					     device-&gt;dt-&gt;device_attrs[i]);
+                         if (err)
+                                 goto cleanup;
+@@ -237,18 +293,31 @@
+ {
+ 	int err;
+ 
+-	err = class_register(&amp;tgt_target_class);
++	err = class_register(&amp;tgt_type_class);
+ 	if (err)
+ 		return err;
+ 
++	err = class_register(&amp;tgt_target_class);
++	if (err)
++		goto unregister_type;
++
+ 	err = class_register(&amp;tgt_device_class);
+ 	if (err)
+-		class_unregister(&amp;tgt_target_class);
++		goto unregister_target;
++
++	return 0;
++
++unregister_target:
++	class_unregister(&amp;tgt_target_class);
++unregister_type:
++	class_unregister(&amp;tgt_type_class);
++
+ 	return err;
+ }
+ 
+ void tgt_sysfs_exit(void)
+ {
++	class_unregister(&amp;tgt_type_class);
+ 	class_unregister(&amp;tgt_target_class);
+ 	class_unregister(&amp;tgt_device_class);
+ }
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-10-29 09:18:48 UTC (rev 139)
++++ trunk/kernel/tgt_target.h	2005-11-02 16:38:07 UTC (rev 140)
+@@ -15,6 +15,14 @@
+ struct tgt_target;
+ struct tgt_cmd;
+ 
++struct target_type_internal {
++	int typeid;
++	struct list_head list;
++	struct tgt_target_template *tt;
++	struct tgt_protocol *proto;
++	struct class_device cdev;
++};
++
+ enum {
+ 	TGT_CMD_XMIT_OK,
+ 	TGT_CMD_XMIT_FAILED,
+@@ -69,6 +77,7 @@
+ };
+ 
+ struct tgt_target {
++	int typeid;
+ 	int tid;
+ 	struct tgt_target_template *tt;
+ 	void *tt_data;
+@@ -97,7 +106,10 @@
+ extern int tgt_target_destroy(struct tgt_target *target);
+ extern int tgt_sysfs_register_target(struct tgt_target *target);
+ extern void tgt_sysfs_unregister_target(struct tgt_target *target);
++
+ extern int tgt_target_template_register(struct tgt_target_template *tt);
+ extern void tgt_target_template_unregister(struct tgt_target_template *tt);
++extern int tgt_sysfs_register_type(struct target_type_internal *ti);
++extern void tgt_sysfs_unregister_type(struct target_type_internal *ti);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000135.html">[Stgt-svn] r141 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#134">[ date ]</a>
+              <a href="thread.html#134">[ thread ]</a>
+              <a href="subject.html#134">[ subject ]</a>
+              <a href="author.html#134">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

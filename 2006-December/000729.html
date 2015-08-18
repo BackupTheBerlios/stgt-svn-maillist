@@ -1,0 +1,150 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r742 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r742%20-%20trunk/usr&In-Reply-To=%3C200612301436.kBUEa6Mc000227%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000728.html">
+   <LINK REL="Next"  HREF="000730.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r742 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r742%20-%20trunk/usr&In-Reply-To=%3C200612301436.kBUEa6Mc000227%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r742 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Dec 30 15:36:06 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000728.html">[Stgt-svn] r741 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000730.html">[Stgt-svn] r743 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#729">[ date ]</a>
+              <a href="thread.html#729">[ thread ]</a>
+              <a href="subject.html#729">[ subject ]</a>
+              <a href="author.html#729">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-30 15:36:05 +0100 (Sat, 30 Dec 2006)
+New Revision: 742
+
+Modified:
+   trunk/usr/tgtadm.c
+Log:
+Update tgtadm's help message.
+
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-12-30 14:06:29 UTC (rev 741)
++++ trunk/usr/tgtadm.c	2006-12-30 14:36:05 UTC (rev 742)
+@@ -118,41 +118,43 @@
+ 		printf(&quot;\
+ Linux SCSI Target Framework Administration Utility.\n\
+ \n\
+-  --op create --tid=[id] --params [name]\n\
+-                        add a new target with [id]. [id] must not be zero.\n\
+-  --op delete --tid=[id]\n\
+-                        delete specific target with [id]. The target must\n\
+-                        have no active sessions.\n\
+-  --op new --tid=[id] --lun=[lun] --params Path=[path]\n\
+-                        add a new logical unit with [lun] to specific\n\
++  --lld [driver] --mode target --op new --tid=[id] --targetname [name]\n\
++                        add a new target with [id] and [name]. [id] must not be zero.\n\
++  --lld [driver] --mode target --op delete --tid=[id]\n\
++                        delete the specific target with [id]. The target must\n\
++                        have no activity.\n\
++  --lld [driver] --mode target --op show\n\
++                        show all the targets.\n\
++  --lld [driver] --mode target --op show --tid=[id]\n\
++                        show the specific target's parameters.\n\
++  --lld [driver] --mode target --op update --tid=[id] --name=[param] --value=[value]\n\
++                        change the target parameters of the specific\n\
++                        target with [id].\n\
++  --lld [driver] --mode target --op bind --tid=[id] --initiator-address=[src]\n\
++                        enable the target to accept the specific initiators.\n\
++  --lld [driver] --mode target --op unbind --tid=[id] --initiator-address=[src]\n\
++                        disable the specific permitted initiators.\n\
++  --lld [driver] --mode logicalunit --op new --tid=[id] --lun=[lun] --backing-store=[path]\n\
++                        add a new logical unit with [lun] to the specific\n\
+                         target with [id]. The logical unit is offered\n\
+                         to the initiators. [path] must be block device files\n\
+                         (including LVM and RAID devices) or regular files.\n\
+-  --op delete --tid=[id] --lun=[lun]\n\
+-                        delete specific logical unit with [lun] that\n\
++  --lld [driver] --mode logicalunit --op delete --tid=[id] --lun=[lun]\n\
++                        delete the specific logical unit with [lun] that\n\
+                         the target with [id] has.\n\
+-  --op delete --tid=[id] --sid=[sid] --cid=[cid]\n\
+-                        delete specific connection with [cid] in a session\n\
+-                        with [sid] that the target with [id] has.\n\
+-                        If the session has no connections after\n\
+-                        the operation, the session will be deleted\n\
+-                        automatically.\n\
+-  --op delete           stop all activity.\n\
+-  --op update --tid=[id] --params=key1=value1,key2=value2,...\n\
+-                        change the target parameters of specific\n\
+-                        target with [id].\n\
+-  --op new --tid=[id] --user --params=[user]=[name],Password=[pass]\n\
+-                        add a new account with [pass] for specific target.\n\
++  --lld [driver] --mode account --op new --user=[name] --password=[pass]\n\
++                        add a new account with [name] and [pass].\n\
++  --lld [driver] --mode account --op delete --user=[name]\n\
++                        delete the specific account having [name].\n\
++  --lld [driver] --mode account --op bind --tid=[id] --user=[name] [--outgoing]\n\
++                        add the specific account having [name] to\n\
++                        the specific target with [id].\n\
+                         [user] could be [IncomingUser] or [OutgoingUser].\n\
+-                        If you don't specify a target (omit --tid option),\n\
+-                        you add a new account for discovery sessions.\n\
+-  --op delete --tid=[id] --user --params=[user]=[name]\n\
+-                        delete specific account having [name] of specific\n\
+-                        target. [user] could be [IncomingUser] or\n\
+-                        [OutgoingUser].\n\
+-                        If you don't specify a target (omit --tid option),\n\
+-                        you delete the account for discovery sessions.\n\
+-  --version             display version and exit\n\
++                        If you use --outgoing option, the account will\n\
++                        be added as an outgoing account.\n\
++  --lld [driver] --mode account --op unbind --tid=[id] --user=[name]\n\
++                        delete the specific account having [name] from specific\n\
++                        target.\n\
+   --help                display this help and exit\n\
+ \n\
+ Report bugs to &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">stgt-devel at lists.berlios.de</A>&gt;.\n&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000728.html">[Stgt-svn] r741 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000730.html">[Stgt-svn] r743 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#729">[ date ]</a>
+              <a href="thread.html#729">[ thread ]</a>
+              <a href="subject.html#729">[ subject ]</a>
+              <a href="author.html#729">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

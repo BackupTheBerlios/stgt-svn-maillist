@@ -1,0 +1,91 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r643 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r643%20-%20trunk/usr&In-Reply-To=%3C200611140940.kAE9ej7C019705%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000629.html">
+   <LINK REL="Next"  HREF="000631.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r643 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r643%20-%20trunk/usr&In-Reply-To=%3C200611140940.kAE9ej7C019705%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r643 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Nov 14 10:40:45 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000629.html">[Stgt-svn] r642 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000631.html">[Stgt-svn] r644 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#630">[ date ]</a>
+              <a href="thread.html#630">[ thread ]</a>
+              <a href="subject.html#630">[ subject ]</a>
+              <a href="author.html#630">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-14 10:40:44 +0100 (Tue, 14 Nov 2006)
+New Revision: 643
+
+Modified:
+   trunk/usr/tgtd.c
+Log:
+Fix lld initialization bugs. ibmvio driver is back now.
+
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-11-13 13:37:04 UTC (rev 642)
++++ trunk/usr/tgtd.c	2006-11-14 09:40:44 UTC (rev 643)
+@@ -243,10 +243,11 @@
+ 			err = tgt_drivers[i]-&gt;init();
+ 			if (err)
+ 				continue;
+-			if (tgt_drivers[i]-&gt;use_kernel)
+-				*use_kernel++;
+-			nr++;
+ 		}
++
++		if (tgt_drivers[i]-&gt;use_kernel)
++			(*use_kernel)++;
++		nr++;
+ 	}
+ 
+ 	return nr;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000629.html">[Stgt-svn] r642 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000631.html">[Stgt-svn] r644 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#630">[ date ]</a>
+              <a href="thread.html#630">[ thread ]</a>
+              <a href="subject.html#630">[ subject ]</a>
+              <a href="author.html#630">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,129 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r751 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r751%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701040722.l047MxQm001875%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000737.html">
+   <LINK REL="Next"  HREF="000739.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r751 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r751%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200701040722.l047MxQm001875%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r751 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Jan  4 08:22:59 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000737.html">[Stgt-svn] r750 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000739.html">[Stgt-svn] r752 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#738">[ date ]</a>
+              <a href="thread.html#738">[ thread ]</a>
+              <a href="subject.html#738">[ subject ]</a>
+              <a href="author.html#738">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-04 08:22:59 +0100 (Thu, 04 Jan 2007)
+New Revision: 751
+
+Modified:
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/scsi.h
+   trunk/usr/util.h
+Log:
+Fix define conflict.
+
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-01-02 16:01:15 UTC (rev 750)
++++ trunk/usr/iscsi/iscsid.h	2007-01-04 07:22:59 UTC (rev 751)
+@@ -10,7 +10,6 @@
+ #include &lt;stdint.h&gt;
+ #include &lt;inttypes.h&gt;
+ #include &lt;linux/types.h&gt;
+-#include &lt;asm/byteorder.h&gt;
+ 
+ #include &quot;transport.h&quot;
+ #include &quot;list.h&quot;
+
+Modified: trunk/usr/scsi.h
+===================================================================
+--- trunk/usr/scsi.h	2007-01-02 16:01:15 UTC (rev 750)
++++ trunk/usr/scsi.h	2007-01-04 07:22:59 UTC (rev 751)
+@@ -4,6 +4,9 @@
+  * better if we include kernel's one directly.
+  */
+ 
++#ifndef __SCSI_H
++#define __SCSI_H
++
+ #define TEST_UNIT_READY       0x00
+ #define REZERO_UNIT           0x01
+ #define REQUEST_SENSE         0x03
+@@ -143,3 +146,4 @@
+ #define TASK_ABORTED         0x20
+ #define SAM_STAT_TASK_ABORTED    0x40
+ 
++#endif
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2007-01-02 16:01:15 UTC (rev 750)
++++ trunk/usr/util.h	2007-01-04 07:22:59 UTC (rev 751)
+@@ -16,13 +16,17 @@
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_MASK)) + PAGE_SIZE - 1) &gt;&gt; PAGE_SHIFT)
+ 
+ #if __BYTE_ORDER == __LITTLE_ENDIAN
++#define __cpu_to_be16(x) bswap_16(x)
+ #define __cpu_to_be32(x) bswap_32(x)
+ #define __cpu_to_be64(x) bswap_64(x)
++#define __be16_to_cpu(x) bswap_16(x)
+ #define __be32_to_cpu(x) bswap_32(x)
+ #define __be64_to_cpu(x) bswap_64(x)
+ #else
++#define __cpu_to_be16(x) (x)
+ #define __cpu_to_be32(x) (x)
+ #define __cpu_to_be64(x) (x)
++#define __be16_to_cpu(x) (x)
+ #define __be32_to_cpu(x) (x)
+ #define __be64_to_cpu(x) (x)
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000737.html">[Stgt-svn] r750 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000739.html">[Stgt-svn] r752 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#738">[ date ]</a>
+              <a href="thread.html#738">[ thread ]</a>
+              <a href="subject.html#738">[ subject ]</a>
+              <a href="author.html#738">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

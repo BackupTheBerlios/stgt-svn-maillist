@@ -1,0 +1,351 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r144 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r144%20-%20trunk/usr&In-Reply-To=%3C200511030237.jA32bGV5015292%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000137.html">
+   <LINK REL="Next"  HREF="000139.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r144 - trunk/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r144%20-%20trunk/usr&In-Reply-To=%3C200511030237.jA32bGV5015292%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r144 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Nov  3 03:37:16 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000137.html">[Stgt-svn] r143 - in trunk: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000139.html">[Stgt-svn] r145 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#138">[ date ]</a>
+              <a href="thread.html#138">[ thread ]</a>
+              <a href="subject.html#138">[ subject ]</a>
+              <a href="author.html#138">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-03 03:37:15 +0100 (Thu, 03 Nov 2005)
+New Revision: 144
+
+Added:
+   trunk/usr/tgt_sysfs.h
+Modified:
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/ipc.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+   trunk/usr/tgtd.h
+Log:
+Replace driver string in tgtadm_req struct with typeid.
+
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/dl.c	2005-11-03 02:37:15 UTC (rev 144)
+@@ -24,6 +24,7 @@
+ #include &quot;log.h&quot;
+ #include &quot;dl.h&quot;
+ #include &quot;tgtd.h&quot;
++#include &quot;tgt_sysfs.h&quot;
+ 
+ struct driver_info {
+ 	char *name;
+@@ -34,19 +35,6 @@
+ 
+ static struct driver_info dinfo[MAX_DL_HANDLES];
+ 
+-static int driver_find_by_name(char *name)
+-{
+-	int i;
+-
+-	for (i = 0; i &lt; MAX_DL_HANDLES; i++) {
+-		if (dinfo[i].dl &amp;&amp;
+-		    !strncmp(dinfo[i].name, name, strlen(dinfo[i].name)))
+-			return i;
+-	}
+-
+-	return -ENOENT;
+-}
+-
+ static char *dlname(char *d_name, char *entry)
+ {
+ 	int fd, err;
+@@ -123,6 +111,10 @@
+ 		}
+ 	}
+ 
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
+ 	return 0;
+ }
+ 
+@@ -157,18 +149,11 @@
+ 	return NULL;
+ }
+ 
+-void *dl_ipc_fn(char *name)
++void *dl_ipc_fn(int typeid)
+ {
+-	int idx = driver_find_by_name(name);
++	if (dinfo[typeid].dl)
++		return dlsym(dinfo[typeid].dl, &quot;ipc_mgmt&quot;);
+ 
+-	if (idx &lt; 0) {
+-		eprintf(&quot;%d %s\n&quot;, idx, name);
+-		return NULL;
+-	}
+-
+-	if (dinfo[idx].dl)
+-		return dlsym(dinfo[idx].dl, &quot;ipc_mgmt&quot;);
+-
+ 	return NULL;
+ }
+ 
+
+Modified: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/dl.h	2005-11-03 02:37:15 UTC (rev 144)
+@@ -9,7 +9,7 @@
+ 
+ extern void *dl_poll_init_fn(int idx);
+ extern void *dl_poll_fn(int idx);
+-extern void *dl_ipc_fn(char *driver);
++extern void *dl_ipc_fn(int typeid);
+ extern void *dl_event_fn(int tid, int typeid);
+ extern void *dl_proto_cmd_process(int tid, int typeid);
+ 
+
+Modified: trunk/usr/ipc.c
+===================================================================
+--- trunk/usr/ipc.c	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/ipc.c	2005-11-03 02:37:15 UTC (rev 144)
+@@ -99,11 +99,11 @@
+ 
+ 	req = NLMSG_DATA(nlh);
+ 
+-	dprintf(&quot;%s %d %d\n&quot;, req-&gt;driver, err, nlh-&gt;nlmsg_len);
++	dprintf(&quot;%d %d %d\n&quot;, req-&gt;typeid, err, nlh-&gt;nlmsg_len);
+ 
+-	fn = dl_ipc_fn(req-&gt;driver);
++	fn = dl_ipc_fn(req-&gt;typeid);
+ 	if (!fn) {
+-		eprintf(&quot;Cannot handle event %s\n&quot;, req-&gt;driver);
++		eprintf(&quot;Cannot handle event %d\n&quot;, req-&gt;typeid);
+ 		err = -EINVAL;
+ 		goto fail;
+ 	}
+
+Added: trunk/usr/tgt_sysfs.h
+===================================================================
+--- trunk/usr/tgt_sysfs.h	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/tgt_sysfs.h	2005-11-03 02:37:15 UTC (rev 144)
+@@ -0,0 +1,8 @@
++#ifndef	__TGT_SYSFS_H
++#define	__TGT_SYSFS_H
++
++#define	TGT_TYPE_SYSFSDIR	&quot;/sys/class/tgt_type&quot;
++#define	TGT_TARGET_SYSFSDIR	&quot;/sys/class/tgt_target&quot;
++#define	TGT_DEVICE_SYSFSDIR	&quot;/sys/class/tgt_device&quot;
++
++#endif
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/tgtadm.c	2005-11-03 02:37:15 UTC (rev 144)
+@@ -18,6 +18,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;dirent.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;dlfcn.h&gt;
+ #include &lt;inttypes.h&gt;
+@@ -29,7 +30,15 @@
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;tgtadm.h&quot;
++#include &quot;tgt_sysfs.h&quot;
+ 
++#define eprintf(fmt, args...)					\
++do {								\
++	fprintf(stderr, &quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
++} while (0)
++
++#define dprintf eprintf
++
+ static char program_name[] = &quot;tgtadm&quot;;
+ 
+ static struct option const long_options[] =
+@@ -98,6 +107,51 @@
+ 	exit(status == 0 ? 0 : -1);
+ }
+ 
++static int filter(const struct dirent *dir)
++{
++	return strcmp(dir-&gt;d_name, &quot;.&quot;) &amp;&amp; strcmp(dir-&gt;d_name, &quot;..&quot;);
++}
++
++static int driver_to_typeid(char *name)
++{
++	int i, nr, err, fd, id = -ENOENT;
++	char *p, path[PATH_MAX], buf[PATH_MAX];
++	struct dirent **namelist;
++
++	nr = scandir(TGT_TYPE_SYSFSDIR, &amp;namelist, filter, alphasort);
++	for (i = 0; i &lt; nr; i++) {
++		snprintf(path, sizeof(path), TGT_TYPE_SYSFSDIR &quot;/%s/name&quot;,
++			 namelist[i]-&gt;d_name);
++
++		fd = open(path, O_RDONLY);
++		if (fd &lt; 0) {
++			eprintf(&quot;%s %d\n&quot;, path, errno);
++			continue;
++		}
++
++		err = read(fd, buf, sizeof(buf));
++		close(fd);
++		if (err &lt; 0) {
++			eprintf(&quot;%s %d\n&quot;, path, err);
++			continue;
++		}
++
++		if (strncmp(name, buf, strlen(name)))
++			continue;
++
++		for (p = namelist[i]-&gt;d_name; !isdigit((int) *p); p++)
++			;
++		id = atoi(p);
++		break;
++	}
++
++	for (i = 0; i &lt; nr; i++)
++		free(namelist[i]);
++	free(namelist);
++
++	return id;
++}
++
+ static int ipc_mgmt_connect(void)
+ {
+ 	int fd, err;
+@@ -202,7 +256,7 @@
+ {
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1, len;
+-	int tid = -1;
++	int tid = -1, typeid;
+ 	uint32_t cid = 0, set = 0;
+ 	uint64_t sid = 0, lun = 0;
+ 	char *params = NULL, *driver = NULL;
+@@ -253,15 +307,21 @@
+ 	}
+ 
+ 	if (op &lt; 0) {
+-		fprintf(stderr, &quot;You must specify the operation type\n&quot;);
++		eprintf(&quot;You must specify the operation type\n&quot;);
+ 		goto out;
+ 	}
+ 
+ 	if (!driver) {
+-		fprintf(stderr, &quot;You must specify the driver name\n&quot;);
++		eprintf(&quot;You must specify the driver name\n&quot;);
+ 		goto out;
+ 	}
+ 
++	typeid = driver_to_typeid(driver);
++	if (typeid &lt; 0) {
++		eprintf(&quot;Invalid driver name %s\n&quot;, driver);
++		goto out;
++	}
++
+ 	if (optind &lt; argc) {
+ 		fprintf(stderr, &quot;unrecognized: &quot;);
+ 		while (optind &lt; argc)
+@@ -274,7 +334,7 @@
+ 	memset(rbuf, 0, sizeof(rbuf));
+ 
+ 	req = (struct tgtadm_req *) sbuf;
+-	strncpy(req-&gt;driver, driver, sizeof(req-&gt;driver));
++	req-&gt;typeid = typeid;
+ 	req-&gt;op = op;
+ 	req-&gt;set = set;
+ 	req-&gt;tid = tid;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/tgtadm.h	2005-11-03 02:37:15 UTC (rev 144)
+@@ -9,8 +9,6 @@
+ #define	SET_DEVICE	(1 &lt;&lt; 3)
+ #define	SET_USER	(1 &lt;&lt; 4)
+ 
+-#define	TGT_DNAME_LEN	64
+-
+ enum tgtadm_op {
+ 	OP_NEW,
+ 	OP_DELETE,
+@@ -19,7 +17,7 @@
+ };
+ 
+ struct tgtadm_req {
+-	char driver[TGT_DNAME_LEN];
++	int typeid;
+ 	int op;
+ 	uint32_t set;
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2005-11-02 18:10:29 UTC (rev 143)
++++ trunk/usr/tgtd.h	2005-11-03 02:37:15 UTC (rev 144)
+@@ -12,7 +12,4 @@
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+ 
+-#define	TGT_TYPE_SYSFSDIR	&quot;/sys/class/tgt_type&quot;
+-#define	TGT_TARGET_SYSFSDIR	&quot;/sys/class/tgt_target&quot;
+-
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000137.html">[Stgt-svn] r143 - in trunk: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000139.html">[Stgt-svn] r145 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#138">[ date ]</a>
+              <a href="thread.html#138">[ thread ]</a>
+              <a href="subject.html#138">[ subject ]</a>
+              <a href="author.html#138">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

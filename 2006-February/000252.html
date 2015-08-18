@@ -1,0 +1,117 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r265 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r265%20-%20trunk/kernel&In-Reply-To=%3C200602051207.k15C7LJc028711%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000251.html">
+   <LINK REL="Next"  HREF="000253.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r265 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r265%20-%20trunk/kernel&In-Reply-To=%3C200602051207.k15C7LJc028711%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r265 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Feb  5 13:07:21 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000251.html">[Stgt-svn] r264 - in trunk: . include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000253.html">[Stgt-svn] r266 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#252">[ date ]</a>
+              <a href="thread.html#252">[ thread ]</a>
+              <a href="subject.html#252">[ subject ]</a>
+              <a href="author.html#252">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-05 13:06:55 +0100 (Sun, 05 Feb 2006)
+New Revision: 265
+
+Added:
+   trunk/kernel/tgt-packet.diff
+Log:
+Add a kernel patch to export packet the socket interface.
+
+Added: trunk/kernel/tgt-packet.diff
+===================================================================
+--- trunk/kernel/tgt-packet.diff	2006-02-05 12:05:13 UTC (rev 264)
++++ trunk/kernel/tgt-packet.diff	2006-02-05 12:06:55 UTC (rev 265)
+@@ -0,0 +1,41 @@
++diff --git a/include/net/af_packet.h b/include/net/af_packet.h
++new file mode 100644
++index 0000000..e280e7c
++--- /dev/null
+++++ b/include/net/af_packet.h
++@@ -0,0 +1,6 @@
+++#ifndef __LINUX_NET_AFPACKET_H
+++#define __LINUX_NET_AFPACKET_H
+++
+++extern void *packet_frame(struct sock *sk);
+++
+++#endif
++diff --git a/net/packet/af_packet.c b/net/packet/af_packet.c
++index 9db7dbd..aee86cd 100644
++--- a/net/packet/af_packet.c
+++++ b/net/packet/af_packet.c
++@@ -562,6 +562,24 @@ drop:
++ }
++ 
++ #ifdef CONFIG_PACKET_MMAP
+++void *packet_frame(struct sock *sk)
+++{
+++	struct packet_sock *po;
+++	struct tpacket_hdr *h;
+++	int err;
+++
+++	po = pkt_sk(sk);
+++	spin_lock(&amp;sk-&gt;sk_receive_queue.lock);
+++	h = (struct tpacket_hdr *) packet_lookup_frame(po, po-&gt;head);
+++	if (h-&gt;tp_status)
+++		h = ERR_PTR(-ENOBUFS);
+++	else
+++		po-&gt;head = po-&gt;head != po-&gt;frame_max ? po-&gt;head+1 : 0;
+++	spin_unlock(&amp;sk-&gt;sk_receive_queue.lock);
+++	return h;
+++}
+++EXPORT_SYMBOL_GPL(packet_frame);
+++
++ static int tpacket_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
++ {
++ 	struct sock *sk;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000251.html">[Stgt-svn] r264 - in trunk: . include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000253.html">[Stgt-svn] r266 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#252">[ date ]</a>
+              <a href="thread.html#252">[ thread ]</a>
+              <a href="subject.html#252">[ subject ]</a>
+              <a href="author.html#252">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

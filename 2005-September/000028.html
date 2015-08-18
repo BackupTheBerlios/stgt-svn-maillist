@@ -1,0 +1,618 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r34 - in trunk: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r34%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200509030647.j836lstH018424%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000027.html">
+   <LINK REL="Next"  HREF="000029.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r34 - in trunk: include kernel usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r34%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200509030647.j836lstH018424%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r34 - in trunk: include kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Sep  3 08:47:54 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000027.html">[Stgt-svn] r33 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000029.html">[Stgt-svn] r35 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#28">[ date ]</a>
+              <a href="thread.html#28">[ thread ]</a>
+              <a href="subject.html#28">[ subject ]</a>
+              <a href="author.html#28">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-03 08:47:48 +0200 (Sat, 03 Sep 2005)
+New Revision: 34
+
+Modified:
+   trunk/include/stgt_if.h
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+   trunk/usr/netlink.c
+   trunk/usr/scsi.c
+   trunk/usr/stgtd.h
+Log:
+Add error handling support to user-space code.
+
+Modified: trunk/include/stgt_if.h
+===================================================================
+--- trunk/include/stgt_if.h	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/include/stgt_if.h	2005-09-03 06:47:48 UTC (rev 34)
+@@ -35,8 +35,8 @@
+ 		} d_device;
+ 		struct {
+ 			uint64_t cid;
+-			uint32_t size;
+-			int err;
++			uint32_t len;
++			int result;
+ 		} cmnd_res;
+ 	} u;
+ 
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/kernel/stgt.c	2005-09-03 06:47:48 UTC (rev 34)
+@@ -767,18 +767,28 @@
+ 	done(cmnd);
+ }
+ 
+-static void uspace_cmnd_done(struct stgt_cmnd *cmnd, char *data, uint32_t datasize)
++static void uspace_cmnd_done(struct stgt_cmnd *cmnd, char *data,
++			     int result, uint32_t len)
+ {
++	int i;
+ 	assert(cmnd-&gt;done);
+ 
+-	dprintk(&quot;%x %u\n&quot;, cmnd-&gt;scb[0], datasize);
++	dprintk(&quot;%x %u\n&quot;, cmnd-&gt;scb[0], len);
+ 
+-	if (datasize) {
+-		__alloc_buffer(cmnd, datasize, 0);
+-		/* FIXEM: multiple pages */
+-		memcpy(page_address(cmnd-&gt;sg[0].page), data, datasize);
++	if (len) {
++		__alloc_buffer(cmnd, len, 0);
++
++		for (i = 0; i &lt; cmnd-&gt;sg_count; i++) {
++			uint32_t copy = min_t(uint32_t, len, PAGE_CACHE_SIZE);
++			char *p = data;
++
++			memcpy(page_address(cmnd-&gt;sg[i].page), p, copy);
++			p += copy;
++			len -= copy;
++		}
+ 	}
+ 
++	cmnd-&gt;result = result;
+ 	cmnd_done(cmnd);
+ }
+ 
+@@ -922,7 +932,8 @@
+ 		cmnd = find_cmnd_by_id(ev-&gt;u.cmnd_res.cid);
+ 		if (cmnd)
+ 			uspace_cmnd_done(cmnd, (char *) ev + sizeof(*ev),
+-					 ev-&gt;u.cmnd_res.size);
++					 ev-&gt;u.cmnd_res.result,
++					 ev-&gt;u.cmnd_res.len);
+ 		else {
+ 			eprintk(&quot;cannot found %llu\n&quot;, ev-&gt;u.cmnd_res.cid);
+ 			err = -EEXIST;
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/kernel/stgt.h	2005-09-03 06:47:48 UTC (rev 34)
+@@ -34,7 +34,7 @@
+ 	struct scatterlist *sg;
+ 	uint32_t bufflen;
+ 
+-	uint8_t sense_buffer[SCSI_SENSE_BUFFERSIZE];
++	int result;
+ 
+ 	void *private;
+ };
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/usr/netlink.c	2005-09-03 06:47:48 UTC (rev 34)
+@@ -107,7 +107,7 @@
+ 
+ static int scsi_cmnd_queue(int fd, char *reqbuf, char *resbuf)
+ {
+-	int size;
++	int result, len;
+ 	struct iovec iov[2];
+ 	struct stgt_event *ev = (struct stgt_event *) reqbuf;
+ 	uint64_t cid = ev-&gt;k.cmnd_req.cid;
+@@ -117,21 +117,20 @@
+ 	scb = reqbuf + sizeof(*ev);
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, scb[0]);
+ 
+-	size = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.lun,
+-				scb, resbuf);
++	result = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.lun,
++				scb, resbuf, &amp;len);
+ 
+-	/* TODO: error handling */
+ 	memset(ev, 0, sizeof(*ev));
+ 	ev-&gt;u.cmnd_res.cid = cid;
+-	ev-&gt;u.cmnd_res.size = size;
+-	ev-&gt;u.cmnd_res.err = 0;
++	ev-&gt;u.cmnd_res.len = len;
++	ev-&gt;u.cmnd_res.result = result;
+ 
+ 	iov[0].iov_base = ev;
+ 	iov[0].iov_len = sizeof(*ev);
+ 	iov[1].iov_base = resbuf;
+-	iov[1].iov_len = size;
++	iov[1].iov_len = len;
+ 
+-	return nl_write(fd, STGT_UEVENT_SCSI_CMND_RES, iov, size ? 2 : 1);
++	return nl_write(fd, STGT_UEVENT_SCSI_CMND_RES, iov, len ? 2 : 1);
+ }
+ 
+ void nl_event_handle(int fd)
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/usr/scsi.c	2005-09-03 06:47:48 UTC (rev 34)
+@@ -34,6 +34,15 @@
+ #define SERVICE_ACTION_IN     0x9e
+ #endif
+ 
++/* Additional Sense Code (SAM3) */
++#define	SAM_ASC_LOGICAL_UNIT_NOT_SUPPORTED	0x25
++#define	SAM_ASC_INVALID_FIELD_IN_CDB		0x24
++#define	SAM_ASC_NO_ADDITIONAL_SENSE_INFORMATION	0x00
++
++#define SAM_STAT_GOOD            0x00
++#define SAM_STAT_CHECK_CONDITION 0x02
++
++
+ static uint32_t blk_shift = 9;
+ 
+ #define min(x,y) ({ \
+@@ -72,6 +81,20 @@
+ 	return 0;
+ }
+ 
++static int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
++		      uint8_t ascode, uint8_t ascodeq)
++{
++	int len = 6;
++
++	data[0] = res_code | 1U &lt;&lt; 7;
++	data[2] = key;
++	data[7] = len;
++	data[12] = ascode;
++	data[13] = ascodeq;
++
++	return len;
++}
++
+ static int insert_disconnect_pg(uint8_t *ptr)
+ {
+ 	unsigned char disconnect_pg[] = {0x02, 0x0e, 0x80, 0x80, 0x00, 0x0a, 0x00, 0x00,
+@@ -133,20 +156,26 @@
+ 	return sizeof(geo_m_pg);
+ }
+ 
+-static int mode_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
++static int mode_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+-	int len = 4, err = 0;
++	int result = SAM_STAT_GOOD;
+ 	uint8_t pcode = scb[2] &amp; 0x3f;
+ 	uint64_t size;
+ 
+-	device_info(tid, lun, &amp;size);
++	if (device_info(tid, lun, &amp;size) &lt; 0) {
++		*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_LOGICAL_UNIT_NOT_SUPPORTED, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++
++	*len = 4;
+ 	size &gt;&gt;= blk_shift;
+ 
+ 	if ((scb[1] &amp; 0x8))
+ 		data[3] = 0;
+ 	else {
+ 		data[3] = 8;
+-		len += 8;
++		*len += 8;
+ 		*(uint32_t *)(data + 4) = (size &gt;&gt; 32) ?
+ 			cpu_to_be32(0xffffffff) : cpu_to_be32(size);
+ 		*(uint32_t *)(data + 8) = cpu_to_be32(1 &lt;&lt; blk_shift);
+@@ -156,51 +185,52 @@
+ 	case 0x0:
+ 		break;
+ 	case 0x2:
+-		len += insert_disconnect_pg(data + len);
++		*len += insert_disconnect_pg(data + *len);
+ 		break;
+ 	case 0x3:
+-		len += insert_format_m_pg(data + len);
++		*len += insert_format_m_pg(data + *len);
+ 		break;
+ 	case 0x4:
+-		len += insert_geo_m_pg(data + len, size);
++		*len += insert_geo_m_pg(data + *len, size);
+ 		break;
+ 	case 0x8:
+-		len += insert_caching_pg(data + len);
++		*len += insert_caching_pg(data + *len);
+ 		break;
+ 	case 0xa:
+-		len += insert_ctrl_m_pg(data + len);
++		*len += insert_ctrl_m_pg(data + *len);
+ 		break;
+ 	case 0x1c:
+-		len += insert_iec_m_pg(data + len);
++		*len += insert_iec_m_pg(data + *len);
+ 		break;
+ 	case 0x3f:
+-		len += insert_disconnect_pg(data + len);
+-		len += insert_format_m_pg(data + len);
+-		len += insert_geo_m_pg(data + len, size);
+-		len += insert_caching_pg(data + len);
+-		len += insert_ctrl_m_pg(data + len);
+-		len += insert_iec_m_pg(data + len);
++		*len += insert_disconnect_pg(data + *len);
++		*len += insert_format_m_pg(data + *len);
++		*len += insert_geo_m_pg(data + *len, size);
++		*len += insert_caching_pg(data + *len);
++		*len += insert_ctrl_m_pg(data + *len);
++		*len += insert_iec_m_pg(data + *len);
+ 		break;
+ 	default:
+-		err = -1;
++		result = SAM_STAT_CHECK_CONDITION;
++		*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_INVALID_FIELD_IN_CDB, 0);
+ 	}
+ 
+-	data[0] = len - 1;
++	data[0] = *len - 1;
+ 
+-	return len;
++	return result;
+ }
+ 
+ #define VENDOR_ID	&quot;IET&quot;
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-static int inquiry(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
++static int inquiry(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+-	int err = -1;
+-	int len = 0;
++	int result = SAM_STAT_CHECK_CONDITION;
+ 
+ 	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		return err;
++		goto err;
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+ 		data[2] = 4;
+@@ -220,15 +250,15 @@
+ 		data[61] = 0x60;
+ 		data[62] = 0x03;
+ 		data[63] = 0x00;
+-		len = 64;
+-		err = 0;
++		*len = 64;
++		result = SAM_STAT_GOOD;
+ 	} else if (scb[1] &amp; 0x2) {
+ 		/* CmdDt bit is set */
+ 		/* We do not support it now. */
+ 		data[1] = 0x1;
+ 		data[5] = 0;
+-		len = 6;
+-		err = 0;
++		*len = 6;
++		result = SAM_STAT_GOOD;
+ 	} else if (scb[1] &amp; 0x1) {
+ 		/* EVPD bit set */
+ 		if (scb[2] == 0x0) {
+@@ -237,14 +267,14 @@
+ 			data[4] = 0x0;
+ 			data[5] = 0x80;
+ 			data[6] = 0x83;
+-			len = 7;
+-			err = 0;
++			*len = 7;
++			result = SAM_STAT_GOOD;
+ 		} else if (scb[2] == 0x80) {
+ 			data[1] = 0x80;
+ 			data[3] = 4;
+ 			memset(data + 4, 0x20, 4);
+-			len = 8;
+-			err = 0;
++			*len = 8;
++			result = SAM_STAT_GOOD;
+ 		} else if (scb[2] == 0x83) {
+ #define SCSI_ID_LEN	24
+ 			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
+@@ -256,20 +286,28 @@
+ 			data[7] = tmp;
+ 			if (lun != ~0UL)
+ 				sprintf(data + 8, &quot;deadbeaf%d:%u&quot;, tid, lun);
+-			len = tmp + 8;
+-			err = 0;
++			*len = tmp + 8;
++			result = SAM_STAT_GOOD;
+ 		}
+ 	}
+ 
+-	len = min_t(int, len, scb[4]);
++	if (result != SAM_STAT_GOOD)
++		goto err;
+ 
++	*len = min_t(int, *len, scb[4]);
++
+ 	if (lun == ~0UL)
+ 		data[0] = TYPE_NO_LUN;
+ 
+-	return len;
++	return SAM_STAT_GOOD;
++
++err:
++	*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++				SAM_ASC_INVALID_FIELD_IN_CDB, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int report_luns(int tid, uint32_t unused, uint8_t *scb, uint8_t *p)
++static int report_luns(int tid, uint32_t unused, uint8_t *scb, uint8_t *p, int *len)
+ {
+ 	uint32_t lun;
+ 	uint32_t *data = (uint32_t *) p;
+@@ -277,14 +315,21 @@
+ 	DIR *dir;
+ 	struct dirent *ent;
+ 	char buf[128];
++	int result = SAM_STAT_GOOD;
+ 
+ 	dir = opendir(&quot;/sys/class/stgt_device&quot;);
+-	if (!dir)
+-		return -1;
++	if (!dir) {
++		perror(&quot;can't open /sys/class/stgt_device\n&quot;);
++		exit(0);
++	}
+ 
+ 	alen = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+-	if (alen &lt; 16)
+-		return -1;
++	if (alen &lt; 16) {
++		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_INVALID_FIELD_IN_CDB, 0);
++		result = SAM_STAT_CHECK_CONDITION;
++		goto out;
++	}
+ 
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+@@ -315,92 +360,114 @@
+ 	}
+ 
+ 	data[0] = cpu_to_be32(nr_luns * 8);
+-
++	*len = min(oalen, nr_luns * 8 + 8);
++out:
+ 	closedir(dir);
+-
+-	return min(oalen, nr_luns * 8 + 8);
++	return result;
+ }
+ 
+-static int read_capacity(int tid, uint32_t lun, uint8_t *scb, uint8_t *p)
++static int read_capacity(int tid, uint32_t lun, uint8_t *scb, uint8_t *p, int *len)
+ {
+-	int len;
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t size;
+ 
+-	device_info(tid, lun, &amp;size);
++	if (!(scb[8] &amp; 0x1) &amp; (scb[2] | scb[3] | scb[4] | scb[5])) {
++		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_INVALID_FIELD_IN_CDB, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++
++	if (device_info(tid, lun, &amp;size) &lt; 0) {
++		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_LOGICAL_UNIT_NOT_SUPPORTED, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++
+ 	size &gt;&gt;= blk_shift;
+ 
+ 	data[0] = (size &gt;&gt; 32) ?
+ 		cpu_to_be32(0xffffffff) : cpu_to_be32(size - 1);
+ 	data[1] = cpu_to_be32(1U &lt;&lt; blk_shift);
++	*len = 8;
+ 
+-	len = 8;
+-
+-	return len;
++	return SAM_STAT_GOOD;
+ }
+ 
+-static int request_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
++/*
++ * TODO: We always assume autosense.
++ */
++static int request_sense(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int* len)
+ {
+-	int len;
++	*len = sense_data_build(data, 0xf0, NO_SENSE,
++				SAM_ASC_NO_ADDITIONAL_SENSE_INFORMATION, 0);
+ 
+-	data[0] = 0xf0;
+-	data[1] = 0;
+-	data[2] = NO_SENSE;
+-	data[7] = 10;
+-
+-	len = 18;
+-
+-	return len;
++	return SAM_STAT_GOOD;
+ }
+ 
+-static int sevice_action(int tid, uint32_t lun, uint8_t *scb, uint8_t *p)
++static int sevice_action(int tid, uint32_t lun, uint8_t *scb, uint8_t *p, int *len)
+ {
+-	int len;
+ 	uint32_t *data = (uint32_t *) p;
+ 	uint64_t *data64, size;
+ 
+-	device_info(tid, lun, &amp;size);
++	if (device_info(tid, lun, &amp;size) &lt; 0) {
++		*len = sense_data_build(p, 0xf0, ILLEGAL_REQUEST,
++					SAM_ASC_LOGICAL_UNIT_NOT_SUPPORTED, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
+ 	size &gt;&gt;= blk_shift;
+ 
+ 	data64 = (uint64_t *) data;
+ 	data64[0] = cpu_to_be64(size - 1);
+ 	data[2] = cpu_to_be32(1UL &lt;&lt; blk_shift);
+ 
+-	len = 32;
++	*len = 32;
+ 
+-	return len;
++	return SAM_STAT_GOOD;
+ }
+ 
+-int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb, uint8_t *data)
++int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb, uint8_t *data, int *len)
+ {
+-	int len = 0;
++	int result = SAM_STAT_GOOD;
+ 
+ 	dprintf(&quot;%x\n&quot;, scb[0]);
+ 
++	if (lun == ~0UL)
++		switch (scb[0]) {
++		case REQUEST_SENSE:
++		case INQUIRY:
++		case REPORT_LUNS:
++			break;
++		default:
++			*len = sense_data_build(data, 0xf0, ILLEGAL_REQUEST,
++						SAM_ASC_LOGICAL_UNIT_NOT_SUPPORTED, 0);
++			result = SAM_STAT_CHECK_CONDITION;
++			goto out;
++		}
++
+ 	switch (scb[0]) {
+ 	case INQUIRY:
+-		len = inquiry(tid, lun, scb, data);
++		result = inquiry(tid, lun, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
+-		len = report_luns(tid, lun, scb, data);
++		result = report_luns(tid, lun, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+-		len = read_capacity(tid, lun, scb, data);
++		result = read_capacity(tid, lun, scb, data, len);
+ 		break;
+ 	case MODE_SENSE:
+-		len = mode_sense(tid, lun, scb, data);
++		result = mode_sense(tid, lun, scb, data, len);
+ 		break;
+ 	case REQUEST_SENSE:
+-		len = request_sense(tid, lun, scb, data);
++		result = request_sense(tid, lun, scb, data, len);
+ 		break;
+ 	case SERVICE_ACTION_IN:
+-		len = sevice_action(tid, lun, scb, data);
++		result = sevice_action(tid, lun, scb, data, len);
+ 		break;
+ 	case START_STOP:
+ 	case TEST_UNIT_READY:
+ 	case SYNCHRONIZE_CACHE:
+ 	case VERIFY:
+-		len = 0;
++		*len = 0;
+ 		break;
+ 	case READ_6:
+ 	case READ_10:
+@@ -412,10 +479,11 @@
+ 	case RESERVE_10:
+ 	case RELEASE_10:
+ 	default:
+-		dprintf(&quot;FIXME: access to nonexistent lun %u\n&quot;, lun);
+-		len = 0;
++		dprintf(&quot;BUG? %u %u\n&quot;, scb[0], lun);
++		*len = 0;
+ 		break;
+ 	}
+ 
+-	return len;
++out:
++	return result;
+ }
+
+Modified: trunk/usr/stgtd.h
+===================================================================
+--- trunk/usr/stgtd.h	2005-09-03 01:57:30 UTC (rev 33)
++++ trunk/usr/stgtd.h	2005-09-03 06:47:48 UTC (rev 34)
+@@ -24,6 +24,7 @@
+ extern int ipc_open(void);
+ extern void ipc_event_handle(int fd);
+ 
+-extern int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb, uint8_t *data);
++extern int scsi_cmnd_process(int tid, uint32_t lun, uint8_t *scb,
++			     uint8_t *data, int *len);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000027.html">[Stgt-svn] r33 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000029.html">[Stgt-svn] r35 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#28">[ date ]</a>
+              <a href="thread.html#28">[ thread ]</a>
+              <a href="subject.html#28">[ subject ]</a>
+              <a href="author.html#28">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

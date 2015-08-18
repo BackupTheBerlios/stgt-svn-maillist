@@ -1,0 +1,168 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r55 - in trunk: include kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r55%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200509071913.j87JDgo3011949%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000047.html">
+   <LINK REL="Next"  HREF="000049.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r55 - in trunk: include kernel usr</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r55%20-%20in%20trunk%3A%20include%20kernel%20usr&In-Reply-To=%3C200509071913.j87JDgo3011949%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r55 - in trunk: include kernel usr">mnc at berlios.de
+       </A><BR>
+    <I>Wed Sep  7 21:13:42 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000047.html">[Stgt-svn] r54 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000049.html">[Stgt-svn] r56 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#48">[ date ]</a>
+              <a href="thread.html#48">[ thread ]</a>
+              <a href="subject.html#48">[ subject ]</a>
+              <a href="author.html#48">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-07 21:13:41 +0200 (Wed, 07 Sep 2005)
+New Revision: 55
+
+Modified:
+   trunk/include/stgt_if.h
+   trunk/kernel/stgt.c
+   trunk/usr/netlink.c
+Log:
+more trivial scsi seperation prepatation for userspace
+
+Modified: trunk/include/stgt_if.h
+===================================================================
+--- trunk/include/stgt_if.h	2005-09-07 17:55:57 UTC (rev 54)
++++ trunk/include/stgt_if.h	2005-09-07 19:13:41 UTC (rev 55)
+@@ -15,11 +15,11 @@
+ 	STGT_UEVENT_TARGET_DESTROY,
+ 	STGT_UEVENT_DEVICE_CREATE,
+ 	STGT_UEVENT_DEVICE_DESTROY,
+-	STGT_UEVENT_SCSI_CMND_RES,
++	STGT_UEVENT_CMND_RES,
+ 
+ 	/* kernel -&gt; user */
+ 	STGT_KEVENT_RESPONSE,
+-	STGT_KEVENT_SCSI_CMND_REQ,
++	STGT_KEVENT_CMND_REQ,
+ };
+ 
+ struct stgt_event {
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-07 17:55:57 UTC (rev 54)
++++ trunk/kernel/stgt.c	2005-09-07 19:13:41 UTC (rev 55)
+@@ -755,7 +755,7 @@
+ 
+ 	dprintk(&quot;%d %Zd %Zd\n&quot;, len, sizeof(*ev), sizeof(cmnd-&gt;scb));
+ 	nlh = __nlmsg_put(skb, daemon_pid, 0,
+-			  STGT_KEVENT_SCSI_CMND_REQ, len - sizeof(*nlh), 0);
++			  STGT_KEVENT_CMND_REQ, len - sizeof(*nlh), 0);
+ 	ev = NLMSG_DATA(nlh);
+ 	memset(ev, 0, sizeof(*ev));
+ 
+@@ -936,7 +936,7 @@
+ 		err = stgt_device_destroy(ev-&gt;u.d_device.tid,
+ 					  ev-&gt;u.d_device.dev_id);
+ 		break;
+-	case STGT_UEVENT_SCSI_CMND_RES:
++	case STGT_UEVENT_CMND_RES:
+ 		cmnd = find_cmnd_by_id(ev-&gt;u.cmnd_res.cid);
+ 		if (cmnd)
+ 			uspace_cmnd_done(cmnd, (char *) ev + sizeof(*ev),
+@@ -987,7 +987,7 @@
+ 
+ 		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+ 		ev-&gt;k.event_res.err = err;
+-		if (nlh-&gt;nlmsg_type != STGT_UEVENT_SCSI_CMND_RES)
++		if (nlh-&gt;nlmsg_type != STGT_UEVENT_CMND_RES)
+ 			send_event_res(NETLINK_CREDS(skb)-&gt;pid,
+ 				       STGT_KEVENT_RESPONSE,
+ 				       ev, sizeof(*ev));
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-09-07 17:55:57 UTC (rev 54)
++++ trunk/usr/netlink.c	2005-09-07 19:13:41 UTC (rev 55)
+@@ -105,7 +105,7 @@
+ 	return err;
+ }
+ 
+-static int scsi_cmnd_queue(int fd, char *reqbuf, char *resbuf)
++static int cmnd_queue(int fd, char *reqbuf, char *resbuf)
+ {
+ 	int result, len;
+ 	struct iovec iov[2];
+@@ -117,6 +117,10 @@
+ 	scb = reqbuf + sizeof(*ev);
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, scb[0]);
+ 
++	/*
++	 * TODO match tid to protocol and route cmnd to correct userspace
++	 * protocol module
++	 */
+ 	result = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.dev_id,
+ 				scb, resbuf, &amp;len);
+ 
+@@ -130,7 +134,7 @@
+ 	iov[1].iov_base = resbuf;
+ 	iov[1].iov_len = len;
+ 
+-	return nl_write(fd, STGT_UEVENT_SCSI_CMND_RES, iov, len ? 2 : 1);
++	return nl_write(fd, STGT_UEVENT_CMND_RES, iov, len ? 2 : 1);
+ }
+ 
+ void nl_event_handle(int fd)
+@@ -167,8 +171,8 @@
+ 	}
+ 
+ 	switch (nlh-&gt;nlmsg_type) {
+-	case STGT_KEVENT_SCSI_CMND_REQ:
+-		scsi_cmnd_queue(fd, NLMSG_DATA(recvbuf), sendbuf);
++	case STGT_KEVENT_CMND_REQ:
++		cmnd_queue(fd, NLMSG_DATA(recvbuf), sendbuf);
+ 		break;
+ 	default:
+ 		/* kernel module bug */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000047.html">[Stgt-svn] r54 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000049.html">[Stgt-svn] r56 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#48">[ date ]</a>
+              <a href="thread.html#48">[ thread ]</a>
+              <a href="subject.html#48">[ subject ]</a>
+              <a href="author.html#48">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

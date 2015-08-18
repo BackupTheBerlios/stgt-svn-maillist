@@ -1,0 +1,205 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r42 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r42%20-%20trunk/kernel&In-Reply-To=%3C200509052313.j85NDj4V005709%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000034.html">
+   <LINK REL="Next"  HREF="000036.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r42 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r42%20-%20trunk/kernel&In-Reply-To=%3C200509052313.j85NDj4V005709%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r42 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Tue Sep  6 01:13:45 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000034.html">[Stgt-svn] r41 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000036.html">[Stgt-svn] r43 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#35">[ date ]</a>
+              <a href="thread.html#35">[ thread ]</a>
+              <a href="subject.html#35">[ subject ]</a>
+              <a href="author.html#35">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-06 01:13:43 +0200 (Tue, 06 Sep 2005)
+New Revision: 42
+
+Removed:
+   trunk/kernel/stgt_sd.c
+Log:
+kill stgt_sd.c, because we can do this with a userspace plugin just using SG_IO - yipppeeeee userspace
+
+Deleted: trunk/kernel/stgt_sd.c
+===================================================================
+--- trunk/kernel/stgt_sd.c	2005-09-05 23:12:31 UTC (rev 41)
++++ trunk/kernel/stgt_sd.c	2005-09-05 23:13:43 UTC (rev 42)
+@@ -1,129 +0,0 @@
+-/*
+- * STGT passthrough device
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/namei.h&gt;
+-
+-#include &lt;stgt_device.h&gt;
+-
+-struct stgt_sd_dev {
+-	struct block_device *bdev;
+-};
+-
+-/*
+- * Convert a device path to a dev_t.
+- * from dm-table.c
+- */
+-static int lookup_device(const char *path, dev_t *dev)
+-{
+-	int r;
+-	struct nameidata nd;
+-	struct inode *inode;
+-
+-	r = path_lookup(path, LOOKUP_FOLLOW, &amp;nd);
+-	if (r)
+-		return r;
+-
+-	inode = nd.dentry-&gt;d_inode;
+-	if (!inode) {
+-		r = -ENOENT;
+-		goto out;
+-	}
+-
+-	if (!S_ISBLK(inode-&gt;i_mode)) {
+-		r = -ENOTBLK;
+-		goto out;
+-	}
+-
+-	*dev = inode-&gt;i_rdev;
+-out:
+-	path_release(&amp;nd);
+-	return r;
+-}
+-
+-static int open_dev(struct stgt_sd_dev *sddev, dev_t devt)
+-{
+-        struct block_device *bdev;
+-
+-        bdev = open_by_devnum(devt, FMODE_WRITE | FMODE_READ);
+-        if (IS_ERR(bdev))
+-                return PTR_ERR(bdev);
+-	sddev-&gt;bdev = bdev;
+-        return 0;
+-}
+-
+-/*
+- * Close a device that we've been using.
+- */
+-static void close_dev(struct stgt_sd_dev *sddev)
+-{
+-	blkdev_put(sddev-&gt;bdev);
+-}
+-
+-static int stgt_sd_create(struct stgt_device *device)
+-{
+-	struct stgt_sd_dev *sddev = device-&gt;sdt_data;
+-	dev_t devt;
+-	int err;
+-
+-	err = lookup_device(device-&gt;path, &amp;devt);
+-	if (err)
+-		return err;
+-
+-	err = open_dev(sddev, devt);
+-	if (err)
+-		return err;
+-
+-	device-&gt;size = sddev-&gt;bdev-&gt;bd_block_size;
+-
+-	return 0;
+-}
+-
+-static void stgt_sd_destroy(struct stgt_device *device)
+-{
+-	close_dev(device-&gt;sdt_data);
+-}
+-
+-static int stgt_sd_queue(struct stgt_device *device, struct stgt_cmnd *cmnd)
+-{
+-	/*
+-	struct stgt_sd_dev *sddev = device-&gt;sdt_data;
+-	struct request_queue *q = bdev_get_queue(sddev-&gt;bdev);
+-	struct request *rq;
+-
+-	 * format struct request as BLOCK_PC command and do
+-	 * elv_add_request or if James's no_wait helper is in
+-	 * then use it
+-	 *
+-	 * Will need some stgt wrappers/helpers though
+-	 */
+-	return 0;
+-}
+-
+-static struct stgt_device_template stgt_sd = {
+-	.name = &quot;stgt_sd&quot;,
+-	.module = THIS_MODULE,
+-	.create = stgt_sd_create,
+-	.destroy = stgt_sd_destroy,
+-	.queue_cmnd = stgt_sd_queue,
+-};
+-
+-static int __init stgt_sd_init(void)
+-{
+-	stgt_sd.priv_data_size = sizeof(struct stgt_sd_dev);
+-	return stgt_device_template_register(&amp;stgt_sd);
+-}
+-
+-static void __exit stgt_sd_exit(void)
+-{
+-	stgt_device_template_unregister(&amp;stgt_sd);
+-}
+-
+-module_init(stgt_sd_init);
+-module_exit(stgt_sd_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000034.html">[Stgt-svn] r41 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000036.html">[Stgt-svn] r43 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#35">[ date ]</a>
+              <a href="thread.html#35">[ thread ]</a>
+              <a href="subject.html#35">[ subject ]</a>
+              <a href="author.html#35">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,1695 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r794 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r794%20-%20trunk/usr&In-Reply-To=%3C200703031129.l23BTSf2018752%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000780.html">
+   <LINK REL="Next"  HREF="000782.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r794 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r794%20-%20trunk/usr&In-Reply-To=%3C200703031129.l23BTSf2018752%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r794 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar  3 12:29:28 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000780.html">[Stgt-svn] r793 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000782.html">[Stgt-svn] r795 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#781">[ date ]</a>
+              <a href="thread.html#781">[ thread ]</a>
+              <a href="subject.html#781">[ subject ]</a>
+              <a href="author.html#781">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-03 12:29:27 +0100 (Sat, 03 Mar 2007)
+New Revision: 794
+
+Added:
+   trunk/usr/sbc.c
+   trunk/usr/spc.c
+   trunk/usr/spc.h
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+Log:
+add device type support
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/Makefile	2007-03-03 11:29:27 UTC (rev 794)
+@@ -45,7 +45,7 @@
+ CFLAGS += -Wall -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
+ 
+ PROGRAMS += tgtd tgtadm
+-TGTD_OBJS += tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o
++TGTD_OBJS += tgtd.o mgmt.o target.o spc.o sbc.o scsi.o log.o driver.o util.o work.o
+ 
+ all: $(PROGRAMS)
+ 
+
+Added: trunk/usr/sbc.c
+===================================================================
+--- trunk/usr/sbc.c	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/sbc.c	2007-03-03 11:29:27 UTC (rev 794)
+@@ -0,0 +1,642 @@
++/*
++ * SCSI block command processing
++ *
++ * (C) 2004-2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005-2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * SCSI target emulation code is based on Ardis's iSCSI implementation.
++ *   <A HREF="http://www.ardistech.com/iscsi/">http://www.ardistech.com/iscsi/</A>
++ *   Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;,
++ *   licensed under the terms of the GNU GPL v2.0,
++ */
++
++#include &lt;errno.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;linux/fs.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++#include &quot;driver.h&quot;
++#include &quot;scsi.h&quot;
++#include &quot;spc.h&quot;
++
++#define BLK_SHIFT	9
++
++static int sbc_test_unit(int host_no, struct scsi_cmd *cmd)
++{
++	int ret = SAM_STAT_GOOD;
++
++	/* how should we test a backing-storage file? */
++
++	if (cmd-&gt;dev) {
++		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
++		if (ret)
++			ret = SAM_STAT_RESERVATION_CONFLICT;
++	} else {
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x24, 0);
++		ret = SAM_STAT_CHECK_CONDITION;
++	}
++	return ret;
++}
++
++static int sbc_request_sense(int host_no, struct scsi_cmd *cmd)
++{
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, NO_SENSE, 0, 0);
++	return SAM_STAT_GOOD;
++}
++
++static uint64_t sbc_rw_offset(uint8_t *scb)
++{
++	uint64_t off;
++
++	switch (scb[0]) {
++	case READ_6:
++	case WRITE_6:
++		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
++		break;
++	case READ_10:
++	case WRITE_10:
++	case WRITE_VERIFY:
++		off = __be32_to_cpu(*(uint32_t *) &amp;scb[2]);
++		break;
++	case READ_16:
++	case WRITE_16:
++		off = __be64_to_cpu(*(uint64_t *) &amp;scb[2]);
++		break;
++	default:
++		off = 0;
++		break;
++	}
++
++	return off &lt;&lt; BLK_SHIFT;
++}
++
++static int sbc_rw(int host_no, struct scsi_cmd *cmd)
++{
++	int ret;
++	unsigned long uaddr;
++	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
++
++	if (cmd-&gt;dev) {
++		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
++		if (ret)
++			return SAM_STAT_RESERVATION_CONFLICT;
++	} else {
++		ret = SAM_STAT_CHECK_CONDITION;
++		goto sense;
++	}
++
++	switch (cmd-&gt;scb[0]) {
++	case WRITE_6:
++	case WRITE_10:
++	case WRITE_16:
++	case WRITE_VERIFY:
++		cmd-&gt;rw = WRITE;
++		break;
++	default:
++		break;
++	}
++
++	cmd-&gt;offset = sbc_rw_offset(cmd-&gt;scb);
++	uaddr = cmd-&gt;uaddr;
++	ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
++		     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
++	if (ret) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++	} else {
++		cmd-&gt;mmapped = 1;
++		cmd-&gt;uaddr = uaddr;
++		return SAM_STAT_GOOD;
++	}
++sense:
++	cmd-&gt;rw = READ;
++	cmd-&gt;offset = 0;
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++#define VENDOR_ID	&quot;IET&quot;
++#define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
++#define PRODUCT_REV	&quot;0&quot;
++
++static int __sbc_inquiry(int host_no, struct scsi_cmd *cmd)
++{
++	int len, ret = SAM_STAT_CHECK_CONDITION;
++	uint8_t *data;
++	uint8_t *scb = cmd-&gt;scb;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
++
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	memset(data, 0, pagesize);
++
++	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
++
++	if (!(scb[1] &amp; 0x3)) {
++		data[2] = 4;
++		data[3] = 0x42;
++		data[4] = 59;
++		data[7] = 0x02;
++		memset(data + 8, 0x20, 28);
++		memcpy(data + 8,
++		       VENDOR_ID, min_t(size_t, strlen(VENDOR_ID), 8));
++		memcpy(data + 16,
++		       PRODUCT_ID, min_t(size_t, strlen(PRODUCT_ID), 16));
++		memcpy(data + 32,
++		       PRODUCT_REV, min_t(size_t, strlen(PRODUCT_REV), 4));
++		data[58] = 0x03;
++		data[59] = 0x20;
++		data[60] = 0x09;
++		data[61] = 0x60;
++		data[62] = 0x03;
++		data[63] = 0x00;
++		len = 64;
++		ret = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x2) {
++		/* CmdDt bit is set */
++		/* We do not support it now. */
++		data[1] = 0x1;
++		data[5] = 0;
++		len = 6;
++		ret = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x1) {
++		/* EVPD bit set */
++		if (scb[2] == 0x0) {
++			data[1] = 0x0;
++			data[3] = 3;
++			data[4] = 0x0;
++			data[5] = 0x80;
++			data[6] = 0x83;
++			len = 7;
++			ret = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x80) {
++			int tmp = SCSI_SN_LEN;
++
++			data[1] = 0x80;
++			data[3] = SCSI_SN_LEN;
++			memset(data + 4, 0x20, 4);
++			len = 4 + SCSI_SN_LEN;
++			ret = SAM_STAT_GOOD;
++
++			if (cmd-&gt;dev &amp;&amp; strlen(cmd-&gt;dev-&gt;scsi_sn)) {
++				uint8_t *p;
++				char *q;
++
++				p = data + 4 + tmp - 1;
++				q = cmd-&gt;dev-&gt;scsi_sn + SCSI_SN_LEN - 1;
++
++				for (; tmp &gt; 0; tmp--, q)
++					*(p--) = *q;
++			}
++		} else if (scb[2] == 0x83) {
++			int tmp = SCSI_ID_LEN;
++
++			data[1] = 0x83;
++			data[3] = tmp + 4;
++			data[4] = 0x1;
++			data[5] = 0x1;
++			data[7] = tmp;
++			if (cmd-&gt;dev)
++				strncpy((char *) data + 8, cmd-&gt;dev-&gt;scsi_id,
++				        SCSI_ID_LEN);
++			len = tmp + 8;
++			ret = SAM_STAT_GOOD;
++		}
++	}
++
++	if (ret != SAM_STAT_GOOD)
++		goto sense;
++
++	cmd-&gt;len = min_t(int, len, scb[4]);
++	cmd-&gt;uaddr = (unsigned long) data;
++
++	if (!cmd-&gt;dev)
++		data[0] = TYPE_NO_LUN;
++
++	return SAM_STAT_GOOD;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static int sbc_inquiry(int host_no, struct scsi_cmd *cmd)
++{
++	int ret, lid = cmd-&gt;c_target-&gt;lid;
++
++	if (tgt_drivers[lid]-&gt;scsi_inquiry)
++		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd);
++	else
++		ret = __sbc_inquiry(host_no, cmd);
++	return ret;
++}
++
++static int sbc_reserve(int host_no, struct scsi_cmd *cmd)
++{
++	int ret;
++
++	if (cmd-&gt;dev) {
++		ret = device_reserve(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
++		if (ret)
++			ret = SAM_STAT_RESERVATION_CONFLICT;
++		else
++			ret = SAM_STAT_GOOD;
++	} else {
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
++		ret = SAM_STAT_CHECK_CONDITION;
++	}
++	return ret;
++}
++
++static int sbc_release(int host_no, struct scsi_cmd *cmd)
++{
++	int ret;
++
++	if (cmd-&gt;dev) {
++		ret = device_release(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no, 0);
++		if (ret)
++			ret = SAM_STAT_RESERVATION_CONFLICT;
++		else
++			ret = SAM_STAT_GOOD;
++	} else {
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
++		ret = SAM_STAT_CHECK_CONDITION;
++	}
++	return ret;
++}
++
++static int sbc_read_capacity(int host_no, struct scsi_cmd *cmd)
++{
++	uint32_t *data;
++	uint64_t size;
++	uint8_t *scb = cmd-&gt;scb;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
++
++	if (cmd-&gt;dev) {
++		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
++			return SAM_STAT_RESERVATION_CONFLICT;
++	} else
++		goto sense;
++
++	if (!(scb[8] &amp; 0x1) &amp; (scb[2] | scb[3] | scb[4] | scb[5])) {
++		asc = 0x24;
++		goto sense;
++	}
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	cmd-&gt;uaddr = (unsigned long) data;
++
++	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
++
++	data[0] = (size &gt;&gt; 32) ?
++		__cpu_to_be32(0xffffffff) : __cpu_to_be32(size - 1);
++	data[1] = __cpu_to_be32(1U &lt;&lt; BLK_SHIFT);
++	cmd-&gt;len = 8;
++
++	return SAM_STAT_GOOD;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static int sbc_sync_cache(int host_no, struct scsi_cmd *cmd)
++{
++	int ret, len;
++	uint8_t key = ILLEGAL_REQUEST, asc;
++
++	if (cmd-&gt;dev) {
++		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
++			return SAM_STAT_RESERVATION_CONFLICT;
++	} else {
++		asc = 0x25;
++		goto sense;
++	}
++
++	ret = fsync(cmd-&gt;dev-&gt;fd);
++
++	switch (ret) {
++	case EROFS:
++	case EINVAL:
++	case EBADF:
++	case EIO:
++		/*
++		 * is this the right sense code?
++		 * what should I put for the asc/ascq?
++		 */
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	default:
++		len = 0;
++		return SAM_STAT_GOOD;
++	}
++
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static int insert_disconnect_pg(uint8_t *ptr)
++{
++	unsigned char disconnect_pg[] = {0x02, 0x0e, 0x80, 0x80, 0x00, 0x0a, 0x00, 0x00,
++                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
++
++	memcpy(ptr, disconnect_pg, sizeof(disconnect_pg));
++	return sizeof(disconnect_pg);
++}
++
++static int insert_caching_pg(uint8_t *ptr)
++{
++	unsigned char caching_pg[] = {0x08, 0x12, 0x14, 0x00, 0xff, 0xff, 0x00, 0x00,
++				      0xff, 0xff, 0xff, 0xff, 0x80, 0x14, 0x00, 0x00,
++				      0x00, 0x00, 0x00, 0x00};
++
++	memcpy(ptr, caching_pg, sizeof(caching_pg));
++	return sizeof(caching_pg);
++}
++
++static int insert_ctrl_m_pg(uint8_t *ptr)
++{
++	unsigned char ctrl_m_pg[] = {0x0a, 0x0a, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
++				     0x00, 0x00, 0x02, 0x4b};
++
++	memcpy(ptr, ctrl_m_pg, sizeof(ctrl_m_pg));
++	return sizeof(ctrl_m_pg);
++}
++
++static int insert_iec_m_pg(uint8_t *ptr)
++{
++	unsigned char iec_m_pg[] = {0x1c, 0xa, 0x08, 0x00, 0x00, 0x00, 0x00,
++				    0x00, 0x00, 0x00, 0x00, 0x00};
++
++	memcpy(ptr, iec_m_pg, sizeof(iec_m_pg));
++	return sizeof(iec_m_pg);
++}
++
++static int insert_format_m_pg(uint8_t *ptr)
++{
++	unsigned char format_m_pg[] = {0x03, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++				       0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
++				       0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00};
++	memcpy(ptr, format_m_pg, sizeof(format_m_pg));
++	return sizeof(format_m_pg);
++}
++
++static int insert_geo_m_pg(uint8_t *ptr, uint64_t sec)
++{
++	unsigned char geo_m_pg[] = {0x04, 0x16, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
++				    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++				    0x00, 0x00, 0x00, 0x00, 0x3a, 0x98, 0x00, 0x00};
++	uint32_t ncyl, *p;
++
++	/* assume 0xff heads, 15krpm. */
++	memcpy(ptr, geo_m_pg, sizeof(geo_m_pg));
++	ncyl = sec &gt;&gt; 14; /* 256 * 64 */
++	p = (uint32_t *)(ptr + 1);
++	*p = *p | __cpu_to_be32(ncyl);
++	return sizeof(geo_m_pg);
++}
++
++static int sbc_mode_sense(int host_no, struct scsi_cmd *cmd)
++{
++	int ret = SAM_STAT_GOOD, len;
++	uint8_t pcode = cmd-&gt;scb[2] &amp; 0x3f;
++	uint64_t size;
++	uint8_t *data = NULL;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
++
++	if (cmd-&gt;dev) {
++		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
++			return SAM_STAT_RESERVATION_CONFLICT;
++	} else
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	memset(data, 0, pagesize);
++
++	len = 4;
++	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
++
++	if ((cmd-&gt;scb[1] &amp; 0x8))
++		data[3] = 0;
++	else {
++		data[3] = 8;
++		len += 8;
++		*(uint32_t *)(data + 4) = (size &gt;&gt; 32) ?
++			__cpu_to_be32(0xffffffff) : __cpu_to_be32(size);
++		*(uint32_t *)(data + 8) = __cpu_to_be32(1 &lt;&lt; BLK_SHIFT);
++	}
++
++	switch (pcode) {
++	case 0x0:
++		break;
++	case 0x2:
++		len += insert_disconnect_pg(data + len);
++		break;
++	case 0x3:
++		len += insert_format_m_pg(data + len);
++		break;
++	case 0x4:
++		len += insert_geo_m_pg(data + len, size);
++		break;
++	case 0x8:
++		len += insert_caching_pg(data + len);
++		break;
++	case 0xa:
++		len += insert_ctrl_m_pg(data + len);
++		break;
++	case 0x1c:
++		len += insert_iec_m_pg(data + len);
++		break;
++	case 0x3f:
++		len += insert_disconnect_pg(data + len);
++		len += insert_format_m_pg(data + len);
++		len += insert_geo_m_pg(data + len, size);
++		len += insert_caching_pg(data + len);
++		len += insert_ctrl_m_pg(data + len);
++		len += insert_iec_m_pg(data + len);
++		break;
++	default:
++		asc = 0x24;
++		goto sense;
++	}
++
++	data[0] = len - 1;
++	cmd-&gt;len = len;
++	cmd-&gt;uaddr = (unsigned long) data;
++	return ret;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++struct device_command_operations sbc_ops[] = {
++	{sbc_test_unit,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_request_sense,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	/* 0x10 */
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_inquiry,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_reserve,},
++	{sbc_release,},
++
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_mode_sense,},
++	{spc_start_stop,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	/* 0x20 */
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_read_capacity,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{sbc_rw},
++	{spc_illegal_op,},
++	{sbc_rw},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_rw},
++	{sbc_test_unit},
++
++	/* 0x30 */
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_sync_cache,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	[0x40 ... 0x7f] = {spc_illegal_op,},
++
++	/* 0x80 */
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_rw},
++	{sbc_test_unit},
++
++	/* 0x90 */
++	{spc_illegal_op,},
++	{sbc_sync_cache,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	/* 0xA0 */
++	{spc_report_luns,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{sbc_rw,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{spc_illegal_op,},
++	{sbc_rw,},
++	{sbc_test_unit,},
++
++	[0xb0 ... 0xff] = {spc_illegal_op},
++};
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/scsi.c	2007-03-03 11:29:27 UTC (rev 794)
+@@ -1,15 +1,24 @@
+ /*
+- * SCSI command processing
++ * SCSI lib functions
+  *
+- * (C) 2004 - 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * Copyright (C) 2005-2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005-2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  *
+- * SCSI target emulation code is based on Ardis's iSCSI implementation.
+- *   <A HREF="http://www.ardistech.com/iscsi/">http://www.ardistech.com/iscsi/</A>
+- *   Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;,
+- *   licensed under the terms of the GNU GPL v2.0,
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
+  */
+-
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;inttypes.h&gt;
+@@ -27,9 +36,8 @@
+ #include &quot;target.h&quot;
+ #include &quot;driver.h&quot;
+ #include &quot;scsi.h&quot;
++#include &quot;spc.h&quot;
+ 
+-#define BLK_SHIFT	9
+-
+ void sense_data_build(struct scsi_cmd *cmd, uint8_t key, uint8_t asc, uint8_t asq)
+ {
+ 	int len = 0xa;
+@@ -72,714 +80,8 @@
+ 	return fn(p);
+ }
+ 
+-static int sbc_test_unit(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret = SAM_STAT_GOOD;
+-
+-	/* how should we test a backing-storage file? */
+-
+-	if (cmd-&gt;dev) {
+-		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
+-		if (ret)
+-			ret = SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		cmd-&gt;len = 0;
+-		sense_data_build(cmd, ILLEGAL_REQUEST, 0x24, 0);
+-		ret = SAM_STAT_CHECK_CONDITION;
+-	}
+-	return ret;
+-}
+-
+-static int sbc_request_sense(int host_no, struct scsi_cmd *cmd)
+-{
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, NO_SENSE, 0, 0);
+-	return SAM_STAT_GOOD;
+-}
+-
+-static int __spc_report_luns(int host_no, struct scsi_cmd *cmd)
+-{
+-	struct tgt_device *dev;
+-	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
+-	uint64_t lun, *data;
+-	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+-	int *len = &amp;cmd-&gt;len;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+-
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+-	if (alen &lt; 16)
+-		goto sense;
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	memset(data, 0, pagesize);
+-
+-	alen &amp;= ~(8 - 1);
+-	oalen = alen;
+-
+-	alen -= 8;
+-	rbuflen -= 8; /* FIXME */
+-	idx = 1;
+-	nr_luns = 0;
+-
+-	overflow = 0;
+-	list_for_each_entry(dev, dev_list, device_siblings) {
+-		nr_luns++;
+-
+-		if (overflow)
+-			continue;
+-
+-		lun = dev-&gt;lun;
+-		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16);
+-		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32);
+-		if (!(alen -= 8))
+-			overflow = 1;
+-		if (!(rbuflen -= 8)) {
+-			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
+-			exit(-1);
+-		}
+-	}
+-
+-	cmd-&gt;uaddr = (unsigned long)data;
+-	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+-	*len = min(oalen, nr_luns * 8 + 8);
+-	return SAM_STAT_GOOD;
+-sense:
+-	*len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static int spc_report_luns(int host_no, struct scsi_cmd *cmd)
+-{
+-	struct target *target = cmd-&gt;c_target;
+-	int ret, lid = target-&gt;lid;
+-
+-	/* temp hack */
+-	if (tgt_drivers[lid]-&gt;scsi_report_luns)
+-		ret = tgt_drivers[lid]-&gt;scsi_report_luns(host_no, cmd);
+-	else
+-		ret = __spc_report_luns(host_no, cmd);
+-
+-	return ret;
+-}
+-
+-static uint64_t sbc_rw_offset(uint8_t *scb)
+-{
+-	uint64_t off;
+-
+-	switch (scb[0]) {
+-	case READ_6:
+-	case WRITE_6:
+-		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
+-		break;
+-	case READ_10:
+-	case WRITE_10:
+-	case WRITE_VERIFY:
+-		off = __be32_to_cpu(*(uint32_t *) &amp;scb[2]);
+-		break;
+-	case READ_16:
+-	case WRITE_16:
+-		off = __be64_to_cpu(*(uint64_t *) &amp;scb[2]);
+-		break;
+-	default:
+-		off = 0;
+-		break;
+-	}
+-
+-	return off &lt;&lt; BLK_SHIFT;
+-}
+-
+-static int sbc_rw(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret;
+-	unsigned long uaddr;
+-	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+-
+-	if (cmd-&gt;dev) {
+-		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
+-		if (ret)
+-			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		ret = SAM_STAT_CHECK_CONDITION;
+-		goto sense;
+-	}
+-
+-	switch (cmd-&gt;scb[0]) {
+-	case WRITE_6:
+-	case WRITE_10:
+-	case WRITE_16:
+-	case WRITE_VERIFY:
+-		cmd-&gt;rw = WRITE;
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	cmd-&gt;offset = sbc_rw_offset(cmd-&gt;scb);
+-	uaddr = cmd-&gt;uaddr;
+-	ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
+-		     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
+-	if (ret) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-	} else {
+-		cmd-&gt;mmapped = 1;
+-		cmd-&gt;uaddr = uaddr;
+-		return SAM_STAT_GOOD;
+-	}
+-sense:
+-	cmd-&gt;rw = READ;
+-	cmd-&gt;offset = 0;
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-#define VENDOR_ID	&quot;IET&quot;
+-#define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+-#define PRODUCT_REV	&quot;0&quot;
+-
+-static int __sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+-{
+-	int len, ret = SAM_STAT_CHECK_CONDITION;
+-	uint8_t *data;
+-	uint8_t *scb = cmd-&gt;scb;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+-
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto sense;
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	memset(data, 0, pagesize);
+-
+-	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+-
+-	if (!(scb[1] &amp; 0x3)) {
+-		data[2] = 4;
+-		data[3] = 0x42;
+-		data[4] = 59;
+-		data[7] = 0x02;
+-		memset(data + 8, 0x20, 28);
+-		memcpy(data + 8,
+-		       VENDOR_ID, min_t(size_t, strlen(VENDOR_ID), 8));
+-		memcpy(data + 16,
+-		       PRODUCT_ID, min_t(size_t, strlen(PRODUCT_ID), 16));
+-		memcpy(data + 32,
+-		       PRODUCT_REV, min_t(size_t, strlen(PRODUCT_REV), 4));
+-		data[58] = 0x03;
+-		data[59] = 0x20;
+-		data[60] = 0x09;
+-		data[61] = 0x60;
+-		data[62] = 0x03;
+-		data[63] = 0x00;
+-		len = 64;
+-		ret = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x2) {
+-		/* CmdDt bit is set */
+-		/* We do not support it now. */
+-		data[1] = 0x1;
+-		data[5] = 0;
+-		len = 6;
+-		ret = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x1) {
+-		/* EVPD bit set */
+-		if (scb[2] == 0x0) {
+-			data[1] = 0x0;
+-			data[3] = 3;
+-			data[4] = 0x0;
+-			data[5] = 0x80;
+-			data[6] = 0x83;
+-			len = 7;
+-			ret = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x80) {
+-			int tmp = SCSI_SN_LEN;
+-
+-			data[1] = 0x80;
+-			data[3] = SCSI_SN_LEN;
+-			memset(data + 4, 0x20, 4);
+-			len = 4 + SCSI_SN_LEN;
+-			ret = SAM_STAT_GOOD;
+-
+-			if (cmd-&gt;dev &amp;&amp; strlen(cmd-&gt;dev-&gt;scsi_sn)) {
+-				uint8_t *p;
+-				char *q;
+-
+-				p = data + 4 + tmp - 1;
+-				q = cmd-&gt;dev-&gt;scsi_sn + SCSI_SN_LEN - 1;
+-
+-				for (; tmp &gt; 0; tmp--, q)
+-					*(p--) = *q;
+-			}
+-		} else if (scb[2] == 0x83) {
+-			int tmp = SCSI_ID_LEN;
+-
+-			data[1] = 0x83;
+-			data[3] = tmp + 4;
+-			data[4] = 0x1;
+-			data[5] = 0x1;
+-			data[7] = tmp;
+-			if (cmd-&gt;dev)
+-				strncpy((char *) data + 8, cmd-&gt;dev-&gt;scsi_id,
+-				        SCSI_ID_LEN);
+-			len = tmp + 8;
+-			ret = SAM_STAT_GOOD;
+-		}
+-	}
+-
+-	if (ret != SAM_STAT_GOOD)
+-		goto sense;
+-
+-	cmd-&gt;len = min_t(int, len, scb[4]);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+-	if (!cmd-&gt;dev)
+-		data[0] = TYPE_NO_LUN;
+-
+-	return SAM_STAT_GOOD;
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static int sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret, lid = cmd-&gt;c_target-&gt;lid;
+-
+-	if (tgt_drivers[lid]-&gt;scsi_inquiry)
+-		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd);
+-	else
+-		ret = __sbc_inquiry(host_no, cmd);
+-	return ret;
+-}
+-
+-static int sbc_reserve(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret;
+-
+-	if (cmd-&gt;dev) {
+-		ret = device_reserve(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
+-		if (ret)
+-			ret = SAM_STAT_RESERVATION_CONFLICT;
+-		else
+-			ret = SAM_STAT_GOOD;
+-	} else {
+-		cmd-&gt;len = 0;
+-		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
+-		ret = SAM_STAT_CHECK_CONDITION;
+-	}
+-	return ret;
+-}
+-
+-static int sbc_release(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret;
+-
+-	if (cmd-&gt;dev) {
+-		ret = device_release(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no, 0);
+-		if (ret)
+-			ret = SAM_STAT_RESERVATION_CONFLICT;
+-		else
+-			ret = SAM_STAT_GOOD;
+-	} else {
+-		cmd-&gt;len = 0;
+-		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
+-		ret = SAM_STAT_CHECK_CONDITION;
+-	}
+-	return ret;
+-}
+-
+-static int sbc_read_capacity(int host_no, struct scsi_cmd *cmd)
+-{
+-	uint32_t *data;
+-	uint64_t size;
+-	uint8_t *scb = cmd-&gt;scb;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+-
+-	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+-			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else
+-		goto sense;
+-
+-	if (!(scb[8] &amp; 0x1) &amp; (scb[2] | scb[3] | scb[4] | scb[5])) {
+-		asc = 0x24;
+-		goto sense;
+-	}
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+-	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
+-
+-	data[0] = (size &gt;&gt; 32) ?
+-		__cpu_to_be32(0xffffffff) : __cpu_to_be32(size - 1);
+-	data[1] = __cpu_to_be32(1U &lt;&lt; BLK_SHIFT);
+-	cmd-&gt;len = 8;
+-
+-	return SAM_STAT_GOOD;
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static int sbc_sync_cache(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret, len;
+-	uint8_t key = ILLEGAL_REQUEST, asc;
+-
+-	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+-			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		asc = 0x25;
+-		goto sense;
+-	}
+-
+-	ret = fsync(cmd-&gt;dev-&gt;fd);
+-
+-	switch (ret) {
+-	case EROFS:
+-	case EINVAL:
+-	case EBADF:
+-	case EIO:
+-		/*
+-		 * is this the right sense code?
+-		 * what should I put for the asc/ascq?
+-		 */
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	default:
+-		len = 0;
+-		return SAM_STAT_GOOD;
+-	}
+-
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static int insert_disconnect_pg(uint8_t *ptr)
+-{
+-	unsigned char disconnect_pg[] = {0x02, 0x0e, 0x80, 0x80, 0x00, 0x0a, 0x00, 0x00,
+-                                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+-
+-	memcpy(ptr, disconnect_pg, sizeof(disconnect_pg));
+-	return sizeof(disconnect_pg);
+-}
+-
+-static int insert_caching_pg(uint8_t *ptr)
+-{
+-	unsigned char caching_pg[] = {0x08, 0x12, 0x14, 0x00, 0xff, 0xff, 0x00, 0x00,
+-				      0xff, 0xff, 0xff, 0xff, 0x80, 0x14, 0x00, 0x00,
+-				      0x00, 0x00, 0x00, 0x00};
+-
+-	memcpy(ptr, caching_pg, sizeof(caching_pg));
+-	return sizeof(caching_pg);
+-}
+-
+-static int insert_ctrl_m_pg(uint8_t *ptr)
+-{
+-	unsigned char ctrl_m_pg[] = {0x0a, 0x0a, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+-				     0x00, 0x00, 0x02, 0x4b};
+-
+-	memcpy(ptr, ctrl_m_pg, sizeof(ctrl_m_pg));
+-	return sizeof(ctrl_m_pg);
+-}
+-
+-static int insert_iec_m_pg(uint8_t *ptr)
+-{
+-	unsigned char iec_m_pg[] = {0x1c, 0xa, 0x08, 0x00, 0x00, 0x00, 0x00,
+-				    0x00, 0x00, 0x00, 0x00, 0x00};
+-
+-	memcpy(ptr, iec_m_pg, sizeof(iec_m_pg));
+-	return sizeof(iec_m_pg);
+-}
+-
+-static int insert_format_m_pg(uint8_t *ptr)
+-{
+-	unsigned char format_m_pg[] = {0x03, 0x16, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+-				       0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
+-				       0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00};
+-	memcpy(ptr, format_m_pg, sizeof(format_m_pg));
+-	return sizeof(format_m_pg);
+-}
+-
+-static int insert_geo_m_pg(uint8_t *ptr, uint64_t sec)
+-{
+-	unsigned char geo_m_pg[] = {0x04, 0x16, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
+-				    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+-				    0x00, 0x00, 0x00, 0x00, 0x3a, 0x98, 0x00, 0x00};
+-	uint32_t ncyl, *p;
+-
+-	/* assume 0xff heads, 15krpm. */
+-	memcpy(ptr, geo_m_pg, sizeof(geo_m_pg));
+-	ncyl = sec &gt;&gt; 14; /* 256 * 64 */
+-	p = (uint32_t *)(ptr + 1);
+-	*p = *p | __cpu_to_be32(ncyl);
+-	return sizeof(geo_m_pg);
+-}
+-
+-static int sbc_mode_sense(int host_no, struct scsi_cmd *cmd)
+-{
+-	int ret = SAM_STAT_GOOD, len;
+-	uint8_t pcode = cmd-&gt;scb[2] &amp; 0x3f;
+-	uint64_t size;
+-	uint8_t *data = NULL;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+-
+-	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+-			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else
+-		goto sense;
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	memset(data, 0, pagesize);
+-
+-	len = 4;
+-	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
+-
+-	if ((cmd-&gt;scb[1] &amp; 0x8))
+-		data[3] = 0;
+-	else {
+-		data[3] = 8;
+-		len += 8;
+-		*(uint32_t *)(data + 4) = (size &gt;&gt; 32) ?
+-			__cpu_to_be32(0xffffffff) : __cpu_to_be32(size);
+-		*(uint32_t *)(data + 8) = __cpu_to_be32(1 &lt;&lt; BLK_SHIFT);
+-	}
+-
+-	switch (pcode) {
+-	case 0x0:
+-		break;
+-	case 0x2:
+-		len += insert_disconnect_pg(data + len);
+-		break;
+-	case 0x3:
+-		len += insert_format_m_pg(data + len);
+-		break;
+-	case 0x4:
+-		len += insert_geo_m_pg(data + len, size);
+-		break;
+-	case 0x8:
+-		len += insert_caching_pg(data + len);
+-		break;
+-	case 0xa:
+-		len += insert_ctrl_m_pg(data + len);
+-		break;
+-	case 0x1c:
+-		len += insert_iec_m_pg(data + len);
+-		break;
+-	case 0x3f:
+-		len += insert_disconnect_pg(data + len);
+-		len += insert_format_m_pg(data + len);
+-		len += insert_geo_m_pg(data + len, size);
+-		len += insert_caching_pg(data + len);
+-		len += insert_ctrl_m_pg(data + len);
+-		len += insert_iec_m_pg(data + len);
+-		break;
+-	default:
+-		asc = 0x24;
+-		goto sense;
+-	}
+-
+-	data[0] = len - 1;
+-	cmd-&gt;len = len;
+-	cmd-&gt;uaddr = (unsigned long) data;
+-	return ret;
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-static int spc_start_stop(int host_no, struct scsi_cmd *cmd)
+-{
+-	cmd-&gt;len = 0;
+-
+-	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+-			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-	return SAM_STAT_GOOD;
+-}
+-
+-static int spc_illegal_op(int host_no, struct scsi_cmd *cmd)
+-{
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, ILLEGAL_REQUEST,0x24, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+-struct device_command_operations sbc_ops[] = {
+-	{sbc_test_unit,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_request_sense,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	/* 0x10 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_inquiry,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_reserve,},
+-	{sbc_release,},
+-
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_mode_sense,},
+-	{spc_start_stop,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	/* 0x20 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_read_capacity,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{sbc_rw},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{sbc_test_unit},
+-
+-	/* 0x30 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_sync_cache,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	[0x40 ... 0x7f] = {spc_illegal_op,},
+-
+-	/* 0x80 */
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw},
+-	{sbc_test_unit},
+-
+-	/* 0x90 */
+-	{spc_illegal_op,},
+-	{sbc_sync_cache,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	/* 0xA0 */
+-	{spc_report_luns,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{spc_illegal_op,},
+-	{sbc_rw,},
+-	{sbc_test_unit,},
+-
+-	[0xb0 ... 0xff] = {spc_illegal_op},
+-};
+-
+ int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key)
+ {
+ 	unsigned char op = cmd-&gt;scb[0];
+-
+-	return sbc_ops[op].cmd_perform(host_no, cmd);
++	return cmd-&gt;c_target-&gt;dev_cmd_ops[op].cmd_perform(host_no, cmd);
+ }
+
+Added: trunk/usr/spc.c
+===================================================================
+--- trunk/usr/spc.c	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/spc.c	2007-03-03 11:29:27 UTC (rev 794)
+@@ -0,0 +1,125 @@
++/*
++ * SCSI primary command processing
++ *
++ * Copyright (C) 2005-2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2005-2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;stdint.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++#include &quot;driver.h&quot;
++#include &quot;scsi.h&quot;
++#include &quot;spc.h&quot;
++
++static int __spc_report_luns(int host_no, struct scsi_cmd *cmd)
++{
++	struct tgt_device *dev;
++	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
++	uint64_t lun, *data;
++	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
++	int *len = &amp;cmd-&gt;len;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
++
++	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
++	if (alen &lt; 16)
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	memset(data, 0, pagesize);
++
++	alen &amp;= ~(8 - 1);
++	oalen = alen;
++
++	alen -= 8;
++	rbuflen -= 8; /* FIXME */
++	idx = 1;
++	nr_luns = 0;
++
++	overflow = 0;
++	list_for_each_entry(dev, dev_list, device_siblings) {
++		nr_luns++;
++
++		if (overflow)
++			continue;
++
++		lun = dev-&gt;lun;
++		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16);
++		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32);
++		if (!(alen -= 8))
++			overflow = 1;
++		if (!(rbuflen -= 8)) {
++			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
++			exit(-1);
++		}
++	}
++
++	cmd-&gt;uaddr = (unsigned long)data;
++	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
++	*len = min(oalen, nr_luns * 8 + 8);
++	return SAM_STAT_GOOD;
++sense:
++	*len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++int spc_report_luns(int host_no, struct scsi_cmd *cmd)
++{
++	struct target *target = cmd-&gt;c_target;
++	int ret, lid = target-&gt;lid;
++
++	/* temp hack */
++	if (tgt_drivers[lid]-&gt;scsi_report_luns)
++		ret = tgt_drivers[lid]-&gt;scsi_report_luns(host_no, cmd);
++	else
++		ret = __spc_report_luns(host_no, cmd);
++
++	return ret;
++}
++
++int spc_start_stop(int host_no, struct scsi_cmd *cmd)
++{
++	cmd-&gt;len = 0;
++
++	if (cmd-&gt;dev) {
++		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
++			return SAM_STAT_RESERVATION_CONFLICT;
++	} else {
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++	return SAM_STAT_GOOD;
++}
++
++int spc_illegal_op(int host_no, struct scsi_cmd *cmd)
++{
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, ILLEGAL_REQUEST,0x24, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
+
+Added: trunk/usr/spc.h
+===================================================================
+--- trunk/usr/spc.h	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/spc.h	2007-03-03 11:29:27 UTC (rev 794)
+@@ -0,0 +1,9 @@
++#ifndef __SPC_H
++#define __SPC_H
++
++extern int spc_report_luns(int host_no, struct scsi_cmd *cmd);
++extern int spc_start_stop(int host_no, struct scsi_cmd *cmd);
++extern int spc_illegal_op(int host_no, struct scsi_cmd *cmd);
++
++#endif
++
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/target.c	2007-03-03 11:29:27 UTC (rev 794)
+@@ -36,6 +36,8 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
++extern struct device_command_operations sbc_ops[];
++
+ static LIST_HEAD(target_list);
+ 
+ static struct target *target_lookup(int tid)
+@@ -1219,6 +1221,15 @@
+ 	if (!target)
+ 		return TGTADM_NOMEM;
+ 
++	switch (t_type) {
++	case TARGET_SBC:
++		target-&gt;dev_cmd_ops = sbc_ops;
++		break;
++	default:
++		free(target);
++		return TGTADM_INVALID_REQUEST;
++	}
++
+ 	target-&gt;name = strdup(targetname);
+ 	if (!target-&gt;name) {
+ 		free(target);
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-03-03 10:47:55 UTC (rev 793)
++++ trunk/usr/target.h	2007-03-03 11:29:27 UTC (rev 794)
+@@ -57,6 +57,8 @@
+ 	struct list_head acl_list;
+ 
+ 	struct tgt_account account;
++
++	struct device_command_operations *dev_cmd_ops;
+ };
+ 
+ struct it_nexus {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000780.html">[Stgt-svn] r793 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000782.html">[Stgt-svn] r795 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#781">[ date ]</a>
+              <a href="thread.html#781">[ thread ]</a>
+              <a href="subject.html#781">[ subject ]</a>
+              <a href="author.html#781">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

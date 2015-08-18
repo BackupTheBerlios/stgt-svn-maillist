@@ -1,0 +1,218 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r193 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r193%20-%20trunk/kernel&In-Reply-To=%3C200512011253.jB1Crtkw020641%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000181.html">
+   <LINK REL="Next"  HREF="000183.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r193 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r193%20-%20trunk/kernel&In-Reply-To=%3C200512011253.jB1Crtkw020641%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r193 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Dec  1 13:53:55 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000181.html">[Stgt-svn] r192 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000183.html">[Stgt-svn] r194 - trunk/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#182">[ date ]</a>
+              <a href="thread.html#182">[ thread ]</a>
+              <a href="subject.html#182">[ subject ]</a>
+              <a href="author.html#182">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-01 13:53:41 +0100 (Thu, 01 Dec 2005)
+New Revision: 193
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+Log:
+Remove synchronous interface of session operations to simplify the code.
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-01 08:31:50 UTC (rev 192)
++++ trunk/kernel/tgt.c	2005-12-01 12:53:41 UTC (rev 193)
+@@ -334,11 +334,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_target_destroy);
+ 
+-struct tgt_session_wait {
+-	struct completion event;
+-	int err;
+-};
+-
+ static void tgt_session_op_init(struct tgt_session *session,
+ 				void (*func)(void *),
+ 				tgt_session_done_t *done, void *arg)
+@@ -349,17 +344,6 @@
+ 	queue_work(session-&gt;target-&gt;twq, &amp;session-&gt;work);
+ }
+ 
+-static void tgt_session_sync_helper(void *arg, struct tgt_session *session)
+-{
+-	struct tgt_session_wait *w = (struct tgt_session_wait *) arg;
+-
+-	if (session)
+-		w-&gt;err = 0;
+-	else
+-		w-&gt;err = 1;
+-	complete(&amp;w-&gt;event);
+-}
+-
+ static void tgt_session_async_create(void *data)
+ {
+ 	struct tgt_session *session = (struct tgt_session *) data;
+@@ -377,8 +361,6 @@
+ 		spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 		list_add(&amp;session-&gt;slist, &amp;target-&gt;session_list);
+ 		spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-		set_bit(TGT_SESSION_CREATED, &amp;session-&gt;state);
+ 	}
+ 
+ 	session-&gt;done(session-&gt;arg, err ? NULL : session);
+@@ -386,28 +368,21 @@
+ 		kfree(session);
+ }
+ 
+-struct tgt_session *tgt_session_create(struct tgt_target *target,
+-				       tgt_session_done_t *done, void *arg)
++int tgt_session_create(struct tgt_target *target, tgt_session_done_t *done,
++		       void *arg)
+ {
+ 	struct tgt_session *session;
+-	struct tgt_session_wait w;
+ 
+-	session = kzalloc(sizeof(*session), done ? GFP_ATOMIC : GFP_KERNEL);
++	BUG_ON(!done);
++	session = kzalloc(sizeof(*session), GFP_ATOMIC);
+ 	if (!session)
+-		return NULL;
++		return -ENOMEM;
+ 	session-&gt;target = target;
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+ 
+-	init_completion(&amp;w.event);
+-	tgt_session_op_init(session, tgt_session_async_create,
+-			    done ? : tgt_session_sync_helper,
+-			    arg ? : &amp;w);
+-	if (!done) {
+-		wait_for_completion(&amp;w.event);
+-		if (w.err)
+-			return NULL;
+-	}
+-	return session;
++	tgt_session_op_init(session, tgt_session_async_create, done, arg);
++
++	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tgt_session_create);
+ 
+@@ -421,7 +396,8 @@
+ 	list_del(&amp;session-&gt;slist);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	session-&gt;done(session-&gt;arg, NULL);
++	if (session-&gt;done)
++		session-&gt;done(session-&gt;arg, NULL);
+ 
+ 	mempool_destroy(session-&gt;cmd_pool);
+ 	kfree(session);
+@@ -430,19 +406,8 @@
+ int tgt_session_destroy(struct tgt_session *session,
+ 			tgt_session_done_t *done, void *arg)
+ {
+-	struct tgt_session_wait w;
+-
+-	/* We cannot handle unfinished sessions. Should we do? */
+-	BUG_ON(!test_bit(TGT_SESSION_CREATED, &amp;session-&gt;state));
+-
+-	init_completion(&amp;w.event);
+ 	tgt_session_op_init(session, tgt_session_async_destroy,
+-			    done ? : tgt_session_sync_helper,
+-			    arg ? : &amp;w);
+-
+-	if (!done)
+-		wait_for_completion(&amp;w.event);
+-
++			    done, arg);
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tgt_session_destroy);
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-12-01 08:31:50 UTC (rev 192)
++++ trunk/kernel/tgt.h	2005-12-01 12:53:41 UTC (rev 193)
+@@ -27,16 +27,11 @@
+ 
+ typedef void (tgt_session_done_t) (void *, struct tgt_session *);
+ 
+-enum {
+-	TGT_SESSION_CREATED,
+-};
+-
+ struct tgt_session {
+ 	struct tgt_target *target;
+ 	struct list_head slist;
+ 
+ 	mempool_t *cmd_pool;
+-	unsigned long state;
+ 
+ 	struct work_struct work;
+ 	tgt_session_done_t *done;
+@@ -83,9 +78,8 @@
+ 	unsigned long proto_priv[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
+-extern struct tgt_session *
+-tgt_session_create(struct tgt_target *target,
+-		   tgt_session_done_t *done, void *arg);
++extern int tgt_session_create(struct tgt_target *target,
++			      tgt_session_done_t *done, void *arg);
+ extern int tgt_session_destroy(struct tgt_session *session,
+ 			       tgt_session_done_t *done, void *arg);
+ extern int tgt_msg_send(struct tgt_target *target, void *data, int dlen,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000181.html">[Stgt-svn] r192 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000183.html">[Stgt-svn] r194 - trunk/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#182">[ date ]</a>
+              <a href="thread.html#182">[ thread ]</a>
+              <a href="subject.html#182">[ subject ]</a>
+              <a href="author.html#182">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

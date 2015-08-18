@@ -1,0 +1,107 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r769 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r769%20-%20trunk/usr&In-Reply-To=%3C200701240659.l0O6x2rx013543%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000755.html">
+   <LINK REL="Next"  HREF="000757.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r769 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r769%20-%20trunk/usr&In-Reply-To=%3C200701240659.l0O6x2rx013543%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r769 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Jan 24 07:59:02 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000755.html">[Stgt-svn] r768 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000757.html">[Stgt-svn] r770 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#756">[ date ]</a>
+              <a href="thread.html#756">[ thread ]</a>
+              <a href="subject.html#756">[ subject ]</a>
+              <a href="author.html#756">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-24 07:59:01 +0100 (Wed, 24 Jan 2007)
+New Revision: 769
+
+Modified:
+   trunk/usr/bd_sg.c
+Log:
+Changes for the latest bsg tree (72799db54a1ce4c743448aa9cfe5c7c989d269c4).
+
+
+Modified: trunk/usr/bd_sg.c
+===================================================================
+--- trunk/usr/bd_sg.c	2007-01-22 11:24:08 UTC (rev 768)
++++ trunk/usr/bd_sg.c	2007-01-24 06:59:01 UTC (rev 769)
+@@ -32,6 +32,7 @@
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/time.h&gt;
+ #include &lt;linux/types.h&gt;
++#include &lt;scsi/sg.h&gt;
+ #include &lt;linux/bsg.h&gt;
+ 
+ #include &quot;list.h&quot;
+@@ -65,6 +66,7 @@
+ 	struct stat64 st;
+ 	struct timeval t;
+ 	struct sg_io_v4 hdr, *h;
++	int nr_queue_cmd;
+ 
+ 	/* we assume something like /dev/sda */
+ 	eprintf(&quot;%Zd %Zd %Zd\n&quot;, sizeof(hdr), sizeof(*h), sizeof(struct sg_io_v4));
+@@ -140,6 +142,14 @@
+ 		return -errno;
+ 	}
+ 
++	/* workaround */
++	nr_queue_cmd = 128;
++	err = ioctl(*fd, SG_SET_COMMAND_Q, &amp;nr_queue_cmd);
++	if (err) {
++		eprintf(&quot;can't set the queue depth %d, %m\n&quot;, nr_queue_cmd);
++		goto close_fd;
++	}
++
+ 	err = tgt_event_add(*fd, EPOLLIN, sg_handler, dev);
+ 	if (err) {
+ 		free(dev);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000755.html">[Stgt-svn] r768 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000757.html">[Stgt-svn] r770 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#756">[ date ]</a>
+              <a href="thread.html#756">[ thread ]</a>
+              <a href="subject.html#756">[ subject ]</a>
+              <a href="author.html#756">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

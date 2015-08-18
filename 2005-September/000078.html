@@ -1,0 +1,1683 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r85%20-%20in%20trunk%3A%20include%20iscsi/include%20iscsi/kernel%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200509221759.j8MHxbiF028974%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000077.html">
+   <LINK REL="Next"  HREF="000079.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r85%20-%20in%20trunk%3A%20include%20iscsi/include%20iscsi/kernel%20iscsi/usr%20kernel%20usr&In-Reply-To=%3C200509221759.j8MHxbiF028974%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr">mnc at berlios.de
+       </A><BR>
+    <I>Thu Sep 22 19:59:37 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000077.html">[Stgt-svn] r84 - in trunk: . kernel
+</A></li>
+        <LI>Next message: <A HREF="000079.html">[Stgt-svn] r86 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#78">[ date ]</a>
+              <a href="thread.html#78">[ thread ]</a>
+              <a href="subject.html#78">[ subject ]</a>
+              <a href="author.html#78">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-22 19:59:36 +0200 (Thu, 22 Sep 2005)
+New Revision: 85
+
+Modified:
+   trunk/include/tgt_if.h
+   trunk/iscsi/include/iet_u.h
+   trunk/iscsi/kernel/config.c
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/target.c
+   trunk/iscsi/usr/ctldev.c
+   trunk/iscsi/usr/ietd.c
+   trunk/iscsi/usr/iscsid.h
+   trunk/iscsi/usr/target.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_target.h
+   trunk/usr/netlink.c
+   trunk/usr/scsi.c
+Log:
+use netlink instead of ioctl for iet, TODO - merge userspace daemons and implement hch's suggestion
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/include/tgt_if.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -14,6 +14,7 @@
+ 	TGT_UEVENT_START,
+ 	TGT_UEVENT_TARGET_CREATE,
+ 	TGT_UEVENT_TARGET_DESTROY,
++	TGT_UEVENT_TARGET_PASSTHRU,
+ 	TGT_UEVENT_DEVICE_CREATE,
+ 	TGT_UEVENT_DEVICE_DESTROY,
+ 	TGT_UEVENT_CMND_RES,
+@@ -21,6 +22,7 @@
+ 	/* kernel -&gt; user */
+ 	TGT_KEVENT_RESPONSE,
+ 	TGT_KEVENT_CMND_REQ,
++	TGT_KEVENT_TARGET_PASSTHRU,
+ };
+ 
+ struct tgt_event {
+@@ -35,6 +37,10 @@
+ 		} d_target;
+ 		struct {
+ 			int tid;
++			uint32_t len;
++		} tgt_passthru;
++		struct {
++			int tid;
+ 			uint64_t dev_id;
+ 			uint32_t flags;
+ 			char type[32];
+@@ -61,7 +67,19 @@
+ 			int tid;
+ 			uint64_t dev_id;
+ 		} cmnd_req;
++		struct {
++			int tid;
++			uint32_t len;
++		} tgt_passthru;
+ 	} k;
+-};
+ 
++	/*
++	 * I think a pointer is a unsigned long but this struct
++	 * gets passed around from the kernel to userspace and
++	 * back again so to handle some ppc64 setups where userspace is
++	 * 32 bits but the kernel is 64 we do this odd thing
++	 */
++	uint64_t data[0];
++} __attribute__ ((aligned (sizeof(uint64_t))));
++
+ #endif
+
+Modified: trunk/iscsi/include/iet_u.h
+===================================================================
+--- trunk/iscsi/include/iet_u.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/include/iet_u.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -92,6 +92,46 @@
+ 	u32 state;
+ };
+ 
++/*
++ * TODO: merge iet_msg with iet_event
++ *
++ * the info msgs/ioctls can be done in sysfs the event
++ * could be moved too
++ */
++/*
++ * msg types
++ */
++enum {
++	IET_ADD_SESSION,
++	IET_DEL_SESSION,
++	IET_ADD_CONN,
++	IET_DEL_CONN,
++	IET_ISCSI_PARAM_SET,
++	IET_ISCSI_PARAM_GET,
++};
++
++struct iet_msg {
++	uint32_t msg_type;
++	uint32_t result;
++
++	/* user-&gt; kernel */
++	union {
++		struct session_info sess_info;
++		struct conn_info conn_info;
++		struct iscsi_param_info param_info;
++	} u;
++
++	/* kernel -&gt; user */
++	union {
++		struct {
++			u32 tid;
++			u64 sid;
++			u32 cid;
++			u32 state;
++		} conn_state_change;
++	} k;
++} __attribute__ ((aligned (sizeof(uint64_t))));
++
+ #define	DEFAULT_NR_WTHREADS	8
+ #define	MIN_NR_WTHREADS		1
+ #define	MAX_NR_WTHREADS		128
+@@ -102,13 +142,4 @@
+ 
+ #define NETLINK_IET	21
+ 
+-#define ADD_SESSION _IOW('i', 6, struct session_info)
+-#define DEL_SESSION _IOW('i', 7, struct session_info)
+-#define GET_SESSION_INFO _IOWR('i', 8, struct session_info)
+-#define ADD_CONN _IOW('i', 9, struct conn_info)
+-#define DEL_CONN _IOW('i', 10, struct conn_info)
+-#define GET_CONN_INFO _IOWR('i', 11, struct conn_info)
+-#define ISCSI_PARAM_SET _IOW('i', 12, struct iscsi_param_info)
+-#define ISCSI_PARAM_GET _IOWR('i', 13, struct iscsi_param_info)
+-
+ #endif
+
+Modified: trunk/iscsi/kernel/config.c
+===================================================================
+--- trunk/iscsi/kernel/config.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/kernel/config.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -6,6 +6,10 @@
+ 
+ #include &lt;linux/proc_fs.h&gt;
+ 
++#include &lt;tgt.h&gt;
++#include &lt;tgt_target.h&gt;
++
++#include &quot;iet_u.h&quot;
+ #include &quot;iscsi.h&quot;
+ #include &quot;iscsi_dbg.h&quot;
+ 
+@@ -62,188 +66,73 @@
+ 	return -ENOMEM;
+ }
+ 
+-static int get_conn_info(struct iscsi_target *target, unsigned long ptr)
++static int add_conn(struct iscsi_target *target, struct conn_info *info)
+ {
+-	int err;
+ 	struct iscsi_session *session;
+-	struct conn_info info;
+-	struct iscsi_conn *conn;
+ 
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	session = session_lookup(target, info.sid);
++	session = session_lookup(target, info-&gt;sid);
+ 	if (!session)
+ 		return -ENOENT;
+-	conn = conn_lookup(session, info.cid);
+ 
+-	info.cid = conn-&gt;cid;
+-	info.stat_sn = conn-&gt;stat_sn;
+-	info.exp_stat_sn = conn-&gt;exp_stat_sn;
+-
+-	if (copy_to_user((void *) ptr, &amp;info, sizeof(info)))
+-		return -EFAULT;
+-
+-	return 0;
++	return conn_add(session, info);
+ }
+ 
+-static int add_conn(struct iscsi_target *target, unsigned long ptr)
++static int del_conn(struct iscsi_target *target, struct conn_info *info)
+ {
+-	int err;
+ 	struct iscsi_session *session;
+-	struct conn_info info;
+ 
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	if (!(session = session_lookup(target, info.sid)))
+-		return -ENOENT;
+-
+-	return conn_add(session, &amp;info);
+-}
+-
+-static int del_conn(struct iscsi_target *target, unsigned long ptr)
+-{
+-	int err;
+-	struct iscsi_session *session;
+-	struct conn_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	if (!(session = session_lookup(target, info.sid)))
+-		return -ENOENT;
+-
+-	return conn_del(session, &amp;info);
+-}
+-
+-static int get_session_info(struct iscsi_target *target, unsigned long ptr)
+-{
+-	int err;
+-	struct iscsi_session *session;
+-	struct session_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	session = session_lookup(target, info.sid);
+-
++	session = session_lookup(target, info-&gt;sid);
+ 	if (!session)
+ 		return -ENOENT;
+ 
+-	info.exp_cmd_sn = session-&gt;exp_cmd_sn;
+-	info.max_cmd_sn = session-&gt;max_cmd_sn;
+-
+-	if (copy_to_user((void *) ptr, &amp;info, sizeof(info)))
+-		return -EFAULT;
+-
+-	return 0;
++	return conn_del(session, info);
+ }
+ 
+-static int add_session(struct iscsi_target *target, unsigned long ptr)
++int iet_msg_recv(struct tgt_target *tgt, uint32_t len, void *data)
+ {
++	struct iscsi_target *target = tgt-&gt;tt_data;
++	struct iet_msg *msg = data;
+ 	int err;
+-	struct session_info info;
+ 
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	return session_add(target, &amp;info);
+-}
+-
+-static int del_session(struct iscsi_target *target, unsigned long ptr)
+-{
+-	int err;
+-	struct session_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		return err;
+-
+-	return session_del(target, info.sid);
+-}
+-
+-static int iscsi_param_config(struct iscsi_target *target, unsigned long ptr, int set)
+-{
+-	int err;
+-	struct iscsi_param_info info;
+-
+-	if ((err = copy_from_user(&amp;info, (void *) ptr, sizeof(info))) &lt; 0)
+-		goto out;
+-
+-	if ((err = iscsi_param_set(target, &amp;info, set)) &lt; 0)
+-		goto out;
+-
+-	if (!set)
+-		err = copy_to_user((void *) ptr, &amp;info, sizeof(info));
+-
+-out:
+-	return err;
+-}
+-
+-static long ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+-{
+-	struct iscsi_target *target = NULL;
+-	long err;
+-	u32 id;
+-
+-	if ((err = get_user(id, (u32 *) arg)) != 0)
++	err = target_lock(target, 1);
++	if (err &lt; 0) {
++		eprintk(&quot;interrupted %u %d\n&quot;, err, msg-&gt;msg_type);
+ 		goto done;
+-
+-	target = target_lookup_by_id(id);
+-	if (!target) {
+-		eprintk(&quot;can't find the target %u\n&quot;, id);
+-		err = -EINVAL;
+-		goto done;
+ 	}
+ 
+-	if ((err = target_lock(target, 1)) &lt; 0) {
+-		eprintk(&quot;interrupted %ld %d\n&quot;, err, cmd);
+-		goto done;
+-	}
++	eprintk(&quot;msg_type %d\n&quot;, msg-&gt;msg_type);
+ 
+-	switch (cmd) {
+-	case ADD_SESSION:
+-		err = add_session(target, arg);
++	switch (msg-&gt;msg_type) {
++	case IET_ADD_SESSION:
++		err = session_add(target, &amp;msg-&gt;u.sess_info);
+ 		break;
+ 
+-	case DEL_SESSION:
+-		err = del_session(target, arg);
++	case IET_DEL_SESSION:
++		err = session_del(target, msg-&gt;u.sess_info.sid);
+ 		break;
+ 
+-	case GET_SESSION_INFO:
+-		err = get_session_info(target, arg);
++	case IET_ISCSI_PARAM_SET:
++		err = iscsi_param_set(target, &amp;msg-&gt;u.param_info, 1);
+ 		break;
+ 
+-	case ISCSI_PARAM_SET:
+-		err = iscsi_param_config(target, arg, 1);
++	case IET_ISCSI_PARAM_GET:
++		err = iscsi_param_set(target, &amp;msg-&gt;u.param_info, 0);
+ 		break;
+ 
+-	case ISCSI_PARAM_GET:
+-		err = iscsi_param_config(target, arg, 0);
++	case IET_ADD_CONN:
++		err = add_conn(target, &amp;msg-&gt;u.conn_info);
+ 		break;
+ 
+-	case ADD_CONN:
+-		err = add_conn(target, arg);
++	case IET_DEL_CONN:
++		err = del_conn(target, &amp;msg-&gt;u.conn_info);
+ 		break;
+-
+-	case DEL_CONN:
+-		err = del_conn(target, arg);
+-		break;
+-
+-	case GET_CONN_INFO:
+-		err = get_conn_info(target, arg);
+-		break;
+-
++	default:
++		err = -EINVAL;
+ 	}
+ 
+-	if (target)
+-		target_unlock(target);
+-
++	target_unlock(target);
+ done:
++	msg-&gt;result = err;
++	tgt_msg_send(tgt, msg, sizeof(*msg), GFP_KERNEL);
+ 	return err;
+ }
+-
+-struct file_operations ctr_fops = {
+-	.owner		= THIS_MODULE,
+-	.unlocked_ioctl	= ioctl,
+-};
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -10,20 +10,17 @@
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;linux/mempool.h&gt;
+ 
+-#include &lt;iscsi.h&gt;
+-#include &lt;iscsi_dbg.h&gt;
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
+ 
++#include &lt;iscsi.h&gt;
++#include &lt;iscsi_dbg.h&gt;
++
+ unsigned long debug_enable_flags;
+ 
+ static kmem_cache_t *iscsi_cmnd_cache;
+ static char dummy_data[1024];
+ 
+-static int ctr_major;
+-static char ctr_name[] = &quot;ietctl&quot;;
+-extern struct file_operations ctr_fops;
+-
+ static u32 cmnd_write_size(struct iscsi_cmnd *cmnd)
+ {
+ 	struct iscsi_cmd *hdr = cmnd_hdr(cmnd);
+@@ -1570,13 +1567,12 @@
+ 	.protocol = &quot;scsi&quot;,
+ 	.target_create = target_add,
+ 	.target_destroy = target_del,
++	.msg_recv = iet_msg_recv,
+ 	.priv_data_size = sizeof(struct iscsi_target),
+ };
+ 
+ static void iscsi_exit(void)
+ {
+-	unregister_chrdev(ctr_major, ctr_name);
+-
+ 	iet_procfs_exit();
+ 
+ 	event_exit();
+@@ -1593,11 +1589,6 @@
+ 
+ 	printk(&quot;iSCSI Enterprise Target Software - version %s\n&quot;, IET_VERSION_STRING);
+ 
+-	if ((ctr_major = register_chrdev(0, ctr_name, &amp;ctr_fops)) &lt; 0) {
+-		eprintk(&quot;failed to register the control device %d\n&quot;, ctr_major);
+-		return ctr_major;
+-	}
+-
+ 	if ((err = iet_procfs_init()) &lt; 0)
+ 		goto err;
+ 
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -231,6 +231,7 @@
+ extern void target_del(struct tgt_target *);
+ 
+ /* config.c */
++extern int iet_msg_recv(struct tgt_target *, uint32_t, void *);
+ extern int iet_procfs_init(void);
+ extern void iet_procfs_exit(void);
+ extern int iet_info_show(struct seq_file *, iet_show_info_t *);
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/kernel/target.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -104,8 +104,7 @@
+ static int iscsi_target_create(struct tgt_target *tt)
+ {
+ 	int err = -EINVAL;
+-	struct iscsi_target *target =
+-		(struct iscsi_target *) tt-&gt;tt_data;
++	struct iscsi_target *target = tt-&gt;tt_data;
+ 
+ 	memset(target, 0, sizeof(*target));
+ 
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/usr/ctldev.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -7,6 +7,7 @@
+ #include &lt;ctype.h&gt;
+ #include &lt;errno.h&gt;
+ #include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;dirent.h&gt;
+@@ -22,8 +23,6 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgt_if.h&quot;
+ 
+-#define CTL_DEVICE	&quot;/dev/ietctl&quot;
+-
+ /*
+  * tomo:
+  * netlink code is temporary until ietd will be integrated to stgtd
+@@ -37,68 +36,118 @@
+ 	int (*connection_op) (int fd, u32 tid, u64 sid, u32 cid, void *arg);
+ };
+ 
+-static int ctrdev_open(void)
++/* Temporary stgt glue */
++
++static int ipc_cmnd_execute(struct nlmsghdr *nlm_send, int len)
+ {
+-	FILE *f;
+-	char devname[256];
+-	char buf[256];
+-	int devn;
+-	int ctlfd;
++	int fd, err;
++	struct sockaddr_nl addr;
++	struct nlmsghdr *nlm_recv;
++	struct tgt_event *ev;
++	struct iet_msg *msg;
+ 
+-	if (!(f = fopen(&quot;/proc/devices&quot;, &quot;r&quot;))) {
+-		perror(&quot;Cannot open control path to the driver\n&quot;);
+-		return -1;
+-	}
++	nlm_recv = calloc(1, len);
++	if (!nlm_recv)
++		return -ENOMEM;
+ 
+-	devn = 0;
+-	while (!feof(f)) {
+-		if (!fgets(buf, sizeof (buf), f)) {
+-			break;
+-		}
+-		if (sscanf(buf, &quot;%d %s&quot;, &amp;devn, devname) != 2) {
+-			continue;
+-		}
+-		if (!strcmp(devname, &quot;ietctl&quot;)) {
+-			break;
+-		}
+-		devn = 0;
++	fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_TGT);
++	if (fd &lt; 0) {
++		log_error(&quot;Could not create socket %d %d\n&quot;, fd, errno);
++		err = fd;
++		goto free_nlm;
+ 	}
++	memset(&amp;addr, 0, sizeof(addr));
++	addr.nl_family = AF_NETLINK;
++	addr.nl_pid = 0;
++	addr.nl_groups = 0;
+ 
+-	fclose(f);
+-	if (!devn) {
+-		printf
+-		    (&quot;cannot find iscsictl in /proc/devices - &quot;
+-		     &quot;make sure the module is loaded\n&quot;);
+-		return -1;
++	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
++	if (err &lt; 0) {
++		log_error(&quot;Could not connect %d %d\n&quot;, err, errno);
++		goto close;
+ 	}
+ 
+-	unlink(CTL_DEVICE);
+-	if (mknod(CTL_DEVICE, (S_IFCHR | 0600), (devn &lt;&lt; 8))) {
+-		printf(&quot;cannot create %s %d\n&quot;, CTL_DEVICE, errno);
+-		return -1;
++	err = write(fd, nlm_send, len);
++	if (err &lt; 0) {
++		log_error(&quot;sendmsg failed %d %d\n&quot;, err, errno);
++		goto close;
+ 	}
+ 
+-	ctlfd = open(CTL_DEVICE, O_RDWR);
+-	if (ctlfd &lt; 0) {
+-		printf(&quot;cannot open %s %d\n&quot;, CTL_DEVICE, errno);
+-		return -1;
++	err = read(fd, nlm_recv, len);
++	if (err &lt; 0)
++		goto close;
++
++	ev = NLMSG_DATA(nlm_recv);
++	switch (nlm_recv-&gt;nlmsg_type) {
++		case TGT_KEVENT_TARGET_PASSTHRU:
++			msg = (struct iet_msg *)ev-&gt;data;
++			memcpy(nlm_send, nlm_recv, len);
++			err = msg-&gt;result;
++		default:
++			err = ev-&gt;k.event_res.err;
+ 	}
+ 
+-	return ctlfd;
++close:
++	if (fd &gt;= 0)
++		close(fd);
++free_nlm:
++	free(nlm_recv);
++	return err;
+ }
+ 
++static void nlmsg_init(struct nlmsghdr *nlh, u32 pid, u32 seq, int type,
++		       int len, int flags)
++{
++	nlh-&gt;nlmsg_pid = pid;
++	nlh-&gt;nlmsg_len = len;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_type = type;
++	nlh-&gt;nlmsg_seq = seq;
++}
++
++/*
++ * this will have to be redone and made generic when we move it
++ */
++static struct nlmsghdr *get_iet_msg(u32 tid, struct iet_msg **msg)
++{
++	int len;
++	struct nlmsghdr *nlh;
++	struct tgt_event *ev;
++
++	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct iet_msg));
++	nlh = calloc(1, len);
++	if (!nlh)
++		return NULL;
++
++	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_TARGET_PASSTHRU, len, 0);
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.tgt_passthru.tid = tid;
++	ev-&gt;u.tgt_passthru.len = sizeof(struct iet_msg);
++	*msg = (struct iet_msg *)ev-&gt;data;
++
++	return nlh;
++}
++
++
+ static int iscsi_conn_destroy(u32 tid, u64 sid, u32 cid)
+ {
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct conn_info *info;
+ 	int err;
+-	struct conn_info info;
+ 
+-	info.tid = tid;
+-	info.sid = sid;
+-	info.cid = cid;
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	if ((err = ioctl(ctrl_fd, DEL_CONN, &amp;info)) &lt; 0)
+-		err = errno;
++	info = &amp;msg-&gt;u.conn_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
++	info-&gt;cid = cid;
++	msg-&gt;msg_type = IET_DEL_CONN;
+ 
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	free(nlh);
+ 	return err;
+ }
+ 
+@@ -240,149 +289,145 @@
+ 
+ static int iscsi_param_get(u32 tid, u64 sid, struct iscsi_param *param)
+ {
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct iscsi_param_info *info;
+ 	int err, i;
+-	struct iscsi_param_info info;
+ 
+-	memset(&amp;info, 0, sizeof(info));
+-	info.tid = tid;
+-	info.sid = sid;
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	if ((err = ioctl(ctrl_fd, ISCSI_PARAM_GET, &amp;info)) &lt; 0)
+-		log_error(&quot;Can't set session param %d %d\n&quot;, info.tid, errno);
++	info = &amp;msg-&gt;u.param_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
+ 
+-	for (i = 0; i &lt; session_key_last; i++)
+-		param[i].val = info.session_param[i];
++	msg-&gt;msg_type = IET_ISCSI_PARAM_GET;
+ 
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	if (err &lt; 0)
++		log_error(&quot;Can't get session param %d %d\n&quot;, info-&gt;tid, err);
++	else {
++		struct tgt_event *ev;
++
++		ev = NLMSG_DATA(nlh);
++		msg = (struct iet_msg *)ev-&gt;data;
++		info = &amp;msg-&gt;u.param_info;
++
++		for (i = 0; i &lt; session_key_last; i++)
++			param[i].val = info-&gt;session_param[i];
++	}
++
++	free(nlh);
+ 	return err;
+ }
+ 
+ static int iscsi_param_set(u32 tid, u64 sid, int type, u32 partial, struct iscsi_param *param)
+ {
+-	int i, err;
+-	struct iscsi_param_info info;
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct iscsi_param_info *info;
++	int err, i;
+ 
+-	memset(&amp;info, 0, sizeof(info));
+-	info.tid = tid;
+-	info.sid = sid;
+-	info.param_type = type;
+-	info.partial = partial;
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	if (info.param_type == key_session)
++	info = &amp;msg-&gt;u.param_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
++	info-&gt;param_type = type;
++	info-&gt;partial = partial;
++
++	if (type == key_session)
+ 		for (i = 0; i &lt; session_key_last; i++)
+-			info.session_param[i] = param[i].val;
++			info-&gt;session_param[i] = param[i].val;
+ 	else
+ 		for (i = 0; i &lt; target_key_last; i++)
+-			info.target_param[i] = param[i].val;
++			info-&gt;target_param[i] = param[i].val;
++	msg-&gt;msg_type = IET_ISCSI_PARAM_SET;
+ 
+-	if ((err = ioctl(ctrl_fd, ISCSI_PARAM_SET, &amp;info)) &lt; 0)
+-		fprintf(stderr, &quot;%d %d %u &quot; &quot;%&quot; PRIu64 &quot; %d %u\n&quot;,
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	if (err)
++		fprintf(stderr, &quot;%d %d %u %llu %d %u\n&quot;,
+ 			err, errno, tid, sid, type, partial);
+-
++	free(nlh);
+ 	return err;
+ }
+ 
+ static int iscsi_session_create(u32 tid, u64 sid, u32 exp_cmd_sn, u32 max_cmd_sn, char *name)
+ {
+-	struct session_info info;
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct session_info *info;
++	int err;
+ 
+-	memset(&amp;info, 0, sizeof(info));
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	info.tid = tid;
+-	info.sid = sid;
+-	info.exp_cmd_sn = exp_cmd_sn;
+-	info.max_cmd_sn = max_cmd_sn;
+-	strncpy(info.initiator_name, name, sizeof(info.initiator_name) - 1);
++	info = &amp;msg-&gt;u.sess_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
++	info-&gt;exp_cmd_sn = exp_cmd_sn;
++	info-&gt;max_cmd_sn = max_cmd_sn;
++	strncpy(info-&gt;initiator_name, name, sizeof(info-&gt;initiator_name) - 1);
++	msg-&gt;msg_type = IET_ADD_SESSION;
+ 
+-	return ioctl(ctrl_fd, ADD_SESSION, &amp;info);
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	free(nlh);
++	return err;
+ }
+ 
+ static int iscsi_session_destroy(u32 tid, u64 sid)
+ {
+-	struct session_info info;
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct session_info *info;
++	int err;
+ 
+-	memset(&amp;info, 0, sizeof(info));
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	info.tid = tid;
+-	info.sid = sid;
++	info = &amp;msg-&gt;u.sess_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
++	msg-&gt;msg_type = IET_DEL_SESSION;
+ 
+-	return ioctl(ctrl_fd, DEL_SESSION, &amp;info);
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	free(nlh);
++	return err;
+ }
+ 
+ static int iscsi_conn_create(u32 tid, u64 sid, u32 cid, u32 stat_sn, u32 exp_stat_sn,
+ 			     int fd, u32 hdigest, u32 ddigest)
+ {
+-	struct conn_info info;
++	struct iet_msg *msg;
++	struct nlmsghdr *nlh;
++	struct conn_info *info;
++	int err;
+ 
+-	memset(&amp;info, 0, sizeof(info));
++	nlh = get_iet_msg(tid, &amp;msg);
++	if (!nlh)
++		return -ENOMEM;
+ 
+-	info.tid = tid;
+-	info.sid = sid;
+-	info.cid = cid;
+-	info.stat_sn = stat_sn;
+-	info.exp_stat_sn = exp_stat_sn;
+-	info.fd = fd;
+-	info.header_digest = hdigest;
+-	info.data_digest = ddigest;
++	info = &amp;msg-&gt;u.conn_info;
++	info-&gt;tid = tid;
++	info-&gt;sid = sid;
++	info-&gt;cid = cid;
++	info-&gt;stat_sn = stat_sn;
++	info-&gt;exp_stat_sn = exp_stat_sn;
++	info-&gt;fd = fd;
++	info-&gt;header_digest = hdigest;
++	info-&gt;data_digest = ddigest;
++	msg-&gt;msg_type = IET_ADD_CONN;
+ 
+-	return ioctl(ctrl_fd, ADD_CONN, &amp;info);
+-}
+-
+-/* Temporary stgt glue */
+-
+-static int ipc_cmnd_execute(char *data, int len)
+-{
+-	int fd, err;
+-	struct sockaddr_nl addr;
+-	char nlm_ev[NLMSG_SPACE(sizeof(struct tgt_event))];
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+-
+-	fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_TGT);
+-	if (fd &lt; 0) {
+-		log_error(&quot;Could not create socket %d %d\n&quot;, fd, errno);
+-		return fd;
+-	}
+-	memset(&amp;addr, 0, sizeof(addr));
+-	addr.nl_family = AF_NETLINK;
+-	addr.nl_pid = 0;
+-	addr.nl_groups = 0;
+-
+-	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+-	if (err &lt; 0) {
+-		log_error(&quot;Could not connect %d %d\n&quot;, err, errno);
+-		return err;
+-	}
+-
+-	err = write(fd, data, len);
+-	if (err &lt; 0) {
+-		log_error(&quot;sendmsg failed %d %d\n&quot;, err, errno);
+-		goto out;
+-	}
+-
+-	err = read(fd, nlm_ev, sizeof(nlm_ev));
+-	if (err &lt; 0)
+-		goto out;
+-
+-	ev = NLMSG_DATA(nlh);
+-	err = ev-&gt;k.event_res.err;
+-
+-out:
+-	if (fd &gt; 0)
+-		close(fd);
+-
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++	free(nlh);
+ 	return err;
+ }
+ 
+-static void nlmsg_init(struct nlmsghdr *nlh, u32 pid, u32 seq, int type,
+-		       int len, int flags)
+-{
+-	nlh-&gt;nlmsg_pid = pid;
+-	nlh-&gt;nlmsg_len = len;
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_type = type;
+-	nlh-&gt;nlmsg_seq = seq;
+-}
+-
+ static int iscsi_target_create(u32 *tid, char *name)
+ {
+ 	int err;
+@@ -398,7 +443,7 @@
+ 	sprintf(ev-&gt;u.c_target.type, &quot;%s&quot;, &quot;iet&quot;);
+ 	ev-&gt;u.c_target.nr_cmnds = DEFAULT_NR_QUEUED_CMNDS;
+ 
+-	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+ 	if (err &gt; 0) {
+ 		*tid = err;
+ 		err = 0;
+@@ -421,7 +466,7 @@
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.d_target.tid = tid;
+ 
+-	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+ 
+ 	return err;
+ }
+@@ -429,10 +474,10 @@
+ static int iscsi_lunit_create(u32 tid, u32 lun, char *args)
+ {
+ 	int err, fd;
+-	char nlm_ev[8912], *p, *q, *type = NULL, *path = NULL;
++	char *p, *q, *type = NULL, *path = NULL;
+ 	char dtype[] = &quot;tgt_vsd&quot;;
+ 	struct tgt_event *ev;
+-	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++	struct nlmsghdr *nlh;
+ 
+ 	fprintf(stderr, &quot;%s %d %s\n&quot;, __FUNCTION__, __LINE__, args);
+ 
+@@ -471,21 +516,26 @@
+ 		return errno;
+ 	}
+ 
+-	memset(nlm_ev, 0, sizeof(nlm_ev));
++	nlh = calloc(1, NLMSG_SPACE(sizeof(*ev)));
++	if (!nlh) {
++		err = -ENOMEM;
++		goto close_fd;
++	}
+ 	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_CREATE,
+ 		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
+-	log_error(&quot;pid %d\n&quot;, nlh-&gt;nlmsg_pid);
+-
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.c_device.tid = tid;
+ 	ev-&gt;u.c_device.dev_id = lun;
+ 	ev-&gt;u.c_device.fd = fd;
+ 	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
+ 
+-	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
+-	if (err)
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
++close_fd:
++	if (err) {
+ 		close(fd);
++		free(nlh);
++	}
+ 	return err;
+ }
+ 
+@@ -503,6 +553,10 @@
+ 	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_DESTROY,
+ 		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
++	ev = NLMSG_DATA(nlh);
++	ev-&gt;u.d_device.tid = tid;
++	ev-&gt;u.d_device.dev_id = lun;
++
+ 	sprintf(path, &quot;/sys/class/tgt_device/device%d:%d/fd&quot;, tid, lun);
+ 	fd = open(path, O_RDONLY);
+ 	if (fd &lt; 0) {
+@@ -518,17 +572,12 @@
+ 	}
+ 	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+ 
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.d_device.tid = tid;
+-	ev-&gt;u.d_device.dev_id = lun;
+-
+-	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
++	err = ipc_cmnd_execute(nlh, nlh-&gt;nlmsg_len);
+ 	close(fd);
+ 	return err;
+ }
+ 
+ struct iscsi_kernel_interface ioctl_ki = {
+-	.ctldev_open = ctrdev_open,
+ 	.lunit_create = iscsi_lunit_create,
+ 	.lunit_destroy = iscsi_lunit_destroy,
+ 	.param_get = iscsi_param_get,
+
+Modified: trunk/iscsi/usr/ietd.c
+===================================================================
+--- trunk/iscsi/usr/ietd.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/usr/ietd.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -412,11 +412,6 @@
+ 		exit(-1);
+ 	};
+ 
+-	if ((ctrl_fd = ki-&gt;ctldev_open()) &lt; 0) {
+-		perror(&quot;ctldev fd\n&quot;);
+-		exit(-1);
+-	}
+-
+ 	if ((ipc_fd = ietadm_request_listen()) &lt; 0) {
+ 		perror(&quot;ipc fd\n&quot;);
+ 		exit(-1);
+
+Modified: trunk/iscsi/usr/iscsid.h
+===================================================================
+--- trunk/iscsi/usr/iscsid.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/usr/iscsid.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -198,7 +198,6 @@
+ 
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+-	int (*ctldev_open) (void);
+ 	int (*lunit_create) (u32 tid, u32 lun, char *args);
+ 	int (*lunit_destroy) (u32 tid, u32 lun);
+ 	int (*param_get) (u32, u64, struct iscsi_param *);
+
+Modified: trunk/iscsi/usr/target.c
+===================================================================
+--- trunk/iscsi/usr/target.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/iscsi/usr/target.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -112,7 +112,7 @@
+ 	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+ 
+ 	if ((err = ki-&gt;target_create(tid, name)) &lt; 0) {
+-		log_warning(&quot;can't create a target %d %u\n&quot;, errno, *tid);
++		log_warning(&quot;can't create a target %d %u\n&quot;, err, *tid);
+ 		goto out;
+ 	}
+ 
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/kernel/tgt.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -47,7 +47,11 @@
+ static spinlock_t device_tmpl_lock;
+ static LIST_HEAD(device_tmpl_list);
+ 
+-static int daemon_pid;
++/*
++ * when we merge the daemons we will not need both of these
++ * this is just a tmp hack
++ */
++static int tgt_pid, daemon_pid;
+ static struct sock *nls;
+ 
+ static kmem_cache_t *cmnd_slab;
+@@ -158,7 +162,7 @@
+ 	struct tgt_target *target;
+ 	struct target_type_internal *ti;
+ 
+-	if (!daemon_pid) {
++	if (!tgt_pid) {
+ 		eprintk(&quot;%s\n&quot;, &quot;Run the user-space daemon first!&quot;);
+ 		return NULL;
+ 	}
+@@ -523,8 +527,8 @@
+ }
+ 
+ struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session,
+-				   uint8_t *proto_data,
+-				   uint8_t *id_buff, int buff_size)
++				 uint8_t *proto_data,
++				 uint8_t *id_buff, int buff_size)
+ {
+ 	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 	struct tgt_cmnd *cmnd;
+@@ -536,11 +540,19 @@
+ 	 * However, how can we guarantee the specified number of commands ?
+ 	 */
+ 	pcmnd_data = kmalloc(proto-&gt;priv_cmd_data_size, GFP_ATOMIC);
+-	if (!pcmnd_data)
++	if (!pcmnd_data) {
++		eprintk(&quot;Could not allocate command private data for %p&quot;,
++			 session);
+ 		return NULL;
++	}
+ 
+ 	cmnd = mempool_alloc(session-&gt;cmnd_pool, GFP_ATOMIC);
+-	BUG_ON(!cmnd);
++	if (!cmnd) {
++		eprintk(&quot;Could not allocate tgt_cmnd for %p\n&quot;, session);
++		kfree(pcmnd_data);
++		return NULL;
++	}
++
+ 	memset(cmnd, 0, sizeof(*cmnd));
+ 	cmnd-&gt;tgt_protocol_private = pcmnd_data;
+ 	cmnd-&gt;session = session;
+@@ -565,6 +577,8 @@
+ 	unsigned long flags;
+ 	int i;
+ 
++	dprintk(&quot;cid %llu\n&quot;, cmnd-&gt;cid);
++
+ 	kfree(cmnd-&gt;tgt_protocol_private);
+ 
+ 	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+@@ -590,6 +604,9 @@
+ 	cmnd-&gt;sg_count = pgcnt(len, offset);
+ 	offset &amp;= ~PAGE_CACHE_MASK;
+ 
++	dprintk(&quot;cid %llu pg_count %d offset %llu len %d\n&quot;, cmnd-&gt;cid,
++		cmnd-&gt;sg_count, cmnd-&gt;offset, cmnd-&gt;bufflen);
++
+ 	cmnd-&gt;sg = kmalloc(cmnd-&gt;sg_count * sizeof(struct scatterlist),
+ 			   GFP_KERNEL | __GFP_NOFAIL);
+ 
+@@ -654,19 +671,19 @@
+ 		return -ENOMEM;
+ 
+ 	dprintk(&quot;%d %Zd %d\n&quot;, len, sizeof(*ev), proto_pdu_size);
+-	nlh = __nlmsg_put(skb, daemon_pid, 0,
+-			  TGT_KEVENT_CMND_REQ, len - sizeof(*nlh), 0);
++	nlh = __nlmsg_put(skb, tgt_pid, 0, TGT_KEVENT_CMND_REQ,
++			  len - sizeof(*nlh), 0);
+ 	ev = NLMSG_DATA(nlh);
+ 	memset(ev, 0, sizeof(*ev));
+ 
+-	pdu = (char *) ev + sizeof(*ev);
++	pdu = (char *) ev-&gt;data;
+ 	ev-&gt;k.cmnd_req.tid = cmnd-&gt;session-&gt;target-&gt;tid;
+ 	ev-&gt;k.cmnd_req.dev_id = cmnd-&gt;dev_id;
+ 	ev-&gt;k.cmnd_req.cid = cmnd-&gt;cid;
+ 
+ 	proto-&gt;build_uspace_pdu(cmnd, pdu);
+ 
+-	return netlink_unicast(nls, skb, daemon_pid, 0);
++	return netlink_unicast(nls, skb, tgt_pid, 0);
+ }
+ 
+ static void cmnd_done(struct tgt_cmnd *cmnd, int result)
+@@ -683,12 +700,16 @@
+ 	done(cmnd);
+ }
+ 
+-static void uspace_cmnd_done(struct tgt_cmnd *cmnd, char *data,
++static void uspace_cmnd_done(struct tgt_cmnd *cmnd, void *data,
+ 			     int result, uint32_t len)
+ {
++	char *p = data;
+ 	int i;
+ 	BUG_ON(!cmnd-&gt;done);
+ 
++	dprintk(&quot;cid %llu result %d len %d\n&quot;,
++		cmnd-&gt;cid, result, len);
++
+ 	if (len) {
+ 		cmnd-&gt;bufflen = len;
+ 		cmnd-&gt;offset = 0;
+@@ -696,12 +717,8 @@
+ 
+ 		for (i = 0; i &lt; cmnd-&gt;sg_count; i++) {
+ 			uint32_t copy = min_t(uint32_t, len, PAGE_CACHE_SIZE);
+-			char *dest, *p = data;
+ 
+-			dest = kmap_atomic(cmnd-&gt;sg[i].page, KM_SOFTIRQ0);
+-			memcpy(dest, p, copy);
+-			kunmap_atomic(dest, KM_SOFTIRQ0);
+-
++			memcpy(page_address(cmnd-&gt;sg[i].page), p, copy);
+ 			p += copy;
+ 			len -= copy;
+ 		}
+@@ -717,6 +734,8 @@
+ 	struct tgt_target *target = cmnd-&gt;session-&gt;target;
+ 	struct tgt_device *device;
+ 
++	dprintk(&quot;cid %llu rw %d\n&quot;, cmnd-&gt;cid, cmnd-&gt;rw);
++
+ 	/* Should we do this earlier? */
+ 	device = tgt_device_find(target, cmnd-&gt;dev_id);
+ 	if (device)
+@@ -779,6 +798,33 @@
+ 	return cmnd;
+ }
+ 
++int tgt_msg_send(struct tgt_target *target, void *data, int data_len,
++		 unsigned int gfp_flags)
++{
++	struct tgt_event *ev;
++	struct sk_buff *skb;
++	struct nlmsghdr *nlh;
++	int len;
++
++	len = NLMSG_SPACE(sizeof(*ev) + data_len);
++	skb = alloc_skb(len, gfp_flags);
++	if (!skb)
++		return -ENOMEM;
++
++	dprintk(&quot;%d %Zd %d\n&quot;, len, sizeof(*ev), data_len);
++	nlh = __nlmsg_put(skb, daemon_pid, 0, TGT_KEVENT_TARGET_PASSTHRU,
++			 len - sizeof(*nlh), 0);
++	ev = NLMSG_DATA(nlh);
++	memset(ev, 0, sizeof(*ev));
++
++	memcpy(ev-&gt;data, data, data_len);
++	ev-&gt;k.tgt_passthru.tid = target-&gt;tid;
++	ev-&gt;k.tgt_passthru.len = data_len;
++
++	return netlink_unicast(nls, skb, daemon_pid, 0);
++}
++EXPORT_SYMBOL_GPL(tgt_msg_send);
++
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	int err = 0;
+@@ -789,10 +835,15 @@
+ 	dprintk(&quot;%d %d %d %d\n&quot;, daemon_pid, nlh-&gt;nlmsg_type,
+ 		nlh-&gt;nlmsg_pid, current-&gt;pid);
+ 
++	/*
++	 * stupid hack until we merge daemons
++	 */
++	daemon_pid = NETLINK_CREDS(skb)-&gt;pid;
++
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
+-		daemon_pid  = NETLINK_CREDS(skb)-&gt;pid;
+-		dprintk(&quot;start %d\n&quot;, daemon_pid);
++		tgt_pid  = NETLINK_CREDS(skb)-&gt;pid;
++		dprintk(&quot;start %d\n&quot;, tgt_pid);
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+ 		target = tgt_target_create(ev-&gt;u.c_target.type,
+@@ -809,6 +860,18 @@
+ 		else
+ 			err = -EINVAL;
+ 		break;
++	case TGT_UEVENT_TARGET_PASSTHRU:
++		target = target_find(ev-&gt;u.tgt_passthru.tid);
++		if (!target || !target-&gt;tt-&gt;msg_recv) {
++			dprintk(&quot;Could not find target %d for passthru\n&quot;,
++				ev-&gt;u.tgt_passthru.tid);
++			err = -EINVAL;
++			break;
++		}
++
++		err = target-&gt;tt-&gt;msg_recv(target, ev-&gt;u.tgt_passthru.len,
++					   ev-&gt;data);
++		break;
+ 	case TGT_UEVENT_DEVICE_CREATE:
+ 		err = tgt_device_create(ev-&gt;u.c_device.tid,
+ 					ev-&gt;u.c_device.dev_id,
+@@ -823,7 +886,7 @@
+ 	case TGT_UEVENT_CMND_RES:
+ 		cmnd = find_cmnd_by_id(ev-&gt;u.cmnd_res.cid);
+ 		if (cmnd)
+-			uspace_cmnd_done(cmnd, (char *) ev + sizeof(*ev),
++			uspace_cmnd_done(cmnd, ev-&gt;data,
+ 					 ev-&gt;u.cmnd_res.result,
+ 					 ev-&gt;u.cmnd_res.len);
+ 		else {
+@@ -870,11 +933,17 @@
+ 		err = event_recv_msg(skb, nlh);
+ 
+ 		eprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+-		ev-&gt;k.event_res.err = err;
+-		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMND_RES)
++		/*
++		 * TODO for passthru commands the lower level should
++		 * probably handle the result or we should modify this
++		 */
++		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMND_RES &amp;&amp;
++		    nlh-&gt;nlmsg_type != TGT_UEVENT_TARGET_PASSTHRU) {
++			ev-&gt;k.event_res.err = err;
+ 			send_event_res(NETLINK_CREDS(skb)-&gt;pid,
+ 				       TGT_KEVENT_RESPONSE,
+ 				       ev, sizeof(*ev));
++		}
+ 		skb_pull(skb, rlen);
+ 	}
+ 	return 0;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/kernel/tgt.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -57,6 +57,8 @@
+ 		   void (*done)(void *, struct tgt_session *), void *arg);
+ extern int tgt_session_destroy(struct tgt_session *session);
+ 
++extern int tgt_msg_send(struct tgt_target *target, void *data, int data_len,
++			unsigned int gfp_flags);
+ extern struct tgt_cmnd *tgt_cmnd_create(struct tgt_session *session,
+ 					uint8_t *proto_data,
+ 					uint8_t *id_buff, int buff_size);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/kernel/tgt_scsi.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -113,9 +113,31 @@
+ 	cmnd-&gt;dev_id = scsi_tgt_translate_lun(id_buff, buff_size);
+ }
+ 
+-static int sense_data_build(struct tgt_cmnd *cmnd, uint8_t key,
+-			    uint8_t ascode, uint8_t ascodeq)
++/*
++ * TODO: better error handling
++ * We should get ASC and ASCQ from the device code.
++ */
++static uint8_t error_to_sense_key(int err)
+ {
++	uint8_t key;
++
++	switch (err) {
++	case -ENOMEM:
++		key = ABORTED_COMMAND;
++		break;
++	case -EOVERFLOW:
++		key = HARDWARE_ERROR;
++		break;
++	default:
++		key = HARDWARE_ERROR;
++		break;
++	}
++
++	return key;
++}
++
++static int sense_data_build(struct tgt_cmnd *cmnd, int err)
++{
+ 	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
+ 	int len = 8, alen = 6;
+ 	uint8_t *data = scsi_tgt_cmnd-&gt;sense_buff;
+@@ -123,23 +145,26 @@
+ 	memset(data, 0, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
+ 
+ 	if (cmnd-&gt;rw == READ || cmnd-&gt;rw == WRITE) {
++		uint8_t key = error_to_sense_key(err);
+ 		/* kspace command failure */
+ 
+ 		data[0] = 0x70 | 1U &lt;&lt; 7;
+ 		data[2] = key;
+ 		data[7] = alen;
+-		data[12] = ascode;
+-		data[13] = ascodeq;
++		/*
++		 * TODO
++		 */
++		data[12] = 0;
++		data[13] = 0;
++		cmnd-&gt;result = SAM_STAT_CHECK_CONDITION;
+ 	} else {
+-		char *addr;
+ 		/* uspace command failure */
+ 
+ 		len = min(cmnd-&gt;bufflen, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
+ 		alen = 0;
+ 
+-		addr = kmap_atomic(cmnd-&gt;sg[0].page, KM_SOFTIRQ0);
+-		memcpy(data, addr, len);
+-		kunmap_atomic(addr, KM_SOFTIRQ0);
++		memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
++		cmnd-&gt;result = err;
+ 	}
+ 
+ 	cmnd-&gt;error_buff = data;
+@@ -148,38 +173,11 @@
+ 	return len + alen;
+ }
+ 
+-/*
+- * TODO: better error handling
+- * We should get ASC and ASCQ from the device code.
+- */
+-static uint8_t error_to_sense_key(int err)
+-{
+-	uint8_t key;
+-
+-	switch (err) {
+-	case -ENOMEM:
+-		key = ABORTED_COMMAND;
+-		break;
+-	case -EOVERFLOW:
+-		key = HARDWARE_ERROR;
+-		break;
+-	default:
+-		key = HARDWARE_ERROR;
+-		break;
+-	}
+-
+-	return key;
+-}
+-
+ static void scsi_tgt_cmnd_done(struct tgt_cmnd *cmnd, int err)
+ {
+-	if (err &lt; 0) {
+-		uint8_t key;
+-
+-		key = error_to_sense_key(err);
+-		sense_data_build(cmnd, key, 0, 0);
+-		cmnd-&gt;result = SAM_STAT_CHECK_CONDITION;
+-	} else
++	if (err != 0)
++		sense_data_build(cmnd, err);
++	else
+ 		cmnd-&gt;result = SAM_STAT_GOOD;
+ }
+ 
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/kernel/tgt_target.h	2005-09-22 17:59:36 UTC (rev 85)
+@@ -21,7 +21,7 @@
+ 
+ 	int (* target_create) (struct tgt_target *);
+ 	void (* target_destroy) (struct tgt_target *);
+-
++	int (* msg_recv) (struct tgt_target *, uint32_t, void *);
+ 	/*
+ 	 * name of protocol to use
+ 	 */
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/usr/netlink.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -30,36 +30,26 @@
+ static struct sockaddr_nl src_addr, dest_addr;
+ static char *recvbuf, *sendbuf;
+ 
+-static int nl_write(int fd, int type, struct iovec *iovp, int count)
++static int nl_write(int fd, int type, char *data, int len)
+ {
+-	int i, datalen;
+-	struct iovec iov[8];
++	struct nlmsghdr *nlh = (struct nlmsghdr *) data;
++	struct iovec iov;
+ 	struct msghdr msg;
+-	struct nlmsghdr nlh;
+ 
+-	for (datalen = 0, i = 0; i &lt; count; i++)
+-		datalen += iovp[i].iov_len;
++	memset(nlh, 0, sizeof(*nlh));
++	nlh-&gt;nlmsg_len = len;
++	nlh-&gt;nlmsg_type = type;
++	nlh-&gt;nlmsg_flags = 0;
++	nlh-&gt;nlmsg_pid = getpid();
+ 
+-	memset(&amp;nlh, 0, sizeof(nlh));
+-	nlh.nlmsg_len = NLMSG_SPACE(datalen);
+-	nlh.nlmsg_type = type;
+-	nlh.nlmsg_flags = 0;
+-	nlh.nlmsg_pid = getpid();
++	iov.iov_base = data;
++	iov.iov_len = len;
+ 
+-	iov[0].iov_base = &nlh;
+-	iov[0].iov_len = sizeof(nlh);
+-
+-	for (i = 1; i &lt;= count; i++) {
+-		iov[i].iov_base = iovp-&gt;iov_base;
+-		iov[i].iov_len = iovp-&gt;iov_len;
+-		iovp++;
+-	}
+-
+ 	memset(&amp;msg, 0, sizeof(msg));
+ 	msg.msg_name= (void*) &amp;dest_addr;
+ 	msg.msg_namelen = sizeof(dest_addr);
+ 	msg.msg_iov = (void *) &iov;
+-	msg.msg_iovlen = count + 1;
++	msg.msg_iovlen = 1;
+ 
+ 	return sendmsg(fd, &amp;msg, 0);
+ }
+@@ -87,14 +77,10 @@
+ int nl_cmnd_call(int fd, int type, char *data, int size, int *res)
+ {
+ 	int err;
+-	struct iovec iov;
+ 	struct tgt_event *ev;
+ 	char nlm_ev[NLMSG_SPACE(sizeof(*ev))];
+ 
+-	iov.iov_base = data;
+-	iov.iov_len = size;
+-
+-	err = nl_write(fd, type, &amp;iov, 1);
++	err = nl_write(fd, type, data, size);
+ 	if (err &lt; 0)
+ 		return err;
+ 
+@@ -108,34 +94,34 @@
+ 
+ static int cmnd_queue(int fd, char *reqbuf, char *resbuf)
+ {
+-	int result, len;
+-	struct iovec iov[2];
+-	struct tgt_event *ev = (struct tgt_event *) reqbuf;
+-	uint64_t cid = ev-&gt;k.cmnd_req.cid;
++	int result, len = 0;
++	struct tgt_event *ev_req = (struct tgt_event *) reqbuf;
++	struct tgt_event *ev_res = NLMSG_DATA(resbuf);
++	uint64_t cid = ev_req-&gt;k.cmnd_req.cid;
+ 	uint8_t *scb;
+ 
+ 	memset(resbuf, 0, NL_BUFSIZE);
+-	scb = reqbuf + sizeof(*ev);
++	scb = (uint8_t *) ev_req-&gt;data;
+ 	dprintf(&quot;%&quot; PRIu64 &quot; %x\n&quot;, cid, scb[0]);
+ 
+ 	/*
+ 	 * TODO match tid to protocol and route cmnd to correct userspace
+ 	 * protocol module
+ 	 */
+-	result = scsi_cmnd_process(ev-&gt;k.cmnd_req.tid, ev-&gt;k.cmnd_req.dev_id,
+-				scb, resbuf, &amp;len);
++	result = scsi_cmnd_process(ev_req-&gt;k.cmnd_req.tid,
++				   ev_req-&gt;k.cmnd_req.dev_id, scb,
++				   (uint8_t *) ev_res-&gt;data, &amp;len);
+ 
+-	memset(ev, 0, sizeof(*ev));
+-	ev-&gt;u.cmnd_res.cid = cid;
+-	ev-&gt;u.cmnd_res.len = len;
+-	ev-&gt;u.cmnd_res.result = result;
++	memset(ev_res, 0, sizeof(*ev_res));
++	ev_res-&gt;u.cmnd_res.cid = cid;
++	ev_res-&gt;u.cmnd_res.len = len;
++	ev_res-&gt;u.cmnd_res.result = result;
+ 
+-	iov[0].iov_base = ev;
+-	iov[0].iov_len = sizeof(*ev);
+-	iov[1].iov_base = resbuf;
+-	iov[1].iov_len = len;
+ 
+-	return nl_write(fd, TGT_UEVENT_CMND_RES, iov, len ? 2 : 1);
++	log_error(&quot;scsi_cmnd_process res %d len %d\n&quot;, result, len);
++
++	return nl_write(fd, TGT_UEVENT_CMND_RES, resbuf,
++			NLMSG_SPACE(sizeof(*ev_res) + len));
+ }
+ 
+ void nl_event_handle(int fd)
+@@ -158,7 +144,7 @@
+ 	nlh = (struct nlmsghdr *) recvbuf;
+ 	ev = (struct tgt_event *) NLMSG_DATA(nlh);
+ 
+-	dprintf(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, nlh-&gt;nlmsg_len);
++	dprintf(&quot;nl_event_handle %d %d\n&quot;, nlh-&gt;nlmsg_type, nlh-&gt;nlmsg_len);
+ 
+ read_again:
+ 	err = nl_read(fd, recvbuf, nlh-&gt;nlmsg_len, 0);
+@@ -186,9 +172,10 @@
+ static void nl_start(int fd)
+ {
+ 	int err, res;
+-	struct tgt_event ev;
++	char nlmsg[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 
+-	err = nl_cmnd_call(fd, TGT_UEVENT_START, (char *) &amp;ev, sizeof(ev), &amp;res);
++	err = nl_cmnd_call(fd, TGT_UEVENT_START, nlmsg, 
++			   NLMSG_SPACE(sizeof(struct tgt_event)), &amp;res);
+ 	if (err &lt; 0 || res &lt; 0) {
+ 		eprintf(&quot;%d %d\n&quot;, err, res);
+ 		exit(-1);
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-09-20 04:23:45 UTC (rev 84)
++++ trunk/usr/scsi.c	2005-09-22 17:59:36 UTC (rev 85)
+@@ -401,11 +401,13 @@
+ 	int fd, err;
+ 	char path[PATH_MAX], buf[PATH_MAX];
+ 
+-	sprintf(path, &quot;/sys/class/tgt_device/device%d:%&quot; PRIu64 &quot;/path&quot;, tid, lun);
++	sprintf(path, &quot;/sys/class/tgt_device/device%d:%&quot; PRIu64 &quot;/fd&quot;,
++		tid, lun);
+ 
+ 	fd = open(path, O_RDONLY);
+ 	if (fd &lt; 0) {
+-		perror(&quot;scsi sync_cache could not get LU's path&quot;);
++		log_error(&quot;scsi sync_cache could not get LU's fd err %d&quot;,
++			  errno);
+ 		err = EINVAL;
+ 		goto einval;
+ 	}
+@@ -413,24 +415,32 @@
+ 	err = read(fd, buf, sizeof(buf));
+ 	close(fd);
+ 	if (err &lt; 0) {
+-		perror(&quot;scsi sync_cache could not read LUN path&quot;);
++		log_error(&quot;scsi sync_cache could not read LUN path err %d&quot;,
++			  errno);
+ 		err = EIO;
+ 		goto eio;
+ 	}
+ 	/*
+ 	 * yuck! wtf should I be using
+ 	 */
+-	memset(path, 0, PATH_MAX);
+-	sscanf(buf, &quot;%s\n&quot;, path);
++	fd = 0;
++	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
+ 
+-	fd = open(path, O_RDWR);
+-	if (fd &lt; 0) {
+-		perror(&quot;scsi sync_cache could not open device&quot;);
+-		err = EIO;
+-		goto eio;
++	/*
++	 * this will work when we merge the daemons (fd's are associated
++	 * with procssess so this will fail when ietd opens the fd and
++	 * this thread syncs it).
++	 */
++	err = fsync(fd);
++	if (err) {
++		log_error(&quot;scsi sync_cache fsync of fd %d failed err %d&quot;,
++			   fd, errno);
++		/*
++		 * this is what we should do but for now we lie.
++		 * err = errno;
++		 */
++		err = 0;
+ 	}
+-	err = fsync(fd);
+-	close(fd);
+ 
+ 	switch (err) {
+ 	case EROFS:
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000077.html">[Stgt-svn] r84 - in trunk: . kernel
+</A></li>
+	<LI>Next message: <A HREF="000079.html">[Stgt-svn] r86 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#78">[ date ]</a>
+              <a href="thread.html#78">[ thread ]</a>
+              <a href="subject.html#78">[ subject ]</a>
+              <a href="author.html#78">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

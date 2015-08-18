@@ -1,0 +1,113 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r196 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r196%20-%20trunk/kernel&In-Reply-To=%3C200512040719.jB47JMwc003552%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000184.html">
+   <LINK REL="Next"  HREF="000186.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r196 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r196%20-%20trunk/kernel&In-Reply-To=%3C200512040719.jB47JMwc003552%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r196 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Dec  4 08:19:22 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000184.html">[Stgt-svn] r195 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000186.html">[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#185">[ date ]</a>
+              <a href="thread.html#185">[ thread ]</a>
+              <a href="subject.html#185">[ subject ]</a>
+              <a href="author.html#185">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-04 08:19:09 +0100 (Sun, 04 Dec 2005)
+New Revision: 196
+
+Modified:
+   trunk/kernel/tgt.c
+Log:
+Kill unnecessary check in __tgt_cmd_destroy().
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-01 12:56:00 UTC (rev 195)
++++ trunk/kernel/tgt.c	2005-12-04 07:19:09 UTC (rev 196)
+@@ -709,28 +709,22 @@
+ {
+ 	struct tgt_cmd *cmd = data;
+ 	struct request *rq = cmd-&gt;rq;
+-	struct request_queue *q = NULL;
++	struct request_queue *q = rq-&gt;q;
+ 	unsigned long flags;
+ 
+-	if (rq) {
+-		q = rq-&gt;q;
++	dprintk(&quot;tag %d\n&quot;, rq-&gt;tag);
++	spin_lock_irqsave(q-&gt;queue_lock, flags);
++	if (blk_rq_tagged(rq))
++		blk_queue_end_tag(q, rq);
++	end_that_request_last(rq);
++	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+ 
+-		dprintk(&quot;tag %d\n&quot;, rq-&gt;tag);
+-
+-		spin_lock_irqsave(q-&gt;queue_lock, flags);
+-		if (blk_rq_tagged(rq))
+-			blk_queue_end_tag(q, rq);
+-		end_that_request_last(rq);
+-		spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+-	}
+-
+ 	if (cmd-&gt;device)
+ 		tgt_device_put(cmd-&gt;device);
+ 
+ 	mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
+ 
+-	if (q)
+-		blk_run_queue(q);
++	blk_run_queue(q);
+ }
+ 
+ static void tgt_cmd_destroy(struct tgt_cmd *cmd)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000184.html">[Stgt-svn] r195 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000186.html">[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#185">[ date ]</a>
+              <a href="thread.html#185">[ thread ]</a>
+              <a href="subject.html#185">[ subject ]</a>
+              <a href="author.html#185">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

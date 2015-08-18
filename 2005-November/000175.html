@@ -1,0 +1,93 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r186 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r186%20-%20trunk/kernel&In-Reply-To=%3C200511200819.jAK8JH7r032595%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000174.html">
+   <LINK REL="Next"  HREF="000176.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r186 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r186%20-%20trunk/kernel&In-Reply-To=%3C200511200819.jAK8JH7r032595%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r186 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Nov 20 09:19:17 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000174.html">[Stgt-svn] r185 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000176.html">[Stgt-svn] r187 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#175">[ date ]</a>
+              <a href="thread.html#175">[ thread ]</a>
+              <a href="subject.html#175">[ subject ]</a>
+              <a href="author.html#175">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-20 09:19:00 +0100 (Sun, 20 Nov 2005)
+New Revision: 186
+
+Modified:
+   trunk/kernel/tgt_scsi.c
+Log:
+Fix gcc warning in ppc64 and sparc64.
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-11-19 16:38:46 UTC (rev 185)
++++ trunk/kernel/tgt_scsi.c	2005-11-20 08:19:00 UTC (rev 186)
+@@ -90,7 +90,7 @@
+ 
+ 	dprintk(&quot;%p %x %x %llx %d %llu\n&quot;, rq-&gt;special, scmd-&gt;tags, scmd-&gt;scb[0],
+ 		(unsigned long long) tqd-&gt;qflags, tqd-&gt;active_cmd,
+-		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
++		cmd-&gt;device ? (unsigned long long) cmd-&gt;device-&gt;dev_id : ~0ULL);
+ 
+ 	if (scmd-&gt;tags == MSG_ORDERED_TAG || scmd-&gt;tags == MSG_HEAD_TAG)
+ 		set_bit(TGT_SCSI_QUEUE_BLOCKED, &amp;tqd-&gt;qflags);
+@@ -115,7 +115,7 @@
+ 
+ 	dprintk(&quot;%p %x %x %llx %d %llu\n&quot;, cmd, scmd-&gt;tags, scmd-&gt;scb[0],
+ 		(unsigned long long) tqd-&gt;qflags, tqd-&gt;active_cmd,
+-		cmd-&gt;device ? cmd-&gt;device-&gt;dev_id : ~0ULL);
++		cmd-&gt;device ? (unsigned long long) cmd-&gt;device-&gt;dev_id : ~0ULL);
+ 
+ 	spin_lock_irqsave(q-&gt;queue_lock, flags);
+ 	tqd-&gt;active_cmd--;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000174.html">[Stgt-svn] r185 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000176.html">[Stgt-svn] r187 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#175">[ date ]</a>
+              <a href="thread.html#175">[ thread ]</a>
+              <a href="subject.html#175">[ subject ]</a>
+              <a href="author.html#175">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

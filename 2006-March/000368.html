@@ -1,0 +1,623 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r381%20-%20in%20branches/use-scsi-ml%3A%20.%20ibmvstgt%20ibmvstgt/usr%20usr&In-Reply-To=%3C200603132312.k2DNCjkf032415%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000367.html">
+   <LINK REL="Next"  HREF="000369.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r381%20-%20in%20branches/use-scsi-ml%3A%20.%20ibmvstgt%20ibmvstgt/usr%20usr&In-Reply-To=%3C200603132312.k2DNCjkf032415%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r381 - in branches/use-scsi-ml: . ibmvstgt ibmvstgt/usr usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Mar 14 00:12:45 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000367.html">[Stgt-svn] r380 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000369.html">[Stgt-svn] r382 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#368">[ date ]</a>
+              <a href="thread.html#368">[ thread ]</a>
+              <a href="subject.html#368">[ subject ]</a>
+              <a href="author.html#368">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-14 00:12:45 +0100 (Tue, 14 Mar 2006)
+New Revision: 381
+
+Added:
+   branches/use-scsi-ml/ibmvstgt/usr/
+   branches/use-scsi-ml/ibmvstgt/usr/Makefile
+   branches/use-scsi-ml/ibmvstgt/usr/libibmvstgt.c
+Modified:
+   branches/use-scsi-ml/ibmvstgt/Makefile
+   branches/use-scsi-ml/initd
+   branches/use-scsi-ml/usr/dl.c
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Move some dirty hacks in SCSI command processing specific to ibmvstgt to ibmvstgt dynamic library.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/Makefile
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/Makefile	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/ibmvstgt/Makefile	2006-03-13 23:12:45 UTC (rev 381)
+@@ -4,7 +4,7 @@
+ 	KERNELSRC ?= /lib/modules/$(shell uname -r)/build
+ endif
+ 
+-all: mods
++all: mods usr
+ 
+ mods:
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel modules
+@@ -13,5 +13,5 @@
+ 	$(MAKE) -C usr
+ 
+ clean:
+-#	$(MAKE) -C usr clean
++	$(MAKE) -C usr clean
+ 	$(MAKE) -C $(KERNELSRC) SUBDIRS=$(shell pwd)/kernel clean
+
+Added: branches/use-scsi-ml/ibmvstgt/usr/Makefile
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/usr/Makefile	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/ibmvstgt/usr/Makefile	2006-03-13 23:12:45 UTC (rev 381)
+@@ -0,0 +1,9 @@
++CFLAGS += -O2 -fno-inline -Wall -fPIC -Wstrict-prototypes -I$(KERNELSRC)/include -I../../usr
++OBJS = libibmvstgt.o
++SHAREDLIB = libibmvstgt.so
++
++$(SHAREDLIB): $(OBJS)
++	$(CC) -shared -o $@ $(OBJS)
++
++clean:
++	rm -f *.o $(PROGRAMS) $(SHAREDLIB)
+
+Added: branches/use-scsi-ml/ibmvstgt/usr/libibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/usr/libibmvstgt.c	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/ibmvstgt/usr/libibmvstgt.c	2006-03-13 23:12:45 UTC (rev 381)
+@@ -0,0 +1,267 @@
++/*
++ * SCSI command processing specific to IBM Virtual SCSI target Driver
++ *
++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ *
++ * Based on:
++ *
++ * IBM eServer i/pSeries Virtual SCSI Target Driver
++ * Copyright (C) 2003-2005 Dave Boutcher (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">boutcher at us.ibm.com</A>) IBM Corp.
++ *			   Santiago Leon (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">santil at us.ibm.com</A>) IBM Corp.
++ *			   Linda Xie (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">lxie at us.ibm.com</A>) IBM Corp.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;stdint.h&gt;
++#include &lt;syscall.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;asm/byteorder.h&gt;
++#include &lt;linux/fs.h&gt;
++#include &lt;scsi/scsi.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
++#include &lt;sys/mman.h&gt;
++
++#include &quot;tgtd.h&quot;
++
++#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
++#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
++#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
++
++struct inquiry_data {
++	uint8_t qual_type;
++	uint8_t rmb_reserve;
++	uint8_t version;
++	uint8_t aerc_naca_hisup_format;
++	uint8_t addl_len;
++	uint8_t sccs_reserved;
++	uint8_t bque_encserv_vs_multip_mchngr_reserved;
++	uint8_t reladr_reserved_linked_cmdqueue_vs;
++	char vendor[8];
++	char product[16];
++	char revision[4];
++	char vendor_specific[20];
++	char reserved1[2];
++	char version_descriptor[16];
++	char reserved2[22];
++	char unique[158];
++};
++
++#define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
++
++static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
++{
++	struct inquiry_data *id = (struct inquiry_data *) data;
++	char system_id[256], path[256], buf[32];
++	int fd, err, partition_number;
++	unsigned int unit_address;
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
++	fd = open(path, O_RDONLY);
++	memset(system_id, 0, sizeof(system_id));
++	err = read(fd, system_id, sizeof(system_id));
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/partition_number&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	partition_number = strtoul(buf, NULL, 10);
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/unit_address&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	unit_address = strtoul(buf, NULL, 0);
++	close(fd);
++
++	dprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
++		host_no, system_id, partition_number, unit_address, lun);
++
++	id-&gt;qual_type = TYPE_DISK;
++	id-&gt;rmb_reserve = 0x00;
++	id-&gt;version = 0x84;	/* ISO/IE		  */
++	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
++	id-&gt;addl_len = sizeof(*id) - 4;
++	id-&gt;bque_encserv_vs_multip_mchngr_reserved = 0x00;
++	id-&gt;reladr_reserved_linked_cmdqueue_vs = 0x02;/*CMDQ*/
++	memcpy(id-&gt;vendor, &quot;IBM	    &quot;, 8);
++	/* Don't even ask about the next bit.  AIX uses
++	 * hardcoded device naming to recognize device types
++	 * and their client won't  work unless we use VOPTA and
++	 * VDASD.
++	 */
++	memcpy(id-&gt;product, &quot;VDASD blkdev    &quot;, 16);
++	memcpy(id-&gt;revision, &quot;0001&quot;, 4);
++	snprintf(id-&gt;unique,sizeof(id-&gt;unique),
++		 &quot;IBM-VSCSI-%s-P%d-%x-%d-%d-%d\n&quot;,
++		 system_id,
++		 partition_number,
++		 unit_address,
++		 GETBUS(lun),
++		 GETTARGET(lun),
++		 GETLUN(lun));
++
++	return sizeof(*id);
++}
++
++int scsi_inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
++		 uint8_t *scb, uint8_t *data, int *len)
++{
++	int result = SAM_STAT_CHECK_CONDITION;
++
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto err;
++
++	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
++
++	if (!(scb[1] &amp; 0x3)) {
++		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
++		result = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x2) {
++		/* CmdDt bit is set */
++		/* We do not support it now. */
++		data[1] = 0x1;
++		data[5] = 0;
++		*len = 6;
++		result = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x1) {
++		/* EVPD bit set */
++		if (scb[2] == 0x0) {
++			data[1] = 0x0;
++			data[3] = 3;
++			data[4] = 0x0;
++			data[5] = 0x80;
++			data[6] = 0x83;
++			*len = 7;
++			result = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x80) {
++			data[1] = 0x80;
++			data[3] = 4;
++			memset(data + 4, 0x20, 4);
++			*len = 8;
++			result = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x83) {
++			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
++
++			data[1] = 0x83;
++			data[3] = tmp + 4;
++			data[4] = 0x1;
++			data[5] = 0x1;
++			data[7] = tmp;
++			if (dev)
++				strncpy(data + 8, dev-&gt;scsi_id, SCSI_ID_LEN);
++			*len = tmp + 8;
++			result = SAM_STAT_GOOD;
++		}
++	}
++
++	if (result != SAM_STAT_GOOD)
++		goto err;
++
++	*len = min_t(int, *len, scb[4]);
++
++	if (!dev)
++		data[0] = TYPE_NO_LUN;
++
++	return SAM_STAT_GOOD;
++
++err:
++	*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
++				0x24, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static uint64_t make_lun(unsigned int bus, unsigned int target, unsigned int lun)
++{
++	uint16_t result = (0x8000 |
++			   ((target &amp; 0x003f) &lt;&lt; 8) |
++			   ((bus &amp; 0x0007) &lt;&lt; 5) |
++			   (lun &amp; 0x001f));
++	return ((uint64_t) result) &lt;&lt; 48;
++}
++
++int scsi_report_luns(struct list_head *dev_list, uint8_t *lun_buf,
++		     uint8_t *scb, uint8_t *p, int *len)
++{
++	struct tgt_device *dev;
++	uint64_t lun, *data = (uint64_t *) p;
++	int idx, alen, oalen, nr_luns, rbuflen = 4096;
++	int result = SAM_STAT_GOOD;
++
++	memset(data, 0, rbuflen);
++
++	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	if (alen &lt; 16) {
++		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
++					0x24, 0);
++		return SAM_STAT_CHECK_CONDITION;
++	}
++
++	alen &amp;= ~(8 - 1);
++	oalen = alen;
++
++	if ((*((uint64_t *) lun_buf))) {
++		nr_luns = 1;
++		goto done;
++	}
++
++	alen -= 8;
++	rbuflen -= 8; /* FIXME */
++	idx = 2;
++	nr_luns = 1;
++
++	list_for_each_entry(dev, dev_list, dlist) {
++		lun = dev-&gt;lun;
++		lun = make_lun(0, lun &amp; 0x003f, 0);
++		data[idx++] = __cpu_to_be64(lun);
++		if (!(alen -= 8))
++			break;
++		if (!(rbuflen -= 8)) {
++			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
++			exit(-1);
++		}
++		nr_luns++;
++	}
++
++done:
++	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
++	*len = min(oalen, nr_luns * 8 + 8);
++
++	return result;
++}
++
++#define        TGT_INVALID_DEV_ID      ~0ULL
++
++uint64_t scsi_lun_to_int(uint8_t *p)
++{
++	uint64_t lun = TGT_INVALID_DEV_ID;
++
++	lun = *((uint64_t *) p);
++	dprintf(&quot;%&quot; PRIx64 &quot; %u %u %u\n&quot;, lun, GETTARGET(lun), GETBUS(lun), GETLUN(lun));
++
++	if (GETBUS(lun) || GETLUN(lun))
++		return TGT_INVALID_DEV_ID;
++	else
++		return GETTARGET(lun);
++}
++
+
+Modified: branches/use-scsi-ml/initd
+===================================================================
+--- branches/use-scsi-ml/initd	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/initd	2006-03-13 23:12:45 UTC (rev 381)
+@@ -5,7 +5,7 @@
+ 
+ PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ MEM_SIZE=1048576
+-export LD_LIBRARY_PATH=${PWD}/usr:${PWD}/istgt/usr:${LD_LIBRARY_PATH}
++export LD_LIBRARY_PATH=${PWD}/usr:${PWD}/istgt/usr:${PWD}/ibmvstgt/usr:${LD_LIBRARY_PATH}
+ 
+ if [ -f ${PWD}/istgt/kernel/istgt.ko ] ; then
+ 	TARGET=istgt
+
+Modified: branches/use-scsi-ml/usr/dl.c
+===================================================================
+--- branches/use-scsi-ml/usr/dl.c	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/usr/dl.c	2006-03-13 23:12:45 UTC (rev 381)
+@@ -53,7 +53,7 @@
+ 	&quot;poll_event&quot;,
+ 	&quot;ipc_mgmt&quot;,
+ 	&quot;scsi_inquiry&quot;,
+-	&quot;scsi_report_lun&quot;,
++	&quot;scsi_report_luns&quot;,
+ 	&quot;scsi_lun_to_int&quot;,
+ };
+ 
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-13 23:12:45 UTC (rev 381)
+@@ -29,12 +29,8 @@
+ 
+ #define BLK_SHIFT	9
+ 
+-#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+-#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+-#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
+-
+-static int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+-		      uint8_t ascode, uint8_t ascodeq)
++int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
++		     uint8_t ascode, uint8_t ascodeq)
+ {
+ 	int len = 6;
+ 
+@@ -171,84 +167,6 @@
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-struct inquiry_data {
+-	uint8_t qual_type;
+-	uint8_t rmb_reserve;
+-	uint8_t version;
+-	uint8_t aerc_naca_hisup_format;
+-	uint8_t addl_len;
+-	uint8_t sccs_reserved;
+-	uint8_t bque_encserv_vs_multip_mchngr_reserved;
+-	uint8_t reladr_reserved_linked_cmdqueue_vs;
+-	char vendor[8];
+-	char product[16];
+-	char revision[4];
+-	char vendor_specific[20];
+-	char reserved1[2];
+-	char version_descriptor[16];
+-	char reserved2[22];
+-	char unique[158];
+-};
+-
+-#define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
+-
+-static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
+-{
+-	struct inquiry_data *id = (struct inquiry_data *) data;
+-	char system_id[256], path[256], buf[32];
+-	int fd, err, partition_number;
+-	unsigned int unit_address;
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
+-	fd = open(path, O_RDONLY);
+-	memset(system_id, 0, sizeof(system_id));
+-	err = read(fd, system_id, sizeof(system_id));
+-	close(fd);
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/partition_number&quot;,
+-		 host_no);
+-	fd = open(path, O_RDONLY);
+-	err = read(fd, buf, sizeof(buf));
+-	partition_number = strtoul(buf, NULL, 10);
+-	close(fd);
+-
+-	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/unit_address&quot;,
+-		 host_no);
+-	fd = open(path, O_RDONLY);
+-	err = read(fd, buf, sizeof(buf));
+-	unit_address = strtoul(buf, NULL, 0);
+-	close(fd);
+-
+-	dprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
+-		host_no, system_id, partition_number, unit_address, lun);
+-
+-	id-&gt;qual_type = TYPE_DISK;
+-	id-&gt;rmb_reserve = 0x00;
+-	id-&gt;version = 0x84;	/* ISO/IE		  */
+-	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
+-	id-&gt;addl_len = sizeof(*id) - 4;
+-	id-&gt;bque_encserv_vs_multip_mchngr_reserved = 0x00;
+-	id-&gt;reladr_reserved_linked_cmdqueue_vs = 0x02;/*CMDQ*/
+-	memcpy(id-&gt;vendor, &quot;IBM	    &quot;, 8);
+-	/* Don't even ask about the next bit.  AIX uses
+-	 * hardcoded device naming to recognize device types
+-	 * and their client won't  work unless we use VOPTA and
+-	 * VDASD.
+-	 */
+-	memcpy(id-&gt;product, &quot;VDASD blkdev    &quot;, 16);
+-	memcpy(id-&gt;revision, &quot;0001&quot;, 4);
+-	snprintf(id-&gt;unique,sizeof(id-&gt;unique),
+-		 &quot;IBM-VSCSI-%s-P%d-%x-%d-%d-%d\n&quot;,
+-		 system_id,
+-		 partition_number,
+-		 unit_address,
+-		 GETBUS(lun),
+-		 GETTARGET(lun),
+-		 GETLUN(lun));
+-
+-	return sizeof(*id);
+-}
+-
+ static int __inquiry(struct tgt_device *dev, int host_no, uint8_t *lun_buf,
+ 		     uint8_t *scb, uint8_t *data, int *len)
+ {
+@@ -260,8 +178,6 @@
+ 	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+-		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
+-#if 0
+ 		data[2] = 4;
+ 		data[3] = 0x42;
+ 		data[4] = 59;
+@@ -280,7 +196,6 @@
+ 		data[62] = 0x03;
+ 		data[63] = 0x00;
+ 		*len = 64;
+-#endif
+ 		result = SAM_STAT_GOOD;
+ 	} else if (scb[1] &amp; 0x2) {
+ 		/* CmdDt bit is set */
+@@ -344,15 +259,6 @@
+ 	return fn(dev, host_no, lun_buf, scb, data, len);
+ }
+ 
+-uint64_t make_lun(unsigned int bus, unsigned int target, unsigned int lun)
+-{
+-	uint16_t result = (0x8000 |
+-			   ((target &amp; 0x003f) &lt;&lt; 8) |
+-			   ((bus &amp; 0x0007) &lt;&lt; 5) |
+-			   (lun &amp; 0x001f));
+-	return ((uint64_t) result) &lt;&lt; 48;
+-}
+-
+ static int __report_luns(struct list_head *dev_list, uint8_t *lun_buf,
+ 			 uint8_t *scb, uint8_t *p, int *len)
+ {
+@@ -373,30 +279,16 @@
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+ 
+-	if ((*((uint64_t *) lun_buf))) {
+-		dprintf(&quot;Another sick hack for ibmvstgt\n&quot;);
+-		nr_luns = 1;
+-		goto done;
+-	}
+-
+ 	alen -= 8;
+ 	rbuflen -= 8; /* FIXME */
+ 	idx = 1;
+ 	nr_luns = 0;
+ 
+-	/* ibmvstgt hack */
+-	idx = 2;
+-	nr_luns = 1;
+-
+ 	list_for_each_entry(dev, dev_list, dlist) {
+ 		lun = dev-&gt;lun;
+ 
+-		/* ibmvstgt hack */
+-/* 		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16); */
+-		lun = make_lun(0, lun &amp; 0x003f, 0);
+-		dprintf(&quot;%&quot; PRIx64 &quot;\n&quot;, lun);
+-/* 		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32); */
+-		data[idx++] = __cpu_to_be64(lun);
++		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16);
++		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32);
+ 		if (!(alen -= 8))
+ 			break;
+ 		if (!(rbuflen -= 8)) {
+@@ -406,7 +298,6 @@
+ 		nr_luns++;
+ 	}
+ 
+-done:
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+ 
+@@ -568,15 +459,6 @@
+ {
+ 	uint64_t lun = TGT_INVALID_DEV_ID;
+ 
+-	/* ibmvstgt hack */
+-	lun = *((uint64_t *) p);
+-	dprintf(&quot;%&quot; PRIx64 &quot; %u %u %u\n&quot;, lun, GETTARGET(lun), GETBUS(lun), GETLUN(lun));
+-
+-	if (GETBUS(lun) || GETLUN(lun))
+-		return TGT_INVALID_DEV_ID;
+-	else
+-		return GETTARGET(lun);
+-
+ 	switch (*p &gt;&gt; 6) {
+ 	case 0:
+ 		lun = p[1];
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-03-13 22:34:21 UTC (rev 380)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-13 23:12:45 UTC (rev 381)
+@@ -48,4 +48,6 @@
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+ 			    struct tgt_device *dev, struct list_head *dev_list);
+ 
++extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
++			    uint8_t ascode, uint8_t ascodeq);
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000367.html">[Stgt-svn] r380 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000369.html">[Stgt-svn] r382 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#368">[ date ]</a>
+              <a href="thread.html#368">[ thread ]</a>
+              <a href="subject.html#368">[ subject ]</a>
+              <a href="author.html#368">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

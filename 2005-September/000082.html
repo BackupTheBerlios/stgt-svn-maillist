@@ -1,0 +1,374 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r89%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509232036.j8NKadWA004457%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000081.html">
+   <LINK REL="Next"  HREF="000090.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r89 - in trunk: iscsi/kernel kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r89%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509232036.j8NKadWA004457%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r89 - in trunk: iscsi/kernel kernel">mnc at berlios.de
+       </A><BR>
+    <I>Fri Sep 23 22:36:39 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000081.html">[Stgt-svn] r88 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000090.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#82">[ date ]</a>
+              <a href="thread.html#82">[ thread ]</a>
+              <a href="subject.html#82">[ subject ]</a>
+              <a href="author.html#82">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-23 22:36:38 +0200 (Fri, 23 Sep 2005)
+New Revision: 89
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_vsd.c
+Log:
+create buffer from create cmnd; for now trust expected transfer length. This allows us to have a vsd or sd get a buffer for the transfer without completely parsing the command (can we completely trust this value, HW cards have something similar). This is needed to make passthrough very simple. Target drivers should konw when they have to allocate or not allocate a buffer since it should not know if the command is going to userpscace, a passthrough device etc. The should just magically receive a buffer whenever they need it and let the target framework do the magic
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-23 20:36:38 UTC (rev 89)
+@@ -843,13 +843,26 @@
+ {
+ 	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	struct iscsi_cmd *req_hdr = cmnd_hdr(req);
++	enum dma_data_direction data_dir;
+ 
+ 	dprintk(D_GENERIC, &quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
+ 	eprintk(&quot;scsi command: %02x\n&quot;, req_hdr-&gt;cdb[0]);
+ 
++	/*
++	 * handle bidi later
++	 */
++	if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
++		data_dir = DMA_TO_DEVICE;
++	else if (req_hdr-&gt;flags &amp; ISCSI_FLAG_CMD_READ)
++		data_dir = DMA_FROM_DEVICE;
++	else
++		data_dir = DMA_NONE;
++
+ 	req-&gt;tc = proto-&gt;create_cmnd(conn-&gt;session-&gt;ts, req_hdr-&gt;cdb,
+-				     req_hdr-&gt;lun, sizeof(req_hdr-&gt;lun));
++				     be32_to_cpu(req_hdr-&gt;data_length),
++				     data_dir, req_hdr-&gt;lun,
++				     sizeof(req_hdr-&gt;lun), NULL);
+ 	assert(req-&gt;tc);
+ 
+ 	switch (req_hdr-&gt;cdb[0]) {
+@@ -893,7 +906,6 @@
+ 			cmnd_skip_data(req);
+ 		}
+ 
+-		proto-&gt;alloc_cmnd_buffer(req-&gt;tc, NULL);
+ 		break;
+ 	}
+ 	case WRITE_6:
+@@ -918,8 +930,6 @@
+ 		if (req_hdr-&gt;cdb[0] == WRITE_VERIFY &amp;&amp; req_hdr-&gt;cdb[1] &amp; 0x02)
+ 			eprintk(&quot;Verification is ignored %x\n&quot;, cmnd_itt(req));
+ 
+-		proto-&gt;alloc_cmnd_buffer(req-&gt;tc, NULL);
+-
+ 		if (req-&gt;pdu.datasize) {
+ 			if (cmnd_recv_pdu(conn, req-&gt;tc, 0, req-&gt;pdu.datasize) &lt; 0)
+ 				assert(0);
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt.c	2005-09-23 20:36:38 UTC (rev 89)
+@@ -561,15 +561,21 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmnd_create);
+ 
++static void tgt_free_buffer(struct tgt_cmnd *cmnd)
++{
++	int i;
++	
++	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
++		__free_page(cmnd-&gt;sg[i].page);
++	kfree(cmnd-&gt;sg);
++}
++
+ void tgt_cmnd_destroy(struct tgt_cmnd *cmnd)
+ {
+ 	unsigned long flags;
+-	int i;
+ 
+ 	dprintk(&quot;cid %llu\n&quot;, cmnd-&gt;cid);
+ 
+-	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+-		__free_page(cmnd-&gt;sg[i].page);
+ 	kfree(cmnd-&gt;sg);
+ 
+ 	spin_lock_irqsave(&amp;cmnd_hash_lock, flags);
+@@ -687,14 +693,24 @@
+ 	int i;
+ 	BUG_ON(!cmnd-&gt;done);
+ 
+-	dprintk(&quot;cid %llu result %d len %d\n&quot;,
+-		cmnd-&gt;cid, result, len);
++	dprintk(&quot;cid %llu result %d len %d bufflen %u\n&quot;,
++		cmnd-&gt;cid, result, len, cmnd-&gt;bufflen);
+ 
+ 	if (len) {
+-		cmnd-&gt;bufflen = len;
+-		cmnd-&gt;offset = 0;
+-		__tgt_alloc_buffer(cmnd);
++		/*
++		 * yuck TODO fix.
++		 * This will happen if we though we were going to do some
++		 * IO but we ended up just gettting some sense back
++		 */
++		if (len != cmnd-&gt;bufflen) {
++			tgt_free_buffer(cmnd);
+ 
++			cmnd-&gt;bufflen = len;
++			cmnd-&gt;offset = 0;
++
++			__tgt_alloc_buffer(cmnd);
++		}
++
+ 		for (i = 0; i &lt; cmnd-&gt;sg_count; i++) {
+ 			uint32_t copy = min_t(uint32_t, len, PAGE_CACHE_SIZE);
+ 
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt.h	2005-09-23 20:36:38 UTC (rev 89)
+@@ -10,6 +10,7 @@
+ #define __TGT_H
+ 
+ #include &lt;linux/mempool.h&gt;
++#include &lt;linux/dma-mapping.h&gt;
+ 
+ struct tgt_device;
+ struct tgt_protocol;
+@@ -36,6 +37,7 @@
+ 	struct list_head clist;
+ 	struct list_head hash_list;
+ 
++	enum dma_data_direction data_dir;
+ 	int sg_count;
+ 	struct scatterlist *sg;
+ 	uint32_t bufflen;
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt_device.h	2005-09-23 20:36:38 UTC (rev 89)
+@@ -54,7 +54,7 @@
+ 	/*
+ 	 * setup buffer or device fields if needed
+ 	 */
+-	void (* prep_cmnd)(struct tgt_cmnd *cmnd);
++	void (* prep_cmnd)(struct tgt_cmnd *cmnd, uint32_t data_len);
+ 
+ 	/*
+ 	 * Pointer to the sysfs class properties for this host, NULL terminated.
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt_protocol.h	2005-09-23 20:36:38 UTC (rev 89)
+@@ -9,6 +9,7 @@
+ #define __TGT_PROTOCOL_H
+ 
+ #include &lt;linux/slab.h&gt;
++#include &lt;linux/dma-mapping.h&gt;
+ 
+ struct module;
+ struct tgt_cmnd;
+@@ -27,23 +28,25 @@
+ 	int uspace_pdu_size;
+ 
+ 	/*
+-	 * create a command.
++	 * create a command and allocate a buffer of size data_len for
++	 * for transfer. The buffer will be allocated with GFP_KERNEL
++	 * so if you cannot sleep the caller must pass in a done() function.
++	 * The done function will be called from process context.
++	 *
++	 * TODO: This dual behavior is a little strange. We will convert
++	 * iet to open-iscsi's model so eventually the done() function
++	 * will be a requirement so we can have a common path.
+ 	 */
+ 	struct tgt_cmnd *(* create_cmnd)(struct tgt_session *session,
+-					uint8_t *cmd, uint8_t *dev_id_buff,
+-					int buff_size);
++					uint8_t *cmd, uint32_t data_len,
++					enum dma_data_direction data_dir,
++					uint8_t *dev_id_buff, int id_buff_size,
++					void (*done)(struct tgt_cmnd *));
+ 	/*
+ 	 * destroy a command. This will free the command and buffer
+ 	 */
+ 	void (* destroy_cmnd)(struct tgt_cmnd *cmd); 
+ 	/*
+-	 * allocoate a comand buffer. If this is called from irq context
+-	 * a done callback can be set so the allocation is done in process
+-	 * context.
+-	 */
+-	void (* alloc_cmnd_buffer)(struct tgt_cmnd *cmnd,
+-				   void (*done)(struct tgt_cmnd *));
+-	/*
+ 	 * queue a command to be executed in a workqueue. A done() callback
+ 	 * must be passed in.
+ 	 */
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt_scsi.c	2005-09-23 20:36:38 UTC (rev 89)
+@@ -47,8 +47,10 @@
+  * differently
+  */
+ static struct tgt_cmnd *
+-scsi_tgt_create_cmnd(struct tgt_session *session, uint8_t *scb, uint8_t *lun,
+-		     int lun_size)
++scsi_tgt_create_cmnd(struct tgt_session *session, uint8_t *scb,
++		     uint32_t data_len, enum dma_data_direction data_dir,
++		     uint8_t *lun, int lun_size,
++		     void (*done)(struct tgt_cmnd *))
+ {
+ 	struct tgt_device *device;
+ 	struct tgt_cmnd *cmnd;
+@@ -72,8 +74,17 @@
+ 	}
+ 	cmnd-&gt;device = device;
+ 
++	/* is this device specific */
++	cmnd-&gt;data_dir = data_dir;
++	/*
++	 * set bufflen based on data_len for now, but let device specific
++	 * handler overide just in case
++	 */
++	cmnd-&gt;bufflen = data_len;
+ 	/* do scsi device specific setup */
+-	device-&gt;dt-&gt;prep_cmnd(cmnd);
++	device-&gt;dt-&gt;prep_cmnd(cmnd, data_len);
++	if (cmnd-&gt;bufflen)
++		tgt_cmnd_alloc_buffer(cmnd, done);
+ 	return cmnd;
+ }
+ 
+@@ -128,7 +139,6 @@
+ 	.module = THIS_MODULE,
+ 	.create_cmnd = scsi_tgt_create_cmnd,
+ 	.destroy_cmnd = tgt_cmnd_destroy,
+-	.alloc_cmnd_buffer = tgt_cmnd_alloc_buffer,
+ 	.queue_cmnd = tgt_cmnd_queue,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+
+Modified: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-09-23 00:35:37 UTC (rev 88)
++++ trunk/kernel/tgt_vsd.c	2005-09-23 20:36:38 UTC (rev 89)
+@@ -40,12 +40,12 @@
+ /*
+  * is this device specific or common? Should it be moved to the protocol.
+  */
+-static void tgt_vsd_prep(struct tgt_cmnd *cmnd)
++static void tgt_vsd_prep(struct tgt_cmnd *cmnd, uint32_t data_len)
+ {
+ 	struct scsi_tgt_cmnd *scmnd = tgt_cmnd_to_scsi(cmnd);
+ 	uint8_t *scb = scmnd-&gt;scb;
+ 	uint64_t off = 0;
+-	uint32_t len = 0;
++/*	uint32_t len = 0; */
+ 
+ 	/*
+ 	 * set bufflen and offset
+@@ -54,29 +54,32 @@
+ 	case READ_6:
+ 	case WRITE_6:
+ 		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
+-		len = scb[4];
++/*		len = scb[4];
+ 		if (!len)
+-			len = 256;
++			len = 256;*/
+ 		break;
+ 	case READ_10:
+ 	case WRITE_10:
+ 	case WRITE_VERIFY:
+ 		off = be32_to_cpu(*(u32 *) &amp;scb[2]);
+-		len = (scb[7] &lt;&lt; 8) + scb[8];
++/*		len = (scb[7] &lt;&lt; 8) + scb[8]; */
+ 		break;
+ 	case READ_16:
+ 	case WRITE_16:
+ 		off = be64_to_cpu(*(u64 *)&amp;scb[2]);
+-		len = be32_to_cpu(*(u32 *)&amp;scb[10]);
++/*		len = be32_to_cpu(*(u32 *)&amp;scb[10]); */
+ 		break;
+ 	default:
+ 		break;
+ 	}
+ 
+ 	off &lt;&lt;= 9;
+-	len &lt;&lt;= 9;
++/*	len &lt;&lt;= 9; */
+ 
+-	cmnd-&gt;bufflen = len;
++	/*
++	 * we trust the data_len passed in for now
++	 */
++	cmnd-&gt;bufflen = data_len;
+ 	cmnd-&gt;offset = off;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000081.html">[Stgt-svn] r88 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000090.html">[Stgt-svn] r89 - in trunk: iscsi/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#82">[ date ]</a>
+              <a href="thread.html#82">[ thread ]</a>
+              <a href="subject.html#82">[ subject ]</a>
+              <a href="author.html#82">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

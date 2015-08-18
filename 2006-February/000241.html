@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r254 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r254%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602021224.k12CO9jL022875%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000240.html">
+   <LINK REL="Next"  HREF="000242.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r254 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r254%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602021224.k12CO9jL022875%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r254 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb  2 13:24:09 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000240.html">[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000242.html">[Stgt-svn] r255 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#241">[ date ]</a>
+              <a href="thread.html#241">[ thread ]</a>
+              <a href="subject.html#241">[ subject ]</a>
+              <a href="author.html#241">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-02 13:24:02 +0100 (Thu, 02 Feb 2006)
+New Revision: 254
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+Log:
+Add debug message to scsi_tgt_bind_host().
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_nl.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-02 11:36:24 UTC (rev 253)
++++ branches/use-scsi-ml/kernel/scsi_tgt_nl.c	2006-02-02 12:24:02 UTC (rev 254)
+@@ -111,6 +111,8 @@
+ 	struct task_struct *tsk;
+ 	int err = 0;
+ 
++	dprintk(&quot;%d %d\n&quot;, ev-&gt;u.target_bind.host_no, ev-&gt;u.target_bind.pid);
++
+ 	shost = scsi_host_lookup(ev-&gt;u.target_bind.host_no);
+ 	if (IS_ERR(shost)) {
+ 		eprintk(&quot;Could not find host no %d\n&quot;,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000240.html">[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000242.html">[Stgt-svn] r255 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#241">[ date ]</a>
+              <a href="thread.html#241">[ thread ]</a>
+              <a href="subject.html#241">[ subject ]</a>
+              <a href="author.html#241">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

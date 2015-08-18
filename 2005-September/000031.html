@@ -1,0 +1,244 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r38 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r38%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509031354.j83DsCcD032549%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000030.html">
+   <LINK REL="Next"  HREF="000032.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r38 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r38%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509031354.j83DsCcD032549%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r38 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Sep  3 15:54:12 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000030.html">[Stgt-svn] r37 - in trunk: kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000032.html">[Stgt-svn] r39 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#31">[ date ]</a>
+              <a href="thread.html#31">[ thread ]</a>
+              <a href="subject.html#31">[ subject ]</a>
+              <a href="author.html#31">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-03 15:54:11 +0200 (Sat, 03 Sep 2005)
+New Revision: 38
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi.h
+   trunk/iscsi/kernel/nthread.c
+Log:
+IET can use stgt sense data properly.
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-03 13:52:32 UTC (rev 37)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-03 13:54:11 UTC (rev 38)
+@@ -256,53 +256,82 @@
+ 	iscsi_cmnd_init_write(rsp);
+ }
+ 
+-static struct iscsi_cmnd *create_sense_rsp(struct iscsi_cmnd *req,
+-					   u8 sense_key, u8 asc, u8 ascq)
++struct iscsi_sense_data {
++	u16 length;
++	u8  data[0];
++} __packed;
++
++static struct iscsi_cmnd *do_create_sense_rsp(struct iscsi_cmnd *req)
+ {
+ 	struct iscsi_cmnd *rsp;
+-/* 	struct iscsi_scsi_rsp_hdr *rsp_hdr; */
+-/* 	struct tio *tio; */
+-/* 	struct iscsi_sense_data *sense; */
++	struct iscsi_cmd_rsp *rsp_hdr;
++	struct iscsi_sense_data *sense;
++	struct scatterlist *sg = req-&gt;stc-&gt;sg;
+ 
+-	rsp = NULL;
+-	assert(0);
++	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+ 
+-/* 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1); */
++	rsp_hdr = (struct iscsi_cmd_rsp *)&amp;rsp-&gt;pdu.bhs;
++	rsp_hdr-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
++	rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++	rsp_hdr-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
++	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
++	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
+ 
+-/* 	rsp_hdr = (struct iscsi_scsi_rsp_hdr *)&amp;rsp-&gt;pdu.bhs; */
+-/* 	rsp_hdr-&gt;opcode = ISCSI_OP_SCSI_RSP; */
+-/* 	rsp_hdr-&gt;flags = ISCSI_FLG_FINAL; */
+-/* 	rsp_hdr-&gt;response = ISCSI_RESPONSE_COMMAND_COMPLETED; */
+-/* 	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION; */
+-/* 	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt; */
++	sense = (struct iscsi_sense_data *) page_address(sg[0].page);
++	memmove(sense-&gt;data, sense, req-&gt;stc-&gt;bufflen);
++	sense-&gt;length = cpu_to_be16(req-&gt;stc-&gt;bufflen);
+ 
+-/* 	tio = rsp-&gt;tio = tio_alloc(1); */
+-/* 	sense = (struct iscsi_sense_data *) page_address(tio-&gt;pvec[0]); */
+-/* 	assert(sense); */
+-/* 	clear_page(sense); */
+-/* 	sense-&gt;length = cpu_to_be16(14); */
+-/* 	sense-&gt;data[0] = 0xf0; */
+-/* 	sense-&gt;data[2] = sense_key; */
+-/* 	sense-&gt;data[7] = 6;	// Additional sense length */
+-/* 	sense-&gt;data[12] = asc; */
+-/* 	sense-&gt;data[13] = ascq; */
++	req-&gt;stc-&gt;bufflen += sizeof(struct iscsi_sense_data);
++	sg-&gt;length = req-&gt;stc-&gt;bufflen;
++	rsp-&gt;pdu.datasize = sg-&gt;length;
++	rsp-&gt;sg = sg;
+ 
+-/* 	rsp-&gt;pdu.datasize = sizeof(struct iscsi_sense_data) + 14; */
+-/* 	tio-&gt;size = (rsp-&gt;pdu.datasize + 3) &amp; -4; */
+-/* 	tio-&gt;offset = 0; */
+-
+ 	return rsp;
+ }
+ 
+-void send_data_rsp(struct iscsi_cmnd *req, int (*func)(struct iscsi_cmnd *))
++static struct iscsi_cmnd *create_sense_rsp(struct iscsi_cmnd *req,
++					   u8 sense_key, u8 asc, u8 ascq)
+ {
+ 	struct iscsi_cmnd *rsp;
++	struct iscsi_cmd_rsp *rsp_hdr;
++	struct iscsi_sense_data *sense;
++	struct scatterlist *sg;
+ 
+-	if (func(req) &lt; 0) {
+-		rsp = create_sense_rsp(req, ILLEGAL_REQUEST, 0x24, 0x0);
+-		iscsi_cmnd_init_write(rsp);
+-	} else
+-		do_send_data_rsp(req);
++	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
++
++	rsp_hdr = (struct iscsi_cmd_rsp *)&amp;rsp-&gt;pdu.bhs;
++	rsp_hdr-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
++	rsp_hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++	rsp_hdr-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
++	rsp_hdr-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
++	rsp_hdr-&gt;itt = cmnd_hdr(req)-&gt;itt;
++
++	assert(req-&gt;stc);
++	assert(!req-&gt;stc-&gt;sg);
++
++	/* TODO: really needs cleanups. */
++	req-&gt;stc-&gt;bufflen = sizeof(struct iscsi_sense_data) + 14;
++	req-&gt;stc-&gt;sg_count = 1;
++	req-&gt;stc-&gt;sg = sg =
++		kmalloc(sizeof(struct scatterlist *), __GFP_NOFAIL | GFP_KERNEL);
++
++	sg-&gt;page = alloc_page(__GFP_NOFAIL | GFP_KERNEL);
++	sg-&gt;offset = 0;
++	sg-&gt;length = req-&gt;stc-&gt;bufflen;
++
++	sense = (struct iscsi_sense_data *) page_address(sg[0].page);
++	clear_page(sense);
++	sense-&gt;length = cpu_to_be16(14);
++	sense-&gt;data[0] = 0xf0;
++	sense-&gt;data[2] = sense_key;
++	sense-&gt;data[7] = 6;	// Additional sense length
++	sense-&gt;data[12] = asc;
++	sense-&gt;data[13] = ascq;
++
++	rsp-&gt;pdu.datasize = sizeof(struct iscsi_sense_data) + 14;
++	rsp-&gt;sg = sg;
++
++	return rsp;
+ }
+ 
+ /**
+@@ -680,6 +709,15 @@
+ 	struct iscsi_cmnd *cmnd = (struct iscsi_cmnd *) stc-&gt;private;
+ 	struct iscsi_cmd *req = cmnd_hdr(cmnd);
+ 
++	if (stc-&gt;result != SAM_STAT_GOOD) {
++		struct iscsi_cmnd *rsp;
++
++		eprintk(&quot;%p %d %x\n&quot;, stc, stc-&gt;result, stc-&gt;scb[0]);
++		rsp = do_create_sense_rsp(cmnd);
++		iscsi_cmnd_init_write(rsp);
++		return;
++	}
++
+ 	switch (req-&gt;cdb[0]) {
+ 	case INQUIRY:
+ 	case REPORT_LUNS:
+@@ -1225,7 +1263,6 @@
+ 
+ 	size = (cmnd-&gt;pdu.datasize + 3) &amp; -4;
+ 	assert(cmnd-&gt;sg);
+-/* 	assert(tio-&gt;size == size); */
+ 	__cmnd_send_pdu(conn, cmnd-&gt;sg, 0, size);
+ }
+ 
+
+Modified: trunk/iscsi/kernel/iscsi.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi.h	2005-09-03 13:52:32 UTC (rev 37)
++++ trunk/iscsi/kernel/iscsi.h	2005-09-03 13:54:11 UTC (rev 38)
+@@ -206,7 +206,6 @@
+ extern void cmnd_tx_start(struct iscsi_cmnd *);
+ extern void cmnd_tx_end(struct iscsi_cmnd *);
+ extern void cmnd_release(struct iscsi_cmnd *, int);
+-extern void send_data_rsp(struct iscsi_cmnd *, int (*)(struct iscsi_cmnd *));
+ extern void send_scsi_rsp(struct iscsi_cmnd *);
+ 
+ /* conn.c */
+
+Modified: trunk/iscsi/kernel/nthread.c
+===================================================================
+--- trunk/iscsi/kernel/nthread.c	2005-09-03 13:52:32 UTC (rev 37)
++++ trunk/iscsi/kernel/nthread.c	2005-09-03 13:54:11 UTC (rev 38)
+@@ -294,7 +294,6 @@
+ 	struct socket *sock;
+ 	ssize_t (*sendpage)(struct socket *, struct page *, int, size_t, int);
+ 	struct scatterlist *sg;
+-/* 	struct tio *tio; */
+ 	struct iovec *iop;
+ 	int saved_size, size, sendsize;
+ 	int offset, idx;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000030.html">[Stgt-svn] r37 - in trunk: kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000032.html">[Stgt-svn] r39 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#31">[ date ]</a>
+              <a href="thread.html#31">[ thread ]</a>
+              <a href="subject.html#31">[ subject ]</a>
+              <a href="author.html#31">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

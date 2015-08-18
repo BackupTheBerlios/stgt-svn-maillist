@@ -1,0 +1,500 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r842%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi%20xen&In-Reply-To=%3C200703180102.l2I12OHY024055%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000828.html">
+   <LINK REL="Next"  HREF="000830.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r842%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi%20xen&In-Reply-To=%3C200703180102.l2I12OHY024055%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar 18 02:02:24 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000828.html">[Stgt-svn] r841 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000830.html">[Stgt-svn] r843 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#829">[ date ]</a>
+              <a href="thread.html#829">[ thread ]</a>
+              <a href="subject.html#829">[ subject ]</a>
+              <a href="author.html#829">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-18 02:02:22 +0100 (Sun, 18 Mar 2007)
+New Revision: 842
+
+Modified:
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/bd_xen.c
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/mmc.c
+   trunk/usr/osd.c
+   trunk/usr/sbc.c
+   trunk/usr/spt.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+   trunk/usr/xen/xen.h
+Log:
+backendio_template is renamed backingstore_template mainly because
+it's doing more than I/Os.
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/bd_aio.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -47,7 +47,7 @@
+ /* FIXME */
+ #define MAX_AIO_REQS 2048
+ 
+-struct bd_aio_info {
++struct bs_aio_info {
+ 	io_context_t ctx;
+ 
+ 	/* TODO: batch requests */
+@@ -62,7 +62,7 @@
+ 
+ static void *bs_aio_endio_thread(void *arg)
+ {
+-	struct bd_aio_info *info = arg;
++	struct bs_aio_info *info = arg;
+ 	int command, ret, nr;
+ 
+ retry:
+@@ -96,7 +96,7 @@
+ 
+ static void bs_aio_handler(int fd, int events, void *data)
+ {
+-	struct bd_aio_info *info = data;
++	struct bs_aio_info *info = data;
+ 	int i, nr_events, ret;
+ 
+ 	ret = read(info-&gt;done_fd[0], &amp;nr_events, sizeof(nr_events));
+@@ -115,11 +115,11 @@
+ }
+ 
+ static int
+-bd_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++bs_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+ {
+ 	int ret;
+-	struct bd_aio_info *info =
+-		(struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++	struct bs_aio_info *info =
++		(struct bs_aio_info *) ((char *)dev + sizeof(*dev));
+ 
+ 	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+ 	if (*fd &lt; 0)
+@@ -166,11 +166,11 @@
+ 	return -1;
+ }
+ 
+-static void bd_aio_close(struct tgt_device *dev)
++static void bs_aio_close(struct tgt_device *dev)
+ {
+-	struct bd_aio_info *info;
++	struct bs_aio_info *info;
+ 
+-	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++	info = (struct bs_aio_info *) ((char *)dev + sizeof(*dev));
+ 
+ 	pthread_cancel(info-&gt;aio_thread);
+ 	pthread_join(info-&gt;aio_thread, NULL);
+@@ -178,10 +178,10 @@
+ 	close(dev-&gt;fd);
+ }
+ 
+-static int bd_aio_cmd_submit(struct scsi_cmd *cmd)
++static int bs_aio_cmd_submit(struct scsi_cmd *cmd)
+ {
+ 	struct tgt_device *dev = cmd-&gt;dev;
+-	struct bd_aio_info *info = (struct bd_aio_info *)((char *)dev + sizeof(*dev));
++	struct bs_aio_info *info = (struct bs_aio_info *)((char *)dev + sizeof(*dev));
+ 	struct iocb iocb, *io;
+ 	int ret;
+ 
+@@ -211,15 +211,15 @@
+ 	}
+ }
+ 
+-static int bd_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++static int bs_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	return 0;
+ }
+ 
+-struct backedio_template aio_bdt = {
+-	.bd_datasize		= sizeof(struct bd_aio_info),
+-	.bd_open		= bd_aio_open,
+-	.bd_close		= bd_aio_close,
+-	.bd_cmd_submit		= bd_aio_cmd_submit,
+-	.bd_cmd_done		= bd_aio_cmd_done,
++struct backingstore_template aio_bst = {
++	.bs_datasize		= sizeof(struct bs_aio_info),
++	.bs_open		= bs_aio_open,
++	.bs_close		= bs_aio_close,
++	.bs_cmd_submit		= bs_aio_cmd_submit,
++	.bs_cmd_done		= bs_aio_cmd_done,
+ };
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/bd_mmap.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -32,21 +32,21 @@
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ 
+-static int bd_mmap_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++static int bs_mmap_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+ {
+ 	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+ 
+ 	return *fd &gt;= 0 ? 0 : *fd;
+ }
+ 
+-static void bd_mmap_close(struct tgt_device *dev)
++static void bs_mmap_close(struct tgt_device *dev)
+ {
+ 	close(dev-&gt;fd);
+ }
+ 
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; (pagesize - 1))) + (pagesize - 1)) &gt;&gt; pageshift)
+ 
+-static int bd_mmap_cmd_submit(struct scsi_cmd *cmd)
++static int bs_mmap_cmd_submit(struct scsi_cmd *cmd)
+ {
+ 	int fd = cmd-&gt;dev-&gt;fd;
+ 	void *p;
+@@ -72,7 +72,7 @@
+ 	return err;
+ }
+ 
+-static int bd_mmap_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++static int bs_mmap_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	int err = 0;
+ 
+@@ -90,9 +90,9 @@
+ 	return err;
+ }
+ 
+-struct backedio_template mmap_bdt = {
+-	.bd_open		= bd_mmap_open,
+-	.bd_close		= bd_mmap_close,
+-	.bd_cmd_submit		= bd_mmap_cmd_submit,
+-	.bd_cmd_done		= bd_mmap_cmd_done,
++struct backingstore_template mmap_bst = {
++	.bs_open		= bs_mmap_open,
++	.bs_close		= bs_mmap_close,
++	.bs_cmd_submit		= bs_mmap_cmd_submit,
++	.bs_cmd_done		= bs_mmap_cmd_done,
+ };
+
+Modified: trunk/usr/bd_xen.c
+===================================================================
+--- trunk/usr/bd_xen.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/bd_xen.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -37,14 +37,14 @@
+ 
+ #define O_DIRECT 040000 /* who defines this?*/
+ 
+-static int bd_xen_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++static int bs_xen_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+ {
+ 	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE | O_DIRECT, size);
+ 
+ 	return *fd &gt;= 0 ? 0 : *fd;
+ }
+ 
+-static void bd_xen_close(struct tgt_device *dev)
++static void bs_xen_close(struct tgt_device *dev)
+ {
+ 	close(dev-&gt;fd);
+ }
+@@ -52,7 +52,7 @@
+ /*
+  * Replace this with AIO readv/writev after 2.6.20.
+  */
+-static int bd_xen_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
++static int bs_xen_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+ 			     uint32_t datalen, unsigned long *uaddr,
+ 			     uint64_t offset, int *async, void *key)
+ {
+@@ -75,14 +75,14 @@
+ 	return 0;
+ }
+ 
+-static int bd_xen_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++static int bs_xen_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	return 0;
+ }
+ 
+-struct backedio_template xen_bdt = {
+-	.bd_open		= bd_xen_open,
+-	.bd_close		= bd_xen_close,
+-	.bd_cmd_submit		= bd_xen_cmd_submit,
+-	.bd_cmd_done		= bd_xen_cmd_done,
++struct backingstore_template xen_bst = {
++	.bs_open		= bs_xen_open,
++	.bs_close		= bs_xen_close,
++	.bs_cmd_submit		= bs_xen_cmd_submit,
++	.bs_cmd_done		= bs_xen_cmd_done,
+ };
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/driver.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -1,4 +1,4 @@
+-extern struct backedio_template mmap_bdt, aio_bdt, sg_bdt, xen_bdt;
++extern struct backingstore_template mmap_bst, aio_bst, sg_bst, xen_bst;
+ 
+ struct tgt_driver {
+ 	const char *name;
+@@ -17,7 +17,7 @@
+ 	int (*cmd_end_notify)(uint64_t nid, int result, struct scsi_cmd *);
+ 	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+ 
+-	struct backedio_template *default_bdt;
++	struct backingstore_template *default_bst;
+ };
+ 
+ extern struct tgt_driver *tgt_drivers[];
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/ibmvio/ibmvio.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -9,5 +9,5 @@
+ 	.target_create		= ibmvio_target_create,
+ 	.cmd_end_notify		= kspace_send_cmd_res,
+ 	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+-	.default_bdt		= &amp;mmap_bdt,
++	.default_bst		= &amp;mmap_bst,
+ };
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/iscsi/iscsi.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -19,5 +19,5 @@
+ 	.show			= iscsi_target_show,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+-	.default_bdt		= &amp;aio_bdt,
++	.default_bst		= &amp;aio_bst,
+ };
+
+Modified: trunk/usr/mmc.c
+===================================================================
+--- trunk/usr/mmc.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/mmc.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -32,7 +32,7 @@
+ 	int ret;
+ 
+ 	cmd-&gt;offset = (scsi_rw_offset(cmd-&gt;scb) &lt;&lt; MMC_BLK_SHIFT);
+-	ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
++	ret = cmd-&gt;c_target-&gt;bst-&gt;bs_cmd_submit(cmd);
+ 	if (ret) {
+ 		cmd-&gt;offset = 0;
+ 		cmd-&gt;len = 0;
+
+Modified: trunk/usr/osd.c
+===================================================================
+--- trunk/usr/osd.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/osd.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -128,7 +128,7 @@
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+ 
+-	return cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
++	return cmd-&gt;c_target-&gt;bst-&gt;bs_cmd_submit(cmd);
+ }
+ 
+ static void device_osd_init(struct tgt_device *dev)
+
+Modified: trunk/usr/sbc.c
+===================================================================
+--- trunk/usr/sbc.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/sbc.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -53,7 +53,7 @@
+ 	}
+ 
+ 	cmd-&gt;offset = (scsi_rw_offset(cmd-&gt;scb) &lt;&lt; BLK_SHIFT);
+-	ret = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit(cmd);
++	ret = cmd-&gt;c_target-&gt;bst-&gt;bs_cmd_submit(cmd);
+ 	if (ret) {
+ 		key = HARDWARE_ERROR;
+ 		asc = 0;
+
+Modified: trunk/usr/spt.c
+===================================================================
+--- trunk/usr/spt.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/spt.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -55,10 +55,10 @@
+ 	return 0;
+ }
+ 
+-struct backedio_template sg_bdt = {
+-	.bd_open		= spt_sg_open,
+-	.bd_close		= spt_sg_close,
+-	.bd_cmd_done		= spt_sg_cmd_done,
++struct backingstore_template sg_bst = {
++	.bs_open		= spt_sg_open,
++	.bs_close		= spt_sg_close,
++	.bs_cmd_done		= spt_sg_cmd_done,
+ };
+ 
+ static int spt_cmd_perform(int host_no, struct scsi_cmd *cmd)
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/target.c	2007-03-18 01:02:22 UTC (rev 842)
+@@ -166,7 +166,7 @@
+ 	if (!path)
+ 		return TGTADM_NOMEM;
+ 
+-	err = target-&gt;bdt-&gt;bd_open(device, path, &amp;dev_fd, &amp;size);
++	err = target-&gt;bst-&gt;bs_open(device, path, &amp;dev_fd, &amp;size);
+ 	if (err) {
+ 		free(path);
+ 		return TGTADM_INVALID_REQUEST;
+@@ -225,7 +225,7 @@
+ 		return TGTADM_INVALID_REQUEST;
+ 	p++;
+ 
+-	device = zalloc(sizeof(*device) + target-&gt;bdt-&gt;bd_datasize);
++	device = zalloc(sizeof(*device) + target-&gt;bst-&gt;bs_datasize);
+ 	if (!device)
+ 		return TGTADM_NOMEM;
+ 
+@@ -274,7 +274,7 @@
+ 	free(device-&gt;path);
+ 	list_del(&amp;device-&gt;device_siblings);
+ 
+-	target-&gt;bdt-&gt;bd_close(device);
++	target-&gt;bst-&gt;bs_close(device);
+ 	free(device);
+ 	return 0;
+ }
+@@ -503,7 +503,7 @@
+ 		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = target-&gt;bdt-&gt;bd_cmd_done(do_munmap,
++	err = target-&gt;bst-&gt;bs_cmd_done(do_munmap,
+ 				       !cmd-&gt;mmapped,
+ 				       cmd-&gt;uaddr, cmd-&gt;len);
+ 
+@@ -1208,9 +1208,9 @@
+ 
+ 	/* FIXME */
+ 	if (t_type == TYPE_SPT)
+-		target-&gt;bdt = &amp;sg_bdt;
++		target-&gt;bst = &amp;sg_bst;
+ 	else
+-		target-&gt;bdt = tgt_drivers[lld]-&gt;default_bdt;
++		target-&gt;bst = tgt_drivers[lld]-&gt;default_bst;
+ 
+ 	target-&gt;target_state = SCSI_TARGET_RUNNING;
+ 	target-&gt;lid = lld;
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/target.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -44,7 +44,7 @@
+ 
+ 	struct tgt_cmd_queue cmd_queue;
+ 
+-	struct backedio_template *bdt;
++	struct backingstore_template *bst;
+ 
+ 	struct list_head acl_list;
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/tgtd.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -78,12 +78,12 @@
+ 	int sense_len;
+ };
+ 
+-struct backedio_template {
+-	int bd_datasize;
+-	int (*bd_open)(struct tgt_device *dev, char *path, int *fd, uint64_t *size);
+-	void (*bd_close)(struct tgt_device *dev);
+-	int (*bd_cmd_submit)(struct scsi_cmd *cmd);
+-	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
++struct backingstore_template {
++	int bs_datasize;
++	int (*bs_open)(struct tgt_device *dev, char *path, int *fd, uint64_t *size);
++	void (*bs_close)(struct tgt_device *dev);
++	int (*bs_cmd_submit)(struct scsi_cmd *cmd);
++	int (*bs_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
+ #ifdef USE_KERNEL
+
+Modified: trunk/usr/xen/xen.h
+===================================================================
+--- trunk/usr/xen/xen.h	2007-03-17 14:16:09 UTC (rev 841)
++++ trunk/usr/xen/xen.h	2007-03-18 01:02:22 UTC (rev 842)
+@@ -9,7 +9,7 @@
+ 	.init			= xen_init,
+ 	.cmd_end_notify		= kspace_send_cmd_res,
+ 	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+-	.default_bdt		= &amp;xen_bdt,
++	.default_bst		= &amp;xen_bst,
+ };
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000828.html">[Stgt-svn] r841 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000830.html">[Stgt-svn] r843 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#829">[ date ]</a>
+              <a href="thread.html#829">[ thread ]</a>
+              <a href="subject.html#829">[ subject ]</a>
+              <a href="author.html#829">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

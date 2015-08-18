@@ -1,0 +1,124 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r312 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r312%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602230527.k1N5RqNR031885%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000298.html">
+   <LINK REL="Next"  HREF="000300.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r312 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r312%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602230527.k1N5RqNR031885%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r312 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb 23 06:27:52 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000298.html">[Stgt-svn] r311 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000300.html">[Stgt-svn] r313 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#299">[ date ]</a>
+              <a href="thread.html#299">[ thread ]</a>
+              <a href="subject.html#299">[ subject ]</a>
+              <a href="author.html#299">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-23 06:27:50 +0100 (Thu, 23 Feb 2006)
+New Revision: 312
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Export system information for user space through SCSI sysfs. They are necessary for building inquiry responses.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-22 11:27:11 UTC (rev 311)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-23 05:27:50 UTC (rev 312)
+@@ -1093,6 +1093,39 @@
+ 	return 0;
+ }
+ 
++#define	host_to_adapter(x)	(((struct server_adapter *) x-&gt;hostdata))
++
++static ssize_t
++system_id_show(struct class_device *cdev, char *buf)
++{
++	return snprintf(buf, PAGE_SIZE, &quot;%s\n&quot;, system_id);
++}
++
++static ssize_t
++partition_number_show(struct class_device *cdev, char *buf)
++{
++	return snprintf(buf, PAGE_SIZE, &quot;%x\n&quot;, partition_number);
++}
++
++static ssize_t
++unit_address_show(struct class_device *cdev, char *buf)
++{
++	struct Scsi_Host *shost = class_to_shost(cdev);
++	struct server_adapter *adapter = host_to_adapter(shost);
++	return snprintf(buf, PAGE_SIZE, &quot;%x\n&quot;, adapter-&gt;dma_dev-&gt;unit_address);
++}
++
++static CLASS_DEVICE_ATTR(system_id, S_IRUGO, system_id_show, NULL);
++static CLASS_DEVICE_ATTR(partition_number, S_IRUGO, partition_number_show, NULL);
++static CLASS_DEVICE_ATTR(unit_address, S_IRUGO, unit_address_show, NULL);
++
++static struct class_device_attribute *ibmvstgt_attrs[] = {
++	&amp;class_device_attr_system_id,
++	&amp;class_device_attr_partition_number,
++	&amp;class_device_attr_unit_address,
++	NULL,
++};
++
+ static struct scsi_host_template ibmvstgt_sht = {
+ 	.name			= TGT_NAME,
+ 	.module			= THIS_MODULE,
+@@ -1103,6 +1136,7 @@
+ 	.transfer_response	= ibmvstgt_cmd_done,
+ 	.transfer_data		= recv_cmd_data,
+ 	.eh_abort_handler	= ibmvstgt_eh_abort_handler,
++	.shost_attrs		= ibmvstgt_attrs,
+ 	.proc_name		= TGT_NAME,
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000298.html">[Stgt-svn] r311 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000300.html">[Stgt-svn] r313 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#299">[ date ]</a>
+              <a href="thread.html#299">[ thread ]</a>
+              <a href="subject.html#299">[ subject ]</a>
+              <a href="author.html#299">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

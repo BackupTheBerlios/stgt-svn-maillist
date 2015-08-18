@@ -1,0 +1,85 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r680 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r680%20-%20trunk/usr&In-Reply-To=%3C200611261635.kAQGZPD2009326%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000666.html">
+   <LINK REL="Next"  HREF="000668.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r680 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r680%20-%20trunk/usr&In-Reply-To=%3C200611261635.kAQGZPD2009326%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r680 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 26 17:35:25 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000666.html">[Stgt-svn] r679 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000668.html">[Stgt-svn] r681 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#667">[ date ]</a>
+              <a href="thread.html#667">[ thread ]</a>
+              <a href="subject.html#667">[ subject ]</a>
+              <a href="author.html#667">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-26 17:35:25 +0100 (Sun, 26 Nov 2006)
+New Revision: 680
+
+Modified:
+   trunk/usr/target.c
+Log:
+Fix device creation bug.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-26 15:57:54 UTC (rev 679)
++++ trunk/usr/target.c	2006-11-26 16:35:25 UTC (rev 680)
+@@ -152,6 +152,8 @@
+ 	if (!device)
+ 		return -ENOMEM;
+ 
++	device-&gt;lun = lun;
++
+ 	snprintf(device-&gt;scsi_id, sizeof(device-&gt;scsi_id),
+ 		 &quot;deadbeaf%d:%&quot; PRIu64, tid, lun);
+ 	memset(device-&gt;scsi_sn, 0, sizeof(device-&gt;scsi_sn));
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000666.html">[Stgt-svn] r679 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000668.html">[Stgt-svn] r681 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#667">[ date ]</a>
+              <a href="thread.html#667">[ thread ]</a>
+              <a href="subject.html#667">[ subject ]</a>
+              <a href="author.html#667">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

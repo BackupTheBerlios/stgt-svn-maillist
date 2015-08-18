@@ -1,0 +1,139 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r118 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r118%20-%20trunk/istgt/kernel&In-Reply-To=%3C200510050528.j955SJFx019410%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000111.html">
+   <LINK REL="Next"  HREF="000113.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r118 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r118%20-%20trunk/istgt/kernel&In-Reply-To=%3C200510050528.j955SJFx019410%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r118 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Oct  5 07:28:19 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000111.html">[Stgt-svn] r117 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000113.html">[Stgt-svn] r119 - in trunk/istgt: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#112">[ date ]</a>
+              <a href="thread.html#112">[ thread ]</a>
+              <a href="subject.html#112">[ subject ]</a>
+              <a href="author.html#112">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-05 07:28:03 +0200 (Wed, 05 Oct 2005)
+New Revision: 118
+
+Modified:
+   trunk/istgt/kernel/digest.c
+Log:
+Clean up iSCSI digest feature.
+
+Modified: trunk/istgt/kernel/digest.c
+===================================================================
+--- trunk/istgt/kernel/digest.c	2005-10-05 02:22:59 UTC (rev 117)
++++ trunk/istgt/kernel/digest.c	2005-10-05 05:28:03 UTC (rev 118)
+@@ -4,8 +4,10 @@
+  * This code is licensed under the GPL.
+  */
+ 
++#include &lt;linux/mm.h&gt;
+ #include &lt;asm/types.h&gt;
+ #include &lt;asm/scatterlist.h&gt;
++#include &lt;linux/scatterlist.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+ #include &quot;iscsi.h&quot;
+@@ -20,14 +22,6 @@
+ 	}
+ }
+ 
+-/**
+- * initialize support for digest calculation.
+- *
+- * digest_init -
+- * @conn: ptr to connection to make use of digests
+- *
+- * @return: 0 on success, &lt; 0 on error
+- */
+ int digest_init(struct iscsi_conn *conn)
+ {
+ 	int err = 0;
+@@ -59,12 +53,6 @@
+ 	return err;
+ }
+ 
+-/**
+- * free resources used for digest calculation.
+- *
+- * digest_cleanup -
+- * @conn: ptr to connection that made use of digests
+- */
+ void digest_cleanup(struct iscsi_conn *conn)
+ {
+ 	if (conn-&gt;tx_digest_tfm)
+@@ -73,22 +61,15 @@
+ 		crypto_free_tfm(conn-&gt;rx_digest_tfm);
+ }
+ 
+-/* Copied from linux-iscsi initiator and slightly adjusted */
+-#define SETSG(sg, p, l) do {					\
+-	(sg).page = virt_to_page((p));				\
+-	(sg).offset = ((unsigned long)(p) &amp; ~PAGE_CACHE_MASK);	\
+-	(sg).length = (l);					\
+-} while (0)
+-
+ static void digest_header(struct crypto_tfm *tfm, struct iscsi_pdu *pdu, u8 *crc)
+ {
+ 	struct scatterlist sg[2];
+ 	int i = 0;
+ 
+-	SETSG(sg[i], &amp;pdu-&gt;bhs, sizeof(struct iscsi_hdr));
++	sg_init_one(&amp;sg[i], (u8 *) &amp;pdu-&gt;bhs, sizeof(struct iscsi_hdr));
+ 	i++;
+ 	if (pdu-&gt;ahssize) {
+-		SETSG(sg[i], pdu-&gt;ahs, pdu-&gt;ahssize);
++		sg_init_one(&amp;sg[i], pdu-&gt;ahs, pdu-&gt;ahssize);
+ 		i++;
+ 	}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000111.html">[Stgt-svn] r117 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000113.html">[Stgt-svn] r119 - in trunk/istgt: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#112">[ date ]</a>
+              <a href="thread.html#112">[ thread ]</a>
+              <a href="subject.html#112">[ subject ]</a>
+              <a href="author.html#112">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,139 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r385 - branches/use-scsi-ml/patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r385%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200603140730.k2E7UbJg020764%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000371.html">
+   <LINK REL="Next"  HREF="000373.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r385 - branches/use-scsi-ml/patchset</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r385%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200603140730.k2E7UbJg020764%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r385 - branches/use-scsi-ml/patchset">tomo at berlios.de
+       </A><BR>
+    <I>Tue Mar 14 08:30:37 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000371.html">[Stgt-svn] r384 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000373.html">[Stgt-svn] r386 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#372">[ date ]</a>
+              <a href="thread.html#372">[ thread ]</a>
+              <a href="subject.html#372">[ subject ]</a>
+              <a href="author.html#372">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-14 08:30:33 +0100 (Tue, 14 Mar 2006)
+New Revision: 385
+
+Added:
+   branches/use-scsi-ml/patchset/tmf.diff
+Log:
+I'm too lazy to update the whole patchset. Apply the patchset first
+and then tmf.diff. After all, the patchset will be unnecessary because
+we move to the scsi-target git tree.
+
+
+Added: branches/use-scsi-ml/patchset/tmf.diff
+===================================================================
+--- branches/use-scsi-ml/patchset/tmf.diff	2006-03-14 07:14:36 UTC (rev 384)
++++ branches/use-scsi-ml/patchset/tmf.diff	2006-03-14 07:30:33 UTC (rev 385)
+@@ -0,0 +1,60 @@
++diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
++index 8b799db..eca5721 100644
++--- a/include/scsi/scsi_host.h
+++++ b/include/scsi/scsi_host.h
++@@ -153,6 +153,9 @@ struct scsi_host_template {
++ 	int (* transfer_data)(struct scsi_cmnd *,
++ 			      void (*done)(struct scsi_cmnd *));
++ 
+++	/* Used as callback for the completion of task management request. */
+++	int (* tsk_mgmt_response)(u64 mid, int result);
+++
++ 	/*
++ 	 * This is an error handling strategy routine.  You don't need to
++ 	 * define one of these if you don't want to - there is a default
++diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
++index 91ad6bc..3d09a1a 100644
++--- a/include/scsi/scsi_tgt.h
+++++ b/include/scsi/scsi_tgt.h
++@@ -8,4 +8,6 @@ struct scsi_lun;
++ 
++ extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd);
++ extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
++-extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, int);
+++extern void scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, u64);
+++extern int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *, int, u64, struct scsi_lun *,
+++				     void *);
++diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
++index ebca452..63b2e3a 100644
++--- a/include/scsi/scsi_tgt_if.h
+++++ b/include/scsi/scsi_tgt_if.h
++@@ -52,7 +52,7 @@ struct tgt_event {
++ 		} cmd_rsp;
++ 		struct {
++ 			int host_no;
++-			int mid;
+++			uint64_t mid;
++ 			int result;
++ 		} tsk_mgmt_rsp;
++ 	} u;
++@@ -69,6 +69,7 @@ struct tgt_event {
++ 			uint8_t scb[16];
++ 			uint8_t lun[8];
++ 			int attribute;
+++			uint64_t tag;
++ 		} cmd_req;
++ 		struct {
++ 			int host_no;
++@@ -77,10 +78,10 @@ struct tgt_event {
++ 		} cmd_done;
++ 		struct {
++ 			int host_no;
++-			int mid;
+++			int function;
++ 			uint64_t tag;
++ 			uint8_t lun[8];
++-			int function;
+++			uint64_t mid;
++ 		} tsk_mgmt_req;
++ 	} k;
++ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000371.html">[Stgt-svn] r384 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000373.html">[Stgt-svn] r386 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#372">[ date ]</a>
+              <a href="thread.html#372">[ thread ]</a>
+              <a href="subject.html#372">[ subject ]</a>
+              <a href="author.html#372">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

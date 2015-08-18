@@ -1,0 +1,129 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r161 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r161%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051015.jA5AFU69008900%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000154.html">
+   <LINK REL="Next"  HREF="000156.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r161 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r161%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051015.jA5AFU69008900%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r161 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 11:15:30 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000154.html">[Stgt-svn] r160 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000156.html">[Stgt-svn] r162 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#155">[ date ]</a>
+              <a href="thread.html#155">[ thread ]</a>
+              <a href="subject.html#155">[ subject ]</a>
+              <a href="author.html#155">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 11:15:24 +0100 (Sat, 05 Nov 2005)
+New Revision: 161
+
+Modified:
+   trunk/istgt/kernel/iscsi.c
+Log:
+Rename cmnd_opcode cmd_opcode again.
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-05 10:08:14 UTC (rev 160)
++++ trunk/istgt/kernel/iscsi.c	2005-11-05 10:15:24 UTC (rev 161)
+@@ -118,7 +118,7 @@
+ 	list_for_each_safe(pos, next, send) {
+ 		cmnd = list_entry(pos, struct istgt_cmd, list);
+ 
+-		dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++		dprintk(&quot;%p:%x\n&quot;, cmnd, cmd_opcode(cmnd));
+ 
+ 		list_del_init(&amp;cmnd-&gt;list);
+ 		BUG_ON(conn != cmnd-&gt;conn);
+@@ -376,7 +376,7 @@
+ 
+ 	BUG_ON(1);
+ 
+-/* 	eprintk(&quot;%x %x %x %u\n&quot;, cmd_itt(cmnd), cmnd_opcode(cmnd), */
++/* 	eprintk(&quot;%x %x %x %u\n&quot;, cmd_itt(cmnd), cmd_opcode(cmnd), */
+ /* 		cmd_hdr(cmnd)-&gt;cdb[0], cmnd-&gt;pdu.datasize); */
+ 
+ /* 	if (!(size = cmnd-&gt;pdu.datasize)) */
+@@ -446,7 +446,7 @@
+ 	uint32_t exp_stat_sn;
+ 
+ 	cmnd-&gt;pdu.bhs.exp_statsn = exp_stat_sn = be32_to_cpu(cmnd-&gt;pdu.bhs.exp_statsn);
+-	dprintk(&quot;%x,%x\n&quot;, cmnd_opcode(cmnd), exp_stat_sn);
++	dprintk(&quot;%x,%x\n&quot;, cmd_opcode(cmnd), exp_stat_sn);
+ 	if ((int32_t) (exp_stat_sn - conn-&gt;exp_stat_sn) &gt; 0 &amp;&amp;
+ 	    (int32_t) (exp_stat_sn - conn-&gt;stat_sn) &lt;= 0) {
+ 		// free pdu resources
+@@ -1102,7 +1102,7 @@
+ /* 	int err =  -ISCSI_RESPONSE_UNKNOWN_TASK; */
+ 
+ /* 	if ((cmnd = cmnd_find_hash(session, itt, ISCSI_RESERVED_TAG))) { */
+-/* 		eprintk(&quot;%x %x %x %u %u %u %u\n&quot;, cmd_itt(cmnd), cmnd_opcode(cmnd), */
++/* 		eprintk(&quot;%x %x %x %u %u %u %u\n&quot;, cmd_itt(cmnd), cmd_opcode(cmnd), */
+ /* 			cmnd-&gt;r2t_length, cmnd_scsicode(cmnd), */
+ /* 			cmnd_write_size(cmnd), cmnd-&gt;is_unsolicited_data, */
+ /* 			cmnd-&gt;outstanding_r2t); */
+@@ -1266,7 +1266,7 @@
+ 
+ static void iscsi_cmnd_exec(struct istgt_cmd *cmnd)
+ {
+-	dprintk(&quot;%p,%x,%u\n&quot;, cmnd, cmnd_opcode(cmnd),
++	dprintk(&quot;%p,%x,%u\n&quot;, cmnd, cmd_opcode(cmnd),
+ 		cmnd-&gt;pdu.bhs.statsn);
+ 
+ 	switch (cmd_opcode(cmnd)) {
+@@ -1372,7 +1372,7 @@
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+ 	struct iovec *iop;
+ 
+-	dprintk(&quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
++	dprintk(&quot;%p:%x\n&quot;, cmnd, cmd_opcode(cmnd));
+ 	BUG_ON(!cmnd);
+ 	iscsi_cmnd_set_length(&amp;cmnd-&gt;pdu);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000154.html">[Stgt-svn] r160 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000156.html">[Stgt-svn] r162 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#155">[ date ]</a>
+              <a href="thread.html#155">[ thread ]</a>
+              <a href="subject.html#155">[ subject ]</a>
+              <a href="author.html#155">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

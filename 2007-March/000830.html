@@ -1,0 +1,275 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r843 - in trunk/usr: . ibmvio iscsi xen
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r843%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi%20xen&In-Reply-To=%3C200703180122.l2I1MRc2026701%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000829.html">
+   <LINK REL="Next"  HREF="000831.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r843 - in trunk/usr: . ibmvio iscsi xen</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r843%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi%20xen&In-Reply-To=%3C200703180122.l2I1MRc2026701%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r843 - in trunk/usr: . ibmvio iscsi xen">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar 18 02:22:27 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000829.html">[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+        <LI>Next message: <A HREF="000831.html">[Stgt-svn] r844 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#830">[ date ]</a>
+              <a href="thread.html#830">[ thread ]</a>
+              <a href="subject.html#830">[ subject ]</a>
+              <a href="author.html#830">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-18 02:22:24 +0100 (Sun, 18 Mar 2007)
+New Revision: 843
+
+Removed:
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/xen/xen.h
+Modified:
+   trunk/usr/driver.c
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/xen/xen.c
+Log:
+Clean up driver.h stuff (though needs more cleanups)
+
+
+Modified: trunk/usr/driver.c
+===================================================================
+--- trunk/usr/driver.c	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/driver.c	2007-03-18 01:22:24 UTC (rev 843)
+@@ -6,18 +6,8 @@
+ #include &quot;tgtd.h&quot;
+ #include &quot;driver.h&quot;
+ 
+-#ifdef IBMVIO
+-#include &quot;ibmvio/ibmvio.h&quot;
+-#endif
++extern struct tgt_driver ibmvio, iscsi, xen;
+ 
+-#ifdef ISCSI
+-#include &quot;iscsi/iscsi.h&quot;
+-#endif
+-
+-#ifdef XEN
+-#include &quot;xen/xen.h&quot;
+-#endif
+-
+ struct tgt_driver *tgt_drivers[] = {
+ #ifdef IBMVIO
+ 	&amp;ibmvio,
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/ibmvio/ibmvio.c	2007-03-18 01:22:24 UTC (rev 843)
+@@ -42,6 +42,7 @@
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;target.h&quot;
++#include &quot;driver.h&quot;
+ #include &quot;spc.h&quot;
+ 
+ #define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+@@ -243,7 +244,7 @@
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+ 
+-uint64_t scsi_lun_to_int(uint8_t *p)
++static uint64_t scsi_lun_to_int(uint8_t *p)
+ {
+ 	uint64_t lun = TGT_INVALID_DEV_ID;
+ 
+@@ -256,7 +257,7 @@
+ 		return GETTARGET(lun);
+ }
+ 
+-int ibmvio_target_create(struct target *target)
++static int ibmvio_target_create(struct target *target)
+ {
+ 	unsigned char device_type = target-&gt;dev_type_template.type;
+ 	struct device_type_operations *ops = target-&gt;dev_type_template.ops;
+@@ -268,3 +269,13 @@
+ 
+ 	return 0;
+ }
++
++struct tgt_driver ibmvio = {
++	.name			= &quot;ibmvio&quot;,
++	.use_kernel		= 1,
++	.scsi_get_lun		= scsi_lun_to_int,
++	.target_create		= ibmvio_target_create,
++	.cmd_end_notify		= kspace_send_cmd_res,
++	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
++	.default_bst		= &amp;mmap_bst,
++};
+
+Deleted: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/ibmvio/ibmvio.h	2007-03-18 01:22:24 UTC (rev 843)
+@@ -1,13 +0,0 @@
+-extern int ibmvio_target_create(struct target *);
+-
+-extern uint64_t scsi_lun_to_int(uint8_t *p);
+-
+-struct tgt_driver ibmvio = {
+-	.name			= &quot;ibmvio&quot;,
+-	.use_kernel		= 1,
+-	.scsi_get_lun		= scsi_lun_to_int,
+-	.target_create		= ibmvio_target_create,
+-	.cmd_end_notify		= kspace_send_cmd_res,
+-	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+-	.default_bst		= &amp;mmap_bst,
+-};
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/iscsi/iscsi.h	2007-03-18 01:22:24 UTC (rev 843)
+@@ -9,15 +9,3 @@
+ extern int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd);
+ extern int iscsi_tm_done(uint64_t nid, uint64_t mid, int result);
+ 
+-struct tgt_driver iscsi = {
+-	.name			= &quot;iscsi&quot;,
+-	.use_kernel		= 0,
+-	.init			= iscsi_init,
+-	.target_create		= iscsi_target_create,
+-	.target_destroy		= iscsi_target_destroy,
+-	.target_update		= iscsi_target_update,
+-	.show			= iscsi_target_show,
+-	.cmd_end_notify		= iscsi_scsi_cmd_done,
+-	.mgmt_end_notify	= iscsi_tm_done,
+-	.default_bst		= &amp;aio_bst,
+-};
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/iscsi/iscsid.c	2007-03-18 01:22:24 UTC (rev 843)
+@@ -23,6 +23,8 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;util.h&quot;
++#include &quot;driver.h&quot;
++#include &quot;iscsi.h&quot;
+ 
+ #define MAX_QUEUE_CMD	32
+ 
+@@ -1843,3 +1845,16 @@
+ 	if (conn-&gt;state == STATE_CLOSE)
+ 		conn_close(conn, fd);
+ }
++
++struct tgt_driver iscsi = {
++	.name			= &quot;iscsi&quot;,
++	.use_kernel		= 0,
++	.init			= iscsi_init,
++	.target_create		= iscsi_target_create,
++	.target_destroy		= iscsi_target_destroy,
++	.target_update		= iscsi_target_update,
++	.show			= iscsi_target_show,
++	.cmd_end_notify		= iscsi_scsi_cmd_done,
++	.mgmt_end_notify	= iscsi_tm_done,
++	.default_bst		= &amp;aio_bst,
++};
+
+Modified: trunk/usr/xen/xen.c
+===================================================================
+--- trunk/usr/xen/xen.c	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/xen/xen.c	2007-03-18 01:22:24 UTC (rev 843)
+@@ -5,6 +5,7 @@
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
++#include &quot;driver.h&quot;
+ #include &quot;xs_api.h&quot;
+ 
+ /* xenstore/xenbus: */
+@@ -17,7 +18,7 @@
+ 	xs_fire_next_watch((struct xs_handle *) data);
+ }
+ 
+-int xen_init(int index)
++static int xen_init(int index)
+ {
+ 	int err;
+ 	struct xs_handle *xsh;
+@@ -41,3 +42,12 @@
+ open_failed:
+ 	return -1;
+ }
++
++struct tgt_driver xen = {
++	.name			= &quot;xen&quot;,
++	.use_kernel		= 1,
++	.init			= xen_init,
++	.cmd_end_notify		= kspace_send_cmd_res,
++	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
++	.default_bst		= &amp;xen_bst,
++};
+
+Deleted: trunk/usr/xen/xen.h
+===================================================================
+--- trunk/usr/xen/xen.h	2007-03-18 01:02:22 UTC (rev 842)
++++ trunk/usr/xen/xen.h	2007-03-18 01:22:24 UTC (rev 843)
+@@ -1,15 +0,0 @@
+-#ifndef __TGTXEN_H__
+-#define __TGTXEN_H__
+-
+-extern int xen_init(void);
+-
+-struct tgt_driver xen = {
+-	.name			= &quot;xen&quot;,
+-	.use_kernel		= 1,
+-	.init			= xen_init,
+-	.cmd_end_notify		= kspace_send_cmd_res,
+-	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+-	.default_bst		= &amp;xen_bst,
+-};
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000829.html">[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+	<LI>Next message: <A HREF="000831.html">[Stgt-svn] r844 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#830">[ date ]</a>
+              <a href="thread.html#830">[ thread ]</a>
+              <a href="subject.html#830">[ subject ]</a>
+              <a href="author.html#830">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

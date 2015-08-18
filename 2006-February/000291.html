@@ -1,0 +1,425 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r304 - branches/use-scsi-ml/patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r304%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200602161927.k1GJRbIj026826%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000290.html">
+   <LINK REL="Next"  HREF="000292.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r304 - branches/use-scsi-ml/patchset</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r304%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200602161927.k1GJRbIj026826%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r304 - branches/use-scsi-ml/patchset">mnc at berlios.de
+       </A><BR>
+    <I>Thu Feb 16 20:27:37 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000290.html">[Stgt-svn] r303 - branches/use-scsi-ml/patchset
+</A></li>
+        <LI>Next message: <A HREF="000292.html">[Stgt-svn] r305 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#291">[ date ]</a>
+              <a href="thread.html#291">[ thread ]</a>
+              <a href="subject.html#291">[ subject ]</a>
+              <a href="author.html#291">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-02-16 20:27:36 +0100 (Thu, 16 Feb 2006)
+New Revision: 304
+
+Added:
+   branches/use-scsi-ml/patchset/0005-scsi-target-netlink-if.txt
+Log:
+more update patches work
+
+Added: branches/use-scsi-ml/patchset/0005-scsi-target-netlink-if.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0005-scsi-target-netlink-if.txt	2006-02-16 19:26:55 UTC (rev 303)
++++ branches/use-scsi-ml/patchset/0005-scsi-target-netlink-if.txt	2006-02-16 19:27:36 UTC (rev 304)
+@@ -0,0 +1,349 @@
++Netlink interface for the scsi tgt framework.
++
++I did not think the netdev people wanted to see the scsi and
++block layer code, so I am just send the netlink interface part
++of this patchset to netdev. I can resend the other parts if
++needed.
++
++The scsi tgt framework, adds support for scsi target mode
++cards. So instead of using the scsi card in your box as a initiator
++you can use it as a target/server.
++
++The reason of the netlink use is becuase the target normally
++recieve a interrupt indicating that command or event is
++ready to be processed. The scsi card's driver will then call
++a scsi lib function which eventually calls scsi_tgt_uspace_send to
++tell userspace to begin to process the request (userspace contains
++the state model). Later userspace will call back into the kernel
++be sending a netlink msg, and instruct the scsi driver what to do next.
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
++diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
++new file mode 100644
++index 0000000..38b35da
++--- /dev/null
+++++ b/drivers/scsi/scsi_tgt_if.c
++@@ -0,0 +1,214 @@
+++/*
+++ * SCSI target kernel/user interface functions
+++ *
+++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+++ *
+++ * This program is free software; you can redistribute it and/or
+++ * modify it under the terms of the GNU General Public License as
+++ * published by the Free Software Foundation; either version 2 of the
+++ * License, or (at your option) any later version.
+++ *
+++ * This program is distributed in the hope that it will be useful, but
+++ * WITHOUT ANY WARRANTY; without even the implied warranty of
+++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+++ * General Public License for more details.
+++ *
+++ * You should have received a copy of the GNU General Public License
+++ * along with this program; if not, write to the Free Software
+++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+++ * 02110-1301 USA
+++ */
+++#include &lt;linux/blkdev.h&gt;
+++#include &lt;linux/file.h&gt;
+++#include &lt;linux/netlink.h&gt;
+++#include &lt;net/tcp.h&gt;
+++#include &lt;scsi/scsi.h&gt;
+++#include &lt;scsi/scsi_cmnd.h&gt;
+++#include &lt;scsi/scsi_device.h&gt;
+++#include &lt;scsi/scsi_host.h&gt;
+++#include &lt;scsi/scsi_tgt.h&gt;
+++#include &lt;scsi/scsi_tgt_if.h&gt;
+++
+++#include &quot;scsi_tgt_priv.h&quot;
+++
+++static int tgtd_pid;
+++static struct sock *nl_sk;
+++
+++static int send_event_res(uint16_t type, struct tgt_event *p,
+++			  void *data, int dlen, gfp_t flags, pid_t pid)
+++{
+++	struct tgt_event *ev;
+++	struct nlmsghdr *nlh;
+++	struct sk_buff *skb;
+++	uint32_t len;
+++
+++	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+++	skb = alloc_skb(len, flags);
+++	if (!skb)
+++		return -ENOMEM;
+++
+++	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
+++
+++	ev = NLMSG_DATA(nlh);
+++	memcpy(ev, p, sizeof(*ev));
+++	if (dlen)
+++		memcpy(ev-&gt;data, data, dlen);
+++
+++	return netlink_unicast(nl_sk, skb, pid, 0);
+++}
+++
+++int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t gfp_mask)
+++{
+++	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+++	struct sk_buff *skb;
+++	struct nlmsghdr *nlh;
+++	struct tgt_event *ev;
+++	struct tgt_cmd *tcmd;
+++	int err, len;
+++
+++	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct tgt_cmd));
+++	/*
+++	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
+++	 */
+++	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
+++	if (!skb)
+++		return -ENOMEM;
+++
+++	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
+++			  len - sizeof(*nlh), 0);
+++
+++	ev = NLMSG_DATA(nlh);
+++	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+++	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+++	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+++
+++	dprintk(&quot;%d %u %u\n&quot;, ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.cid,
+++		ev-&gt;k.cmd_req.data_len);
+++
+++	/* FIXME: we need scsi core to do that. */
+++	memcpy(cmd-&gt;cmnd, cmd-&gt;data_cmnd, MAX_COMMAND_SIZE);
+++
+++	tcmd = (struct tgt_cmd *) ev-&gt;data;
+++	memcpy(tcmd-&gt;scb, cmd-&gt;cmnd, sizeof(tcmd-&gt;scb));
+++	memcpy(tcmd-&gt;lun, lun, sizeof(struct scsi_lun));
+++
+++	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
+++	if (err &lt; 0)
+++		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb %d\n&quot;,
+++		       err);
+++	return err;
+++}
+++
+++int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+++{
+++	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+++	struct tgt_event ev;
+++	char dummy[sizeof(struct tgt_cmd)];
+++
+++	memset(&amp;ev, 0, sizeof(ev));
+++	ev.k.cmd_done.host_no = shost-&gt;host_no;
+++	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+++	ev.k.cmd_done.result = cmd-&gt;result;
+++
+++	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
+++			      gfp_mask, tgtd_pid);
+++}
+++
+++static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+++{
+++	struct tgt_event *ev = NLMSG_DATA(nlh);
+++	int err = 0;
+++
+++	dprintk(&quot;%d %d %d\n&quot;, nlh-&gt;nlmsg_type,
+++		nlh-&gt;nlmsg_pid, current-&gt;pid);
+++
+++	switch (nlh-&gt;nlmsg_type) {
+++	case TGT_UEVENT_TGTD_BIND:
+++		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+++		break;
+++	case TGT_UEVENT_CMD_RES:
+++		/* TODO: handle multiple cmds in one event */
+++		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_res.host_no,
+++					   ev-&gt;u.cmd_res.cid,
+++					   ev-&gt;u.cmd_res.result,
+++					   ev-&gt;u.cmd_res.len,
+++					   ev-&gt;u.cmd_res.offset,
+++					   ev-&gt;u.cmd_res.uaddr,
+++					   ev-&gt;u.cmd_res.rw,
+++					   ev-&gt;u.cmd_res.try_map);
+++		break;
+++	default:
+++		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+++		err = -EINVAL;
+++	}
+++
+++	return err;
+++}
+++
+++static int event_recv_skb(struct sk_buff *skb)
+++{
+++	int err;
+++	uint32_t rlen;
+++	struct nlmsghdr	*nlh;
+++
+++	while (skb-&gt;len &gt;= NLMSG_SPACE(0)) {
+++		nlh = (struct nlmsghdr *) skb-&gt;data;
+++		if (nlh-&gt;nlmsg_len &lt; sizeof(*nlh) || skb-&gt;len &lt; nlh-&gt;nlmsg_len)
+++			return 0;
+++		rlen = NLMSG_ALIGN(nlh-&gt;nlmsg_len);
+++		if (rlen &gt; skb-&gt;len)
+++			rlen = skb-&gt;len;
+++		err = event_recv_msg(skb, nlh);
+++
+++		dprintk(&quot;%d %d\n&quot;, nlh-&gt;nlmsg_type, err);
+++		/*
+++		 * TODO for passthru commands the lower level should
+++		 * probably handle the result or we should modify this
+++		 */
+++		if (nlh-&gt;nlmsg_type != TGT_UEVENT_CMD_RES) {
+++			struct tgt_event ev;
+++
+++			memset(&amp;ev, 0, sizeof(ev));
+++			ev.k.event_res.err = err;
+++			send_event_res(TGT_KEVENT_RESPONSE, &amp;ev, NULL, 0,
+++				       GFP_KERNEL | __GFP_NOFAIL,
+++					nlh-&gt;nlmsg_pid);
+++		}
+++		skb_pull(skb, rlen);
+++	}
+++	return 0;
+++}
+++
+++static void event_recv(struct sock *sk, int length)
+++{
+++	struct sk_buff *skb;
+++
+++	while ((skb = skb_dequeue(&amp;sk-&gt;sk_receive_queue))) {
+++		if (NETLINK_CREDS(skb)-&gt;uid) {
+++			skb_pull(skb, skb-&gt;len);
+++			kfree_skb(skb);
+++			continue;
+++		}
+++
+++		if (event_recv_skb(skb) &amp;&amp; skb-&gt;len)
+++			skb_queue_head(&amp;sk-&gt;sk_receive_queue, skb);
+++		else
+++			kfree_skb(skb);
+++	}
+++}
+++
+++void __exit scsi_tgt_if_exit(void)
+++{
+++	sock_release(nl_sk-&gt;sk_socket);
+++}
+++
+++int __init scsi_tgt_if_init(void)
+++{
+++	nl_sk = netlink_kernel_create(NETLINK_TGT, 1, event_recv,
+++				    THIS_MODULE);
+++	if (!nl_sk)
+++		return -ENOMEM;
+++
+++	return 0;
+++}
++diff --git a/include/linux/netlink.h b/include/linux/netlink.h
++index 6a2ccf7..580fb42 100644
++--- a/include/linux/netlink.h
+++++ b/include/linux/netlink.h
++@@ -21,6 +21,7 @@
++ #define NETLINK_DNRTMSG		14	/* DECnet routing messages */
++ #define NETLINK_KOBJECT_UEVENT	15	/* Kernel messages to userspace */
++ #define NETLINK_GENERIC		16
+++#define NETLINK_TGT		17	/* SCSI target */
++ 
++ #define MAX_LINKS 32		
++ 
++diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
++new file mode 100644
++index 0000000..da3a808
++--- /dev/null
+++++ b/include/scsi/scsi_tgt_if.h
++@@ -0,0 +1,88 @@
+++/*
+++ * SCSI target kernel/user interface
+++ *
+++ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+++ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+++ *
+++ * This program is free software; you can redistribute it and/or
+++ * modify it under the terms of the GNU General Public License as
+++ * published by the Free Software Foundation; either version 2 of the
+++ * License, or (at your option) any later version.
+++ *
+++ * This program is distributed in the hope that it will be useful, but
+++ * WITHOUT ANY WARRANTY; without even the implied warranty of
+++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+++ * General Public License for more details.
+++ *
+++ * You should have received a copy of the GNU General Public License
+++ * along with this program; if not, write to the Free Software
+++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+++ * 02110-1301 USA
+++ */
+++#ifndef __SCSI_TARGET_IF_H
+++#define __SCSI_TARGET_IF_H
+++
+++enum tgt_event_type {
+++	/* user -&gt; kernel */
+++	TGT_UEVENT_TGTD_BIND,
+++	TGT_UEVENT_TARGET_SETUP,
+++	TGT_UEVENT_CMD_RES,
+++
+++	/* kernel -&gt; user */
+++	TGT_KEVENT_RESPONSE,
+++	TGT_KEVENT_CMD_REQ,
+++	TGT_KEVENT_CMD_DONE,
+++};
+++
+++struct tgt_event {
+++	/* user-&gt; kernel */
+++	union {
+++		struct {
+++			int pk_fd;
+++		} tgtd_bind;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t len;
+++			int result;
+++			uint64_t uaddr;
+++			uint64_t offset;
+++			uint8_t rw;
+++			uint8_t try_map;
+++		} cmd_res;
+++	} u;
+++
+++	/* kernel -&gt; user */
+++	union {
+++		struct {
+++			int err;
+++		} event_res;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			uint32_t data_len;
+++			uint64_t dev_id;
+++		} cmd_req;
+++		struct {
+++			int host_no;
+++			uint32_t cid;
+++			int result;
+++		} cmd_done;
+++	} k;
+++
+++	/*
+++	 * I think a pointer is a unsigned long but this struct
+++	 * gets passed around from the kernel to userspace and
+++	 * back again so to handle some ppc64 setups where userspace is
+++	 * 32 bits but the kernel is 64 we do this odd thing
+++	 */
+++	uint64_t data[0];
+++} __attribute__ ((aligned (sizeof(uint64_t))));
+++
+++struct tgt_cmd {
+++	uint8_t scb[16];
+++	uint8_t lun[8];
+++	int tags;
+++} __attribute__ ((aligned (sizeof(uint64_t))));
+++
+++#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000290.html">[Stgt-svn] r303 - branches/use-scsi-ml/patchset
+</A></li>
+	<LI>Next message: <A HREF="000292.html">[Stgt-svn] r305 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#291">[ date ]</a>
+              <a href="thread.html#291">[ thread ]</a>
+              <a href="subject.html#291">[ subject ]</a>
+              <a href="author.html#291">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

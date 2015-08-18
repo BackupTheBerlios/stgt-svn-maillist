@@ -1,0 +1,419 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r423 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r423%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160925.k3G9PqI1028009%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000409.html">
+   <LINK REL="Next"  HREF="000411.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r423 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r423%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160925.k3G9PqI1028009%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r423 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Apr 16 11:25:52 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000409.html">[Stgt-svn] r422 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000411.html">[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#410">[ date ]</a>
+              <a href="thread.html#410">[ thread ]</a>
+              <a href="subject.html#410">[ subject ]</a>
+              <a href="author.html#410">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-16 11:25:52 +0200 (Sun, 16 Apr 2006)
+New Revision: 423
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+   branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c
+   branches/use-scsi-ml/ibmvstgt/kernel/libsrp.h
+Log:
+Move SCSI command performing code to libsrp
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-16 08:53:04 UTC (rev 422)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-16 09:25:52 UTC (rev 423)
+@@ -26,9 +26,7 @@
+ #include &lt;linux/module.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_host.h&gt;
+-#include &lt;scsi/scsi_tcq.h&gt;
+ #include &lt;scsi/scsi_tgt.h&gt;
+-
+ #include &lt;asm/hvcall.h&gt;
+ #include &lt;asm/iommu.h&gt;
+ #include &lt;asm/prom.h&gt;
+@@ -67,13 +65,6 @@
+ #define dprintk eprintk
+ /* #define dprintk(fmt, args...) */
+ 
+-enum srp_task_attributes {
+-	SRP_SIMPLE_TASK = 0,
+-	SRP_HEAD_TASK = 1,
+-	SRP_ORDERED_TASK = 2,
+-	SRP_ACA_TASK = 4
+-};
+-
+ struct vio_port {
+ 	struct vio_dev *dma_dev;
+ 
+@@ -148,10 +139,8 @@
+ static int send_rsp(struct iu_entry *iue, unsigned char status,
+ 		    unsigned char asc)
+ {
+-	struct srp_target *target = iue-&gt;target;
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	uint64_t tag = iu-&gt;srp.rsp.tag;
+-	unsigned long flags;
+ 
+ 	/* If the linked bit is on and status is good */
+ 	if (test_bit(V_LINKED, &amp;iue-&gt;flags) &amp;&amp; (status == NO_SENSE))
+@@ -202,136 +191,6 @@
+ 	return 0;
+ }
+ 
+-static int data_out_desc_size(struct srp_cmd *cmd)
+-{
+-	int size = 0;
+-	u8 fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
+-
+-	switch (fmt) {
+-	case SRP_NO_DATA_DESC:
+-		break;
+-	case SRP_DATA_DESC_DIRECT:
+-		size = sizeof(struct srp_direct_buf);
+-		break;
+-	case SRP_DATA_DESC_INDIRECT:
+-		size = sizeof(struct srp_indirect_buf) +
+-			sizeof(struct srp_direct_buf) * cmd-&gt;data_out_desc_cnt;
+-		break;
+-	default:
+-		eprintk(&quot;client error. Invalid data_out_format %x\n&quot;, fmt);
+-		break;
+-	}
+-	return size;
+-}
+-
+-static int vscsis_data_length(struct srp_cmd *cmd, enum dma_data_direction dir)
+-{
+-	struct srp_direct_buf *md;
+-	struct srp_indirect_buf *id;
+-	int len = 0, offset = cmd-&gt;add_cdb_len * 4;
+-	u8 fmt;
+-
+-	if (dir == DMA_TO_DEVICE)
+-		fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
+-	else {
+-		fmt = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
+-		offset += data_out_desc_size(cmd);
+-	}
+-
+-	switch (fmt) {
+-	case SRP_NO_DATA_DESC:
+-		break;
+-	case SRP_DATA_DESC_DIRECT:
+-		md = (struct srp_direct_buf *) (cmd-&gt;add_data + offset);
+-		len = md-&gt;len;
+-		break;
+-	case SRP_DATA_DESC_INDIRECT:
+-		id = (struct srp_indirect_buf *) (cmd-&gt;add_data + offset);
+-		len = id-&gt;len;
+-		break;
+-	default:
+-		eprintk(&quot;invalid data format %x\n&quot;, fmt);
+-		break;
+-	}
+-	return len;
+-}
+-
+-static uint8_t getcontrolbyte(uint8_t *cdb)
+-{
+-	return cdb[COMMAND_SIZE(cdb[0]) - 1];
+-}
+-
+-static inline uint8_t getlink(struct iu_entry *iue)
+-{
+-	return (getcontrolbyte(vio_iu(iue)-&gt;srp.cmd.cdb) &amp; 0x01);
+-}
+-
+-static int process_cmd(struct iu_entry *iue)
+-{
+-	struct Scsi_host *shost = iue-&gt;target-&gt;shost;
+-	union viosrp_iu *iu = vio_iu(iue);
+-	enum dma_data_direction data_dir;
+-	struct scsi_cmnd *scmd;
+-	int tag, len;
+-
+-	dprintk(&quot;%p %p\n&quot;, iue-&gt;target, iue);
+-
+-	if (getlink(iue))
+-		__set_bit(V_LINKED, &amp;iue-&gt;flags);
+-
+-	tag = MSG_SIMPLE_TAG;
+-
+-	switch (iu-&gt;srp.cmd.task_attr) {
+-	case SRP_SIMPLE_TASK:
+-		tag = MSG_SIMPLE_TAG;
+-		break;
+-	case SRP_ORDERED_TASK:
+-		tag = MSG_ORDERED_TAG;
+-		break;
+-	case SRP_HEAD_TASK:
+-		tag = MSG_HEAD_TAG;
+-		break;
+-	default:
+-		eprintk(&quot;Task attribute %d not supported, assuming barrier\n&quot;,
+-			iu-&gt;srp.cmd.task_attr);
+-		tag = MSG_ORDERED_TAG;
+-	}
+-
+-	switch (iu-&gt;srp.cmd.cdb[0]) {
+-	case WRITE_6:
+-	case WRITE_10:
+-	case WRITE_VERIFY:
+-	case WRITE_12:
+-	case WRITE_VERIFY_12:
+-		__set_bit(V_WRITE, &amp;iue-&gt;flags);
+-	}
+-
+-	if (iu-&gt;srp.cmd.buf_fmt &gt;&gt; 4)
+-		data_dir = DMA_TO_DEVICE;
+-	else
+-		data_dir = DMA_FROM_DEVICE;
+-	len = vscsis_data_length(&amp;iu-&gt;srp.cmd, data_dir);
+-
+-	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;, iue, iu-&gt;srp.cmd.cdb[0],
+-		iu-&gt;srp.cmd.lun, data_dir, len, tag,
+-		(unsigned long long) iu-&gt;srp.cmd.tag);
+-
+-	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
+-	BUG_ON(!scmd);
+-	scmd-&gt;SCp.ptr = (char *) iue;
+-	memcpy(scmd-&gt;data_cmnd, iu-&gt;srp.cmd.cdb, MAX_COMMAND_SIZE);
+-	scmd-&gt;request_bufflen = len;
+-	scmd-&gt;tag= tag;
+-	iue-&gt;scmd = scmd;
+-	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;iu-&gt;srp.cmd.lun,
+-			       iu-&gt;srp.cmd.tag);
+-
+-	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;, iue, scmd, iu-&gt;srp.cmd.cdb[0],
+-		iu-&gt;srp.cmd.lun, data_dir, len, tag);
+-
+-	return 0;
+-}
+-
+ static void handle_cmd_queue(struct srp_target *target)
+ {
+ 	struct iu_entry *iue;
+@@ -343,7 +202,7 @@
+ 	list_for_each_entry(iue, &amp;target-&gt;cmd_queue, ilist) {
+ 		if (!test_and_set_bit(V_FLYING, &amp;iue-&gt;flags)) {
+ 			spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-			process_cmd(iue);
++			srp_cmd_perform(iue, (struct srp_cmd *) iue-&gt;sbuf-&gt;buf);
+ 			goto retry;
+ 		}
+ 	}
+@@ -853,6 +712,7 @@
+ 	handle_cmd_queue(target);
+ }
+ 
++
+ static int ibmvstgt_eh_abort_handler(struct scsi_cmnd *scmd)
+ {
+ 	unsigned long flags;
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c	2006-04-16 08:53:04 UTC (rev 422)
++++ branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c	2006-04-16 09:25:52 UTC (rev 423)
+@@ -22,10 +22,20 @@
+ #include &lt;linux/kfifo.h&gt;
+ #include &lt;linux/scatterlist.h&gt;
+ #include &lt;linux/dma-mapping.h&gt;
++#include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
++#include &lt;scsi/scsi_tcq.h&gt;
++#include &lt;scsi/scsi_tgt.h&gt;
+ #include &lt;scsi/srp.h&gt;
+ #include &lt;libsrp.h&gt;
+ 
++enum srp_task_attributes {
++	SRP_SIMPLE_TASK = 0,
++	SRP_HEAD_TASK = 1,
++	SRP_ORDERED_TASK = 2,
++	SRP_ACA_TASK = 4
++};
++
+ /* tmp - will replace with SCSI logging stuff */
+ #define eprintk(fmt, args...)					\
+ do {								\
+@@ -333,3 +343,112 @@
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(srp_transfer_data);
++
++static int vscsis_data_length(struct srp_cmd *cmd, enum dma_data_direction dir)
++{
++	struct srp_direct_buf *md;
++	struct srp_indirect_buf *id;
++	int len = 0, offset = cmd-&gt;add_cdb_len * 4;
++	u8 fmt;
++
++	if (dir == DMA_TO_DEVICE)
++		fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
++	else {
++		fmt = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
++		offset += data_out_desc_size(cmd);
++	}
++
++	switch (fmt) {
++	case SRP_NO_DATA_DESC:
++		break;
++	case SRP_DATA_DESC_DIRECT:
++		md = (struct srp_direct_buf *) (cmd-&gt;add_data + offset);
++		len = md-&gt;len;
++		break;
++	case SRP_DATA_DESC_INDIRECT:
++		id = (struct srp_indirect_buf *) (cmd-&gt;add_data + offset);
++		len = id-&gt;len;
++		break;
++	default:
++		eprintk(&quot;invalid data format %x\n&quot;, fmt);
++		break;
++	}
++	return len;
++}
++
++static uint8_t getcontrolbyte(u8 *cdb)
++{
++	return cdb[COMMAND_SIZE(cdb[0]) - 1];
++}
++
++static inline uint8_t getlink(struct srp_cmd *cmd)
++{
++	return (getcontrolbyte(cmd-&gt;cdb) &amp; 0x01);
++}
++
++int srp_cmd_perform(struct iu_entry *iue, struct srp_cmd *cmd)
++{
++	struct Scsi_host *shost = iue-&gt;target-&gt;shost;
++	enum dma_data_direction data_dir;
++	struct scsi_cmnd *scmd;
++	int tag, len;
++
++	dprintk(&quot;%p %p\n&quot;, iue-&gt;target, iue);
++
++	if (getlink(cmd))
++		__set_bit(V_LINKED, &amp;iue-&gt;flags);
++
++	tag = MSG_SIMPLE_TAG;
++
++	switch (cmd-&gt;task_attr) {
++	case SRP_SIMPLE_TASK:
++		tag = MSG_SIMPLE_TAG;
++		break;
++	case SRP_ORDERED_TASK:
++		tag = MSG_ORDERED_TAG;
++		break;
++	case SRP_HEAD_TASK:
++		tag = MSG_HEAD_TAG;
++		break;
++	default:
++		eprintk(&quot;Task attribute %d not supported\n&quot;, cmd-&gt;task_attr);
++		tag = MSG_ORDERED_TAG;
++	}
++
++	switch (cmd-&gt;cdb[0]) {
++	case WRITE_6:
++	case WRITE_10:
++	case WRITE_VERIFY:
++	case WRITE_12:
++	case WRITE_VERIFY_12:
++		__set_bit(V_WRITE, &amp;iue-&gt;flags);
++	}
++
++	if (cmd-&gt;buf_fmt &gt;&gt; 4)
++		data_dir = DMA_TO_DEVICE;
++	else
++		data_dir = DMA_FROM_DEVICE;
++	len = vscsis_data_length(cmd, data_dir);
++
++	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;, iue, cmd-&gt;cdb[0],
++		cmd-&gt;lun, data_dir, len, tag, (unsigned long long) cmd-&gt;tag);
++
++	scmd = scsi_host_get_command(shost, data_dir, GFP_KERNEL);
++	BUG_ON(!scmd);
++	scmd-&gt;SCp.ptr = (char *) iue;
++	memcpy(scmd-&gt;data_cmnd, cmd-&gt;cdb, MAX_COMMAND_SIZE);
++	scmd-&gt;request_bufflen = len;
++	scmd-&gt;tag = tag;
++	iue-&gt;scmd = scmd;
++	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;cmd-&gt;lun, cmd-&gt;tag);
++
++	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;, iue, scmd, cmd-&gt;cdb[0],
++		cmd-&gt;lun, data_dir, len, tag);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(srp_cmd_perform);
++
++MODULE_DESCRIPTION(&quot;SCSI RDAM Protocol lib functions&quot;);
++MODULE_AUTHOR(&quot;FUJITA Tomonori&quot;);
++MODULE_LICENSE(&quot;GPL&quot;);
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/libsrp.h
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/libsrp.h	2006-04-16 08:53:04 UTC (rev 422)
++++ branches/use-scsi-ml/ibmvstgt/kernel/libsrp.h	2006-04-16 09:25:52 UTC (rev 423)
+@@ -68,6 +68,7 @@
+ extern struct iu_entry *srp_iu_get(struct srp_target *);
+ extern void srp_iu_put(struct iu_entry *);
+ 
++extern int srp_cmd_perform(struct iu_entry *iue, struct srp_cmd *cmd);
+ extern int srp_transfer_data(struct scsi_cmnd *scmd, struct srp_cmd *cmd,
+ 			     rdma_io_t rdma_io);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000409.html">[Stgt-svn] r422 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000411.html">[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#410">[ date ]</a>
+              <a href="thread.html#410">[ thread ]</a>
+              <a href="subject.html#410">[ subject ]</a>
+              <a href="author.html#410">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,223 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r130 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r130%20-%20trunk/kernel&In-Reply-To=%3C200510281416.j9SEGZad019802%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000123.html">
+   <LINK REL="Next"  HREF="000125.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r130 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r130%20-%20trunk/kernel&In-Reply-To=%3C200510281416.j9SEGZad019802%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r130 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 16:16:35 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000123.html">[Stgt-svn] r129 - trunk/istgt/usr
+</A></li>
+        <LI>Next message: <A HREF="000125.html">[Stgt-svn] r131 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#124">[ date ]</a>
+              <a href="thread.html#124">[ thread ]</a>
+              <a href="subject.html#124">[ subject ]</a>
+              <a href="author.html#124">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 16:16:33 +0200 (Fri, 28 Oct 2005)
+New Revision: 130
+
+Modified:
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_vsd.c
+Log:
+Support INQUIRY commands with invalid lun. We assume that we always
+have a lun 0 (that is, a lun 0 device is used as a device server). We
+need to fix this later on.
+
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-10-28 10:41:20 UTC (rev 129)
++++ trunk/kernel/tgt_scsi.c	2005-10-28 14:16:33 UTC (rev 130)
+@@ -40,7 +40,7 @@
+  */
+ static uint64_t scsi_tgt_translate_lun(uint8_t *p, int size)
+ {
+-	uint64_t lun = ~0U;
++	uint64_t lun = ~0ULL;
+ 
+ 	switch (*p &gt;&gt; 6) {
+ 	case 0:
+@@ -84,9 +84,19 @@
+ 	cmd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
+ 	device = tgt_device_find(session-&gt;target, cmd-&gt;dev_id);
+ 	if (!device) {
+-		printk(KERN_ERR &quot;Could not find device if %&quot; PRIu64 &quot;\n&quot;,
+-		       cmd-&gt;dev_id);
+-		return NULL;
++		switch (scmd-&gt;scb[0]) {
++		case INQUIRY:
++		case REPORT_LUNS:
++			/* we assume that we have lun 0. */
++			device = tgt_device_find(session-&gt;target, 0);
++			break;
++		}
++
++		if (!device) {
++			eprintk(&quot;Could not find device %x %&quot; PRIu64 &quot;\n&quot;,
++				scmd-&gt;scb[0], cmd-&gt;dev_id);
++			return NULL;
++		}
+ 	}
+ 	cmd-&gt;device = device;
+ 
+@@ -255,7 +265,6 @@
+ 	unsigned long flags;
+ 	int err, enabled, more;
+ 
+-	/* FIXME: we need some tricks here. */
+ 	BUG_ON(!device);
+ 
+ 	spin_lock_irqsave(&amp;stdev-&gt;lock, flags);
+
+Modified: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-10-28 10:41:20 UTC (rev 129)
++++ trunk/kernel/tgt_vsd.c	2005-10-28 14:16:33 UTC (rev 130)
+@@ -32,7 +32,7 @@
+ 		return -EINVAL;
+ 
+ 	device-&gt;size = inode-&gt;i_size;
+-	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
++	dprintk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+ 
+ 	return 0;
+ }
+@@ -110,7 +110,7 @@
+ static int vsd_queue_file_io(struct tgt_cmd *cmd, int op)
+ {
+ 	struct file *file = cmd-&gt;device-&gt;file;
+-	ssize_t size;
++	ssize_t ret;
+ 	struct iovec *iov;
+ 	loff_t pos = cmd-&gt;offset;
+ 
+@@ -119,32 +119,28 @@
+ 		return -ENOMEM;
+ 
+ 	if (op == READ)
+-		size = generic_file_readv(file, iov, cmd-&gt;sg_count, &amp;pos);
++		ret = generic_file_readv(file, iov, cmd-&gt;sg_count, &amp;pos);
+ 	else
+-		size = generic_file_writev(file, iov, cmd-&gt;sg_count, &amp;pos);
++		ret = generic_file_writev(file, iov, cmd-&gt;sg_count, &amp;pos);
+ 
+ 	kfree(iov);
+ 
+-/* not yet used
+-	if (sync)
+-		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
+-				      (size_t) cmd-&gt;bufflen);
+-*/
+-	return size;
++	if (ret &lt; 0 || ret != cmd-&gt;bufflen) {
++		eprintk(&quot;I/O error %d %Zd %u %lld %&quot; PRIu64 &quot;\n&quot;,
++			op, ret, cmd-&gt;bufflen, pos, cmd-&gt;device-&gt;size);
++		return -EINVAL;
++	}
++
++	/* sync_page_range(inode, inode-&gt;i_mapping, pos, (size_t) cmd-&gt;bufflen); */
++
++	return 0;
+ }
+ 
+ static int tgt_vsd_queue(struct tgt_cmd *cmd)
+ {
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	struct tgt_device *device = cmd-&gt;device;
+-	loff_t pos = cmd-&gt;offset;
+-	int err = 0, rw;
++	int err, rw;
+ 
+-	if (cmd-&gt;bufflen + pos &gt; device-&gt;size) {
+-		scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-		return TGT_CMD_FAILED;
+-	}
+-
+ 	switch (scmd-&gt;scb[0]) {
+ 	case READ_6:
+ 	case READ_10:
+@@ -165,8 +161,7 @@
+ 		if (err &gt;= 0)
+ 			return TGT_CMD_USPACE_QUEUED;
+ 
+-		scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-		return TGT_CMD_FAILED;
++		goto failed;
+ 	};
+ 
+ 	/*
+@@ -174,17 +169,18 @@
+ 	 * when we seperate the io_handlers
+ 	 */
+ 	err = vsd_queue_file_io(cmd, rw);
++	if (!err) {
++		cmd-&gt;result = SAM_STAT_GOOD;
++		return TGT_CMD_COMPLETED;
++	}
++
+ 	/*
+ 	 * we should to a switch but I am not sure of all the err values
+ 	 * returned. If you find one add it
+ 	 */
+-	if (err != cmd-&gt;bufflen) {
+-		scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-		return TGT_CMD_FAILED;
+-	} else {
+-		cmd-&gt;result = SAM_STAT_GOOD;
+-		return TGT_CMD_COMPLETED;
+-	}
++failed:
++	scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
++	return TGT_CMD_FAILED;
+ }
+ 
+ static struct tgt_device_template tgt_vsd = {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000123.html">[Stgt-svn] r129 - trunk/istgt/usr
+</A></li>
+	<LI>Next message: <A HREF="000125.html">[Stgt-svn] r131 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#124">[ date ]</a>
+              <a href="thread.html#124">[ thread ]</a>
+              <a href="subject.html#124">[ subject ]</a>
+              <a href="author.html#124">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

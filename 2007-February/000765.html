@@ -1,0 +1,364 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r778 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r778%20-%20trunk/usr&In-Reply-To=%3C200702231607.l1NG7UEM019958%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000764.html">
+   <LINK REL="Next"  HREF="000766.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r778 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r778%20-%20trunk/usr&In-Reply-To=%3C200702231607.l1NG7UEM019958%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r778 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Feb 23 17:07:30 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000764.html">[Stgt-svn] r777 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000766.html">[Stgt-svn] r779 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#765">[ date ]</a>
+              <a href="thread.html#765">[ thread ]</a>
+              <a href="subject.html#765">[ subject ]</a>
+              <a href="author.html#765">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-23 17:07:29 +0100 (Fri, 23 Feb 2007)
+New Revision: 778
+
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/bd_aio.c
+   trunk/usr/tgtd.c
+Log:
+Some target drivers (like iSCSI) need an interface to wait for both
+synchronous and asynchronous descriptors. But upstream kernels don't
+support something like BSD's kqueue though some candidates are under
+development (e.g. kevent). We use a I/O helper thread to avoid this
+issue now (stolen from RedHat Xen blktap code). This workaround will
+be removed some time.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/Makefile	2007-02-23 16:07:29 UTC (rev 778)
+@@ -37,7 +37,7 @@
+ TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o \
+ 	chap.o transport.o iscsi_tcp.o)
+ TGTD_OBJS += bd_aio.o
+-LIBS += -lcrypto
++LIBS += -lcrypto -lpthread
+ BD_AIO=1
+ endif
+ 
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/bd_aio.c	2007-02-23 16:07:29 UTC (rev 778)
+@@ -27,6 +27,7 @@
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;libaio.h&gt;
++#include &lt;pthread.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+ #include &lt;sys/epoll.h&gt;
+@@ -37,34 +38,135 @@
+ 
+ /*
+  * We need an interface to wait for both synchronous and asynchronous
+- * descriptors (something like BSD's kqueue). Now we use a kernel
+- * patch to return an fd associated with the AIO context because Xen
+- * blktap uses it (so we avoid introducing another patch). However,
+- * I'm not sure the patch will go into mainline. Another approach,
+- * IO_CMD_EPOLL_WAIT, looks more promising. kqueue is promising too.
++ * descriptors (something like BSD's kqueue). But upstream kernels
++ * don't provide it though some candidates are under development. So
++ * we use a hacky trick with pthread (stolen from RedHat Xen blktap
++ * code).
+  */
+ 
+ /* FIXME */
+-#define MAX_AIO_REQS 1024
+-#define O_DIRECT 040000 /* who defines this?*/
++#define MAX_AIO_REQS 2048
+ 
+ struct bd_aio_info {
++	io_context_t ctx;
++
+ 	/* TODO: batch requests */
+-	struct iocb iocb[MAX_AIO_REQS];
++/* 	struct iocb iocb[MAX_AIO_REQS]; */
+ 	struct io_event events[MAX_AIO_REQS];
++
++	pthread_t aio_thread;
++
++	int command_fd[2];
++	int done_fd[2];
+ };
+ 
+-extern io_context_t ctx;
++static void *bs_aio_endio_thread(void *arg)
++{
++	struct bd_aio_info *info = arg;
++	int command, ret, nr;
+ 
+-static int bd_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++retry:
++	ret = read(info-&gt;command_fd[0], &amp;command, sizeof(command));
++	if (ret &lt; 0) {
++		eprintf(&quot;AIO pthread will be dead.\n&quot;);
++		goto out;
++	}
++
++	ret = io_getevents(info-&gt;ctx, 1, MAX_AIO_REQS, info-&gt;events, NULL);
++	nr = ret;
++	if (nr) {
++		ret = write(info-&gt;done_fd[1], &amp;nr, sizeof(nr));
++		if (ret &lt; 0) {
++			eprintf(&quot;can't notify tgtd, %m\n&quot;);
++			goto out;
++		}
++	}
++	goto retry;
++out:
++	/* TODO: this lu is going to be removed. */
++	pthread_exit(&amp;ret);
++}
++
++static void bs_aio_handler(int fd, int events, void *data)
+ {
++	struct bd_aio_info *info = data;
++	int i, nr_events, ret;
++
++	ret = read(info-&gt;done_fd[0], &amp;nr_events, sizeof(nr_events));
++	if (ret &lt; 0) {
++		eprintf(&quot;wrong wakeup\n&quot;);
++		return;
++	}
++
++	/* FIXME: need to handle failure */
++	for (i = 0; i &lt; nr_events; i++) {
++		struct io_event *ep = &amp;info-&gt;events[i];
++		target_cmd_io_done(ep-&gt;data, 0);
++	}
++
++	write(info-&gt;command_fd[1], &amp;nr_events, sizeof(nr_events));
++}
++
++static int
++bd_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++{
++	int ret;
++	struct bd_aio_info *info =
++		(struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
+ 	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
++	if (*fd &lt; 0)
++		return *fd;
+ 
+-	return *fd &gt;= 0 ? 0 : *fd;
++	ret = io_queue_init(MAX_AIO_REQS, &amp;info-&gt;ctx);
++	if (ret) {
++		eprintf(&quot;fail to create aio_queue, %m\n&quot;);
++		goto close_dev_fd;
++	}
++
++	ret = pipe(info-&gt;command_fd);
++	if (ret)
++		goto close_ctx;
++
++	ret = pipe(info-&gt;done_fd);
++	if (ret)
++		goto close_command_fd;
++
++	ret = tgt_event_add(info-&gt;done_fd[0], EPOLLIN, bs_aio_handler, info);
++	if (ret)
++		goto close_done_fd;
++
++	ret = pthread_create(&amp;info-&gt;aio_thread, NULL, bs_aio_endio_thread,
++			     info);
++	if (ret)
++		goto event_del;
++
++	write(info-&gt;command_fd[1], &amp;ret, sizeof(ret));
++
++	return 0;
++event_del:
++	tgt_event_del(info-&gt;done_fd[0]);
++close_done_fd:
++	close(info-&gt;done_fd[0]);
++	close(info-&gt;done_fd[1]);
++close_command_fd:
++	close(info-&gt;command_fd[0]);
++	close(info-&gt;command_fd[1]);
++close_ctx:
++	io_destroy(info-&gt;ctx);
++close_dev_fd:
++	close(*fd);
++	return -1;
+ }
+ 
+ static void bd_aio_close(struct tgt_device *dev)
+ {
++	struct bd_aio_info *info;
++
++	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
++	/* FIXME: we should kill pthread */
++	io_destroy(info-&gt;ctx);
+ 	close(dev-&gt;fd);
+ }
+ 
+@@ -72,16 +174,19 @@
+ 			     uint32_t datalen, unsigned long *uaddr,
+ 			     uint64_t offset, int *async, void *key)
+ {
++	struct bd_aio_info *info;
+ 	struct iocb iocb, *io;
+ 	int err;
+ 
++	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
+ 	*async = 1;
+ 
+ 	io = &iocb;
+ 	memset(io, 0, sizeof(*io));
+ 
+-	dprintf(&quot;%d %d %u %lx %&quot; PRIx64 &quot; %p %p\n&quot;, dev-&gt;fd, rw, datalen, *uaddr, offset,
+-		io, key);
++	dprintf(&quot;%d %d %u %lx %&quot; PRIx64 &quot; %p %p\n&quot;, dev-&gt;fd, rw, datalen,
++		*uaddr, offset, io, key);
+ 
+ 	if (rw == READ)
+ 		io_prep_pread(io, dev-&gt;fd, (void *) *uaddr, datalen, offset);
+@@ -89,7 +194,7 @@
+ 		io_prep_pwrite(io, dev-&gt;fd, (void *) *uaddr, datalen, offset);
+ 
+ 	io-&gt;data = key;
+-	err = io_submit(ctx, 1, &amp;io);
++	err = io_submit(info-&gt;ctx, 1, &amp;io);
+ 
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/tgtd.c	2007-02-23 16:07:29 UTC (rev 778)
+@@ -48,7 +48,6 @@
+ 	struct list_head e_list;
+ };
+ 
+-io_context_t ctx;
+ unsigned long pagesize, pageshift, pagemask;
+ 
+ static int ep_fd;
+@@ -182,44 +181,14 @@
+ 	return epoll_ctl(ep_fd, EPOLL_CTL_MOD, fd, &amp;ev);
+ }
+ 
+-#define IOCB_CMD_EPOLL_WAIT 9
+-
+-static void io_prep_epoll_wait(struct iocb *iocb, int epfd,
+-			       struct epoll_event *events, int maxevents,
+-			       int timeout)
+-{
+-	memset(iocb, 0, sizeof(*iocb));
+-	iocb-&gt;aio_fildes = epfd;
+-	iocb-&gt;aio_lio_opcode = IOCB_CMD_EPOLL_WAIT;
+-	iocb-&gt;aio_reqprio = 0;
+-
+-	iocb-&gt;u.c.nbytes = maxevents;
+-	iocb-&gt;u.c.offset = timeout;
+-	iocb-&gt;u.c.buf = events;
+-}
+-
+ static void event_loop(void)
+ {
+-	int nevent, i, err;
++	int nevent, i;
+ 	struct epoll_event events[1024];
+ 	struct tgt_event *tev;
+-	struct iocb iocbs[1], *iocb;
+-	struct io_event aioevents[2048];
+-	struct timespec timeout = {1, 0};
+ 
+-	err = io_queue_init(2048, &amp;ctx);
+-	if (err) {
+-		eprintf(&quot;%m\n&quot;);
+-		return;
+-	}
+-
+-	iocb = iocbs;
+-	io_prep_epoll_wait(iocb, ep_fd, events, ARRAY_SIZE(events), -1);
+-	err = io_submit(ctx, 1, &amp;iocb);
+-
+ retry:
+-	nevent = io_getevents(ctx, 1, ARRAY_SIZE(aioevents), aioevents, &amp;timeout);
+-
++	nevent = epoll_wait(ep_fd, events, ARRAY_SIZE(events), -1);
+ 	if (nevent &lt; 0) {
+ 		if (errno != EINTR) {
+ 			eprintf(&quot;%m\n&quot;);
+@@ -227,18 +196,8 @@
+ 		}
+ 	} else if (nevent) {
+ 		for (i = 0; i &lt; nevent; i++) {
+-			if (iocb == aioevents[i].obj) {
+-				int j;
+-				for (j = 0; j &lt; aioevents[i].res; j++) {
+-					tev = (struct tgt_event *) events[j].data.ptr;
+-					tev-&gt;handler(tev-&gt;fd, events[j].events, tev-&gt;data);
+-				}
+-
+-				err = io_submit(ctx, 1, &amp;iocb);
+-			} else {
+-				/* FIXME */
+-				target_cmd_io_done(aioevents[i].data, 0);
+-			}
++			tev = (struct tgt_event *) events[i].data.ptr;
++			tev-&gt;handler(tev-&gt;fd, events[i].events, tev-&gt;data);
+ 		}
+ 	} else
+ 		schedule();
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000764.html">[Stgt-svn] r777 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000766.html">[Stgt-svn] r779 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#765">[ date ]</a>
+              <a href="thread.html#765">[ thread ]</a>
+              <a href="subject.html#765">[ subject ]</a>
+              <a href="author.html#765">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

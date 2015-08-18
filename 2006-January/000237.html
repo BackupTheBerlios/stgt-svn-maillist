@@ -1,0 +1,257 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r250 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r250%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200601292334.k0TNY4cd008285%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000236.html">
+   <LINK REL="Next"  HREF="000238.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r250 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r250%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200601292334.k0TNY4cd008285%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r250 - branches/use-scsi-ml/istgt/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Mon Jan 30 00:34:04 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000236.html">[Stgt-svn] r249 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000238.html">[Stgt-svn] r251 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#237">[ date ]</a>
+              <a href="thread.html#237">[ thread ]</a>
+              <a href="subject.html#237">[ subject ]</a>
+              <a href="author.html#237">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-30 00:33:56 +0100 (Mon, 30 Jan 2006)
+New Revision: 250
+
+Removed:
+   branches/use-scsi-ml/istgt/kernel/param.c
+Log:
+rm param.c
+
+Deleted: branches/use-scsi-ml/istgt/kernel/param.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/param.c	2006-01-29 23:33:35 UTC (rev 249)
++++ branches/use-scsi-ml/istgt/kernel/param.c	2006-01-29 23:33:56 UTC (rev 250)
+@@ -1,181 +0,0 @@
+-/*
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- *
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;iscsi.h&gt;
+-#include &lt;digest.h&gt;
+-
+-#define	CHECK_PARAM(info, iparam, word, min, max)			\
+-do {									\
+-	if (!info-&gt;partial || (info-&gt;partial &amp; 1 &lt;&lt; key_##word))	\
+-		if (iparam[key_##word] &lt; min ||				\
+-			iparam[key_##word] &gt; max) {			\
+-			eprintk(&quot;%s: %u is out of range (%u %u)\n&quot;,	\
+-				#word, iparam[key_##word], min, max);	\
+-			iparam[key_##word] = min;			\
+-		}							\
+-} while (0)
+-
+-#define	SET_PARAM(param, info, iparam, word)				\
+-({									\
+-	int changed = 0;						\
+-	if (!info-&gt;partial || (info-&gt;partial &amp; 1 &lt;&lt; key_##word)) {	\
+-		if (param-&gt;word != iparam[key_##word])			\
+-			changed = 1;					\
+-		param-&gt;word = iparam[key_##word];			\
+-	}								\
+-	changed;							\
+-})
+-
+-#define	GET_PARAM(param, info, iparam, word)				\
+-do {									\
+-	iparam[key_##word] = param-&gt;word;				\
+-} while (0)
+-
+-static void sess_param_check(struct iscsi_param_info *info)
+-{
+-	uint32_t *iparam = info-&gt;session_param;
+-
+-	CHECK_PARAM(info, iparam, max_connections, 1, 65535);
+-	CHECK_PARAM(info, iparam, max_recv_data_length, 512,
+-		    (uint32_t) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
+-	CHECK_PARAM(info, iparam, max_xmit_data_length, 512,
+-		    (uint32_t) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
+-	CHECK_PARAM(info, iparam, error_recovery_level, 0, 0);
+-	CHECK_PARAM(info, iparam, data_pdu_inorder, 1, 1);
+-	CHECK_PARAM(info, iparam, data_sequence_inorder, 1, 1);
+-
+-	digest_alg_available(&amp;iparam[key_header_digest]);
+-	digest_alg_available(&amp;iparam[key_data_digest]);
+-
+-	CHECK_PARAM(info, iparam, ofmarker, 0, 0);
+-	CHECK_PARAM(info, iparam, ifmarker, 0, 0);
+-}
+-
+-static void sess_param_set(struct iscsi_sess_param *param, struct iscsi_param_info *info)
+-{
+-	uint32_t *iparam = info-&gt;session_param;
+-
+-	SET_PARAM(param, info, iparam, initial_r2t);
+-	SET_PARAM(param, info, iparam, immediate_data);
+-	SET_PARAM(param, info, iparam, max_connections);
+-	SET_PARAM(param, info, iparam, max_recv_data_length);
+-	SET_PARAM(param, info, iparam, max_xmit_data_length);
+-	SET_PARAM(param, info, iparam, max_burst_length);
+-	SET_PARAM(param, info, iparam, first_burst_length);
+-	SET_PARAM(param, info, iparam, default_wait_time);
+-	SET_PARAM(param, info, iparam, default_retain_time);
+-	SET_PARAM(param, info, iparam, max_outstanding_r2t);
+-	SET_PARAM(param, info, iparam, data_pdu_inorder);
+-	SET_PARAM(param, info, iparam, data_sequence_inorder);
+-	SET_PARAM(param, info, iparam, error_recovery_level);
+-	SET_PARAM(param, info, iparam, header_digest);
+-	SET_PARAM(param, info, iparam, data_digest);
+-	SET_PARAM(param, info, iparam, ofmarker);
+-	SET_PARAM(param, info, iparam, ifmarker);
+-	SET_PARAM(param, info, iparam, ofmarkint);
+-	SET_PARAM(param, info, iparam, ifmarkint);
+-}
+-
+-static void sess_param_get(struct iscsi_sess_param *param, struct iscsi_param_info *info)
+-{
+-	uint32_t *iparam = info-&gt;session_param;
+-
+-	GET_PARAM(param, info, iparam, initial_r2t);
+-	GET_PARAM(param, info, iparam, immediate_data);
+-	GET_PARAM(param, info, iparam, max_connections);
+-	GET_PARAM(param, info, iparam, max_recv_data_length);
+-	GET_PARAM(param, info, iparam, max_xmit_data_length);
+-	GET_PARAM(param, info, iparam, max_burst_length);
+-	GET_PARAM(param, info, iparam, first_burst_length);
+-	GET_PARAM(param, info, iparam, default_wait_time);
+-	GET_PARAM(param, info, iparam, default_retain_time);
+-	GET_PARAM(param, info, iparam, max_outstanding_r2t);
+-	GET_PARAM(param, info, iparam, data_pdu_inorder);
+-	GET_PARAM(param, info, iparam, data_sequence_inorder);
+-	GET_PARAM(param, info, iparam, error_recovery_level);
+-	GET_PARAM(param, info, iparam, header_digest);
+-	GET_PARAM(param, info, iparam, data_digest);
+-	GET_PARAM(param, info, iparam, ofmarker);
+-	GET_PARAM(param, info, iparam, ifmarker);
+-	GET_PARAM(param, info, iparam, ofmarkint);
+-	GET_PARAM(param, info, iparam, ifmarkint);
+-}
+-
+-static void trgt_param_check(struct iscsi_param_info *info)
+-{
+-	uint32_t *iparam = info-&gt;target_param;
+-
+-	CHECK_PARAM(info, iparam, queued_cmnds, MIN_NR_QUEUED_CMNDS, MAX_NR_QUEUED_CMNDS);
+-}
+-
+-static void trgt_param_set(struct iscsi_target *target, struct iscsi_param_info *info)
+-{
+-	struct iscsi_trgt_param *param = &amp;target-&gt;trgt_param;
+-	uint32_t *iparam = info-&gt;target_param;
+-
+-	SET_PARAM(param, info, iparam, queued_cmnds);
+-}
+-
+-static void trgt_param_get(struct iscsi_trgt_param *param, struct iscsi_param_info *info)
+-{
+-	uint32_t *iparam = info-&gt;target_param;
+-
+-	GET_PARAM(param, info, iparam, queued_cmnds);
+-}
+-
+-static int trgt_param(struct iscsi_target *target, struct iscsi_param_info *info, int set)
+-{
+-
+-	if (set) {
+-		trgt_param_check(info);
+-		trgt_param_set(target, info);
+-	} else
+-		trgt_param_get(&amp;target-&gt;trgt_param, info);
+-
+-	return 0;
+-}
+-
+-static int sess_param(struct iscsi_target *target, struct iscsi_param_info *info, int set)
+-{
+-	struct iscsi_session *session = NULL;
+-	struct iscsi_sess_param *param;
+-	int err = -ENOENT;
+-
+-	if (set)
+-		sess_param_check(info);
+-
+-	if (info-&gt;sid) {
+-		if (!(session = session_lookup(target, info-&gt;sid)))
+-			goto out;
+-		param = &amp;session-&gt;param;
+-	} else {
+-		param = &amp;target-&gt;sess_param;
+-	}
+-
+-	if (set) {
+-		sess_param_set(param, info);
+-		show_param(param);
+-	} else
+-		sess_param_get(param, info);
+-
+-	err = 0;
+-out:
+-	return err;
+-}
+-
+-int iscsi_param_set(struct iscsi_target *target, struct iscsi_param_info *info, int set)
+-{
+-	int err;
+-
+-	if (info-&gt;param_type == key_session)
+-		err = sess_param(target, info, set);
+-	else if (info-&gt;param_type == key_target)
+-		err = trgt_param(target, info, set);
+-	else
+-		err = -EINVAL;
+-
+-	return err;
+-}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000236.html">[Stgt-svn] r249 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000238.html">[Stgt-svn] r251 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#237">[ date ]</a>
+              <a href="thread.html#237">[ thread ]</a>
+              <a href="subject.html#237">[ subject ]</a>
+              <a href="author.html#237">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

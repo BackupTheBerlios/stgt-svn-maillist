@@ -1,0 +1,255 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r357 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r357%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030939.k239dX9V013847%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000343.html">
+   <LINK REL="Next"  HREF="000345.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r357 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r357%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030939.k239dX9V013847%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r357 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 10:39:33 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000343.html">[Stgt-svn] r356 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000345.html">[Stgt-svn] r358 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#344">[ date ]</a>
+              <a href="thread.html#344">[ thread ]</a>
+              <a href="subject.html#344">[ subject ]</a>
+              <a href="author.html#344">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 10:39:33 +0100 (Fri, 03 Mar 2006)
+New Revision: 357
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+   branches/use-scsi-ml/usr/util.h
+Log:
+Use hash list for commands instead of single list.
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-03 07:34:34 UTC (rev 356)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 09:39:33 UTC (rev 357)
+@@ -37,6 +37,9 @@
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
++#define	BITS_PER_LONG 32
++#include &lt;linux/hash.h&gt;
++
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+@@ -46,13 +49,18 @@
+ #define	DEFAULT_NR_DEVICE	64
+ #define	MAX_NR_DEVICE		(1 &lt;&lt; 20)
+ 
++#define	HASH_ORDER	4
++#define	cmd_hashfn(cid)	hash_long((cid), HASH_ORDER)
++
+ struct cmd {
+-	struct qelem clist;
++	struct qelem hlist;
++	struct qelem qlist;
+ 	uint32_t cid;
+-	uint64_t dev_id;
+ 	uint64_t uaddr;
+ 	uint32_t len;
++	uint64_t dev_id;
+ 	int mmap;
++	struct tgt_cmd_queue *queue;
+ };
+ 
+ struct target {
+@@ -62,8 +70,8 @@
+ 	struct tgt_device **devt;
+ 	struct qelem device_list;
+ 
+-	/* TODO: move to device */
+-	struct qelem cqueue;
++	struct qelem cmd_hash_list[1 &lt;&lt; HASH_ORDER];
++	struct tgt_cmd_queue cmd_queue;
+ };
+ 
+ static struct target *tgtt[MAX_NR_TARGET];
+@@ -178,7 +186,6 @@
+ 		goto close_dev_fd;
+ 
+ 	device-&gt;fd = dev_fd;
+-	device-&gt;state = 0;
+ 	device-&gt;addr = try_mmap_device(dev_fd, size);
+ 	device-&gt;size = size;
+ 	device-&gt;lun = dev_id;
+@@ -234,17 +241,6 @@
+ 	return 0;
+ }
+ 
+-static struct cmd *find_cmd(struct target *target, uint32_t cid)
+-{
+-	struct cmd *cmd;
+-	list_for_each_entry(cmd, &amp;target-&gt;cqueue, clist) {
+-		if (cmd-&gt;cid == cid)
+-			return cmd;
+-	}
+-	return NULL;
+-}
+-
+-/* TODO: coalesce responses */
+ static int cmd_queue(struct tgt_event *ev_req, int nl_fd)
+ {
+ 	struct target *target;
+@@ -289,7 +285,7 @@
+ 	cmd-&gt;len = len;
+ 	cmd-&gt;mmap = try_map;
+ 
+-	insque(&amp;cmd-&gt;clist, &amp;target-&gt;cqueue);
++	insque(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)]);
+ 
+ 	ev_res-&gt;u.cmd_rsp.host_no = host_no;
+ 	ev_res-&gt;u.cmd_rsp.cid = cid;
+@@ -302,6 +298,18 @@
+ 			  NLMSG_SPACE(sizeof(*ev_res)));
+ }
+ 
++static struct cmd *find_cmd(struct target *target, uint32_t cid)
++{
++	struct cmd *cmd;
++	struct qelem *head = &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)];
++
++	list_for_each_entry(cmd, head, hlist) {
++		if (cmd-&gt;cid == cid)
++			return cmd;
++	}
++	return NULL;
++}
++
+ static int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+ {
+ 	int err = 0;
+@@ -339,7 +347,7 @@
+ 		eprintf(&quot;Cannot find cmd %d %u\n&quot;, host_no, cid);
+ 		return;
+ 	}
+-	remque(&amp;cmd-&gt;clist);
++	remque(&amp;cmd-&gt;hlist);
+ 	do_munmap = cmd-&gt;mmap;
+ 
+ 	if (do_munmap) {
+@@ -416,7 +424,7 @@
+ 
+ int tgt_target_create(int tid)
+ {
+-	int err;
++	int err, i;
+ 	struct target *target;
+ 
+ 	if (tid &gt;= MAX_NR_TARGET) {
+@@ -436,8 +444,11 @@
+ 	}
+ 
+ 	target-&gt;tid = tid;
+-	INIT_LIST_HEAD(&amp;target-&gt;cqueue);
++	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hash_list); i++)
++		INIT_LIST_HEAD(&amp;target-&gt;cmd_hash_list[i]);
+ 
++	INIT_LIST_HEAD(&amp;target-&gt;device_list);
++
+ 	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct tgt_device *));
+ 	if (!target-&gt;devt) {
+ 		eprintf(&quot;Out of memoryn\n&quot;);
+@@ -450,8 +461,6 @@
+ 	if (err &lt; 0)
+ 		goto free_device_table;
+ 
+-	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+-
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+ 	tgtt[tid] = target;
+ 	return 0;
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-03-03 07:34:34 UTC (rev 356)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-03 09:39:33 UTC (rev 357)
+@@ -7,16 +7,20 @@
+ 
+ #define	SCSI_ID_LEN	24
+ 
++struct tgt_cmd_queue {
++	unsigned long state;
++	struct qelem cmd_queue;
++};
++
+ struct tgt_device {
+ 	int fd;
+ 	uint64_t addr; /* persistent mapped address */
+ 	uint64_t size;
+ 	uint64_t lun;
+-	unsigned long state;
+ 	char scsi_id[SCSI_ID_LEN];
+ 	struct qelem dlist;
+ 
+-	struct qelem cmd_queue;
++	struct tgt_cmd_queue cmd_queue;
+ };
+ 
+ /* makeshift */
+
+Modified: branches/use-scsi-ml/usr/util.h
+===================================================================
+--- branches/use-scsi-ml/usr/util.h	2006-03-03 07:34:34 UTC (rev 356)
++++ branches/use-scsi-ml/usr/util.h	2006-03-03 09:39:33 UTC (rev 357)
+@@ -2,6 +2,8 @@
+ 
+ /* taken from linux kernel */
+ 
++#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++
+ #undef offsetof
+ #ifdef __compiler_offsetof
+ #define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000343.html">[Stgt-svn] r356 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000345.html">[Stgt-svn] r358 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#344">[ date ]</a>
+              <a href="thread.html#344">[ thread ]</a>
+              <a href="subject.html#344">[ subject ]</a>
+              <a href="author.html#344">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

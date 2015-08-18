@@ -1,0 +1,391 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r212 - branches/uio-mmap/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r212%20-%20branches/uio-mmap/kernel&In-Reply-To=%3C200512240423.jBO4NSog032749%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000198.html">
+   <LINK REL="Next"  HREF="000200.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r212 - branches/uio-mmap/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r212%20-%20branches/uio-mmap/kernel&In-Reply-To=%3C200512240423.jBO4NSog032749%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r212 - branches/uio-mmap/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Dec 24 05:23:28 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000198.html">[Stgt-svn] r211 - branches/uio-mmap/kernel
+</A></li>
+        <LI>Next message: <A HREF="000200.html">[Stgt-svn] r213 - in trunk: . include istgt/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#199">[ date ]</a>
+              <a href="thread.html#199">[ thread ]</a>
+              <a href="subject.html#199">[ subject ]</a>
+              <a href="author.html#199">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-12-24 05:23:24 +0100 (Sat, 24 Dec 2005)
+New Revision: 212
+
+Removed:
+   branches/uio-mmap/kernel/tgt_sd.c
+   branches/uio-mmap/kernel/tgt_vsd.c
+Log:
+test ci: rm old files
+
+Deleted: branches/uio-mmap/kernel/tgt_sd.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_sd.c	2005-12-23 09:35:11 UTC (rev 211)
++++ branches/uio-mmap/kernel/tgt_sd.c	2005-12-24 04:23:24 UTC (rev 212)
+@@ -1,187 +0,0 @@
+-/*
+- * scsi disk functions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/uio.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;linux/file.h&gt;
+-#include &lt;linux/writeback.h&gt;
+-
+-#include &lt;scsi/scsi.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_device.h&gt;
+-#include &lt;tgt_scsi.h&gt;
+-
+-/*
+- * TODO set per device segment, max_sectors, etc limits
+- */
+-static int tgt_sd_create(struct tgt_device *device)
+-{
+-	struct file *file = device-&gt;file;
+-	struct io_restrictions *limits = &amp;device-&gt;limits;
+-	struct request_queue *q;
+-	struct inode *inode;
+-
+-	q = bdev_get_queue(file-&gt;f_dentry-&gt;d_inode-&gt;i_bdev);
+-	limits-&gt;max_sectors = q-&gt;max_hw_sectors;
+-	limits-&gt;max_phys_segments = q-&gt;max_phys_segments;
+-	limits-&gt;max_hw_segments = q-&gt;max_hw_segments;
+-	limits-&gt;hardsect_size = q-&gt;hardsect_size;
+-	limits-&gt;max_segment_size = q-&gt;max_segment_size;
+-	limits-&gt;seg_boundary_mask = q-&gt;seg_boundary_mask;
+-	if (test_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags))
+-		device-&gt;use_clustering = 1;
+-	else
+-		device-&gt;use_clustering = 0;
+-
+-	inode = file-&gt;f_dentry-&gt;d_inode;
+-	if (S_ISREG(inode-&gt;i_mode))
+-		;
+-	else if (S_ISBLK(inode-&gt;i_mode))
+-		inode = inode-&gt;i_bdev-&gt;bd_inode;
+-	else
+-		/*
+-		 * can we handle scsi tape too actually?
+-		 */
+-		return -EINVAL;
+-
+-	device-&gt;size = inode-&gt;i_size;
+-	dprintk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+-
+-	return 0;
+-}
+-
+-static void tgt_sd_prep(struct tgt_cmd *cmd)
+-{
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	uint8_t *scb = scmd-&gt;scb;
+-	uint64_t off = 0;
+-
+-	/*
+-	 * set offset
+-	 */
+-	switch (scb[0]) {
+-	case READ_6:
+-	case WRITE_6:
+-		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
+-		break;
+-	case READ_10:
+-	case WRITE_10:
+-	case WRITE_VERIFY:
+-		off = be32_to_cpu(*(uint32_t *) &amp;scb[2]);
+-		break;
+-	case READ_16:
+-	case WRITE_16:
+-		off = be64_to_cpu(*(uint64_t *) &amp;scb[2]);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	off &lt;&lt;= 9;
+-
+-	cmd-&gt;offset = off;
+-}
+-
+-static void tgt_sd_end_rq(struct request *rq)
+-{
+-	struct tgt_cmd *cmd = rq-&gt;end_io_data;
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-
+-	if (rq-&gt;sense_len) {
+-		memcpy(scmd-&gt;sense_buff, rq-&gt;sense, SCSI_SENSE_BUFFERSIZE);
+-		cmd-&gt;result = SAM_STAT_CHECK_CONDITION;
+-	} else if (rq-&gt;errors) {
+-		/*
+-		 * TODO check *_byte and just send error upwards
+-		 */
+-		scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-		cmd-&gt;result = SAM_STAT_CHECK_CONDITION;
+-	} else
+-		cmd-&gt;result = SAM_STAT_GOOD;
+-
+-	tgt_transfer_response(cmd);
+-	__blk_put_request(rq-&gt;q, rq);
+-}
+-
+-/*
+- * TODO part of this will move to a io_handler callout
+- */
+-static int tgt_sd_execute_rq(struct tgt_cmd *cmd)
+-{
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	struct file *file = cmd-&gt;device-&gt;file;
+-	request_queue_t *q = bdev_get_queue(file-&gt;f_dentry-&gt;d_inode-&gt;i_bdev);
+-	struct request *rq;
+-	int write = (cmd-&gt;data_dir == DMA_TO_DEVICE);
+-
+-	rq = blk_get_request(q, write, GFP_KERNEL | __GFP_NOFAIL);
+-	if (!rq)
+-		goto hw_error;
+-
+-/*	if (req_map_sg(q, rq, cmd-&gt;sg, cmd-&gt;sg_count,
+-			GFP_KERNEL | __GFP_NOFAIL))
+-		goto free_request;
+-*/
+-	rq-&gt;cmd_len = COMMAND_SIZE(scmd-&gt;scb[0]);
+-	memcpy(rq-&gt;cmd, scmd-&gt;scb, rq-&gt;cmd_len);
+-	rq-&gt;sense_len = 0;
+-	rq-&gt;sense = scmd-&gt;sense_buff;
+-	rq-&gt;end_io_data = cmd;
+-	rq-&gt;timeout = 60 * HZ; /* TODO */
+-	rq-&gt;flags |= REQ_BLOCK_PC;
+-
+-	blk_execute_rq_nowait(q, NULL, rq, 0, tgt_sd_end_rq);
+-	return 0;
+-
+- free_request:
+-	blk_put_request(rq);
+- hw_error:
+-	scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-	return -ENOMEM;
+-}
+-
+-static int tgt_sd_execute(struct tgt_cmd *cmd)
+-{
+-	struct tgt_device *device = cmd-&gt;device;
+-	loff_t pos = cmd-&gt;offset;
+-
+-	if (cmd-&gt;bufflen + pos &gt; device-&gt;size) {
+-		scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-		return TGT_CMD_FAILED;
+-	}
+-	/*
+-	 * TODO this will become device-&gt;io_handler-&gt;queue_cmd
+-	 * when we seperate the io_handlers
+-	 */
+-	return tgt_sd_execute_rq(cmd) ? TGT_CMD_FAILED : TGT_CMD_KERN_QUEUED;
+-}
+-
+-static struct tgt_device_template tgt_sd = {
+-	.name = &quot;tgt_sd&quot;,
+-	.module = THIS_MODULE,
+-	.create = tgt_sd_create,
+-	.execute_cmd = tgt_sd_execute,
+-	.prep_cmd = tgt_sd_prep,
+-};
+-
+-static int __init tgt_sd_init(void)
+-{
+-	return tgt_device_template_register(&amp;tgt_sd);
+-}
+-
+-static void __exit tgt_sd_exit(void)
+-{
+-	tgt_device_template_unregister(&amp;tgt_sd);
+-}
+-
+-module_init(tgt_sd_init);
+-module_exit(tgt_sd_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+Deleted: branches/uio-mmap/kernel/tgt_vsd.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_vsd.c	2005-12-23 09:35:11 UTC (rev 211)
++++ branches/uio-mmap/kernel/tgt_vsd.c	2005-12-24 04:23:24 UTC (rev 212)
+@@ -1,121 +0,0 @@
+-/*
+- * virtual scsi disk functions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/uio.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;linux/file.h&gt;
+-#include &lt;linux/writeback.h&gt;
+-
+-#include &lt;scsi/scsi.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_target.h&gt;
+-#include &lt;tgt_device.h&gt;
+-#include &lt;tgt_scsi.h&gt;
+-
+-static int tgt_vsd_create(struct tgt_device *device)
+-{
+-	struct inode *inode;
+-
+-	inode = device-&gt;file-&gt;f_dentry-&gt;d_inode;
+-	if (S_ISREG(inode-&gt;i_mode))
+-		;
+-	else if (S_ISBLK(inode-&gt;i_mode))
+-		inode = inode-&gt;i_bdev-&gt;bd_inode;
+-	else
+-		return -EINVAL;
+-
+-	device-&gt;use_clustering = 1;
+-	device-&gt;size = inode-&gt;i_size;
+-	dprintk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+-
+-	return 0;
+-}
+-
+-/*
+- * is this device specific or common? Should it be moved to the protocol.
+- */
+-static void tgt_vsd_prep(struct tgt_cmd *cmd)
+-{
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	uint8_t *scb = scmd-&gt;scb;
+-	uint64_t off = 0;
+-
+-	/*
+-	 * set bufflen and offset
+-	 */
+-	switch (scb[0]) {
+-	case READ_6:
+-	case WRITE_6:
+-		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
+-		break;
+-	case READ_10:
+-	case WRITE_10:
+-	case WRITE_VERIFY:
+-		off = be32_to_cpu(*(uint32_t *) &amp;scb[2]);
+-		break;
+-	case READ_16:
+-	case WRITE_16:
+-		off = be64_to_cpu(*(uint64_t *) &amp;scb[2]);
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	off &lt;&lt;= 9;
+-
+-	cmd-&gt;offset = off;
+-}
+-
+-static void __tgt_vsd_execute(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-	int err;
+-
+-	err = tgt_uspace_cmd_send(cmd, GFP_KERNEL);
+-	if (err &gt;= 0)
+-		return;
+-
+-	/* TODO if -ENOMEM return QUEUEFULL or BUSY ??? */
+-	scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-}
+-
+-static int tgt_vsd_execute(struct tgt_cmd *cmd)
+-{
+-	/*
+-	 * TODO: this module needs to do async non blocking io or create
+-	 * its own threads
+-	 */
+-	INIT_WORK(&amp;cmd-&gt;work, __tgt_vsd_execute, cmd);
+-	queue_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-	return TGT_CMD_KERN_QUEUED;
+-}
+-
+-static struct tgt_device_template tgt_vsd = {
+-	.name = &quot;tgt_vsd&quot;,
+-	.module = THIS_MODULE,
+-	.create = tgt_vsd_create,
+-	.execute_cmd = tgt_vsd_execute,
+-	.prep_cmd = tgt_vsd_prep,
+-};
+-
+-static int __init tgt_vsd_init(void)
+-{
+-	return tgt_device_template_register(&amp;tgt_vsd);
+-}
+-
+-static void __exit tgt_vsd_exit(void)
+-{
+-	tgt_device_template_unregister(&amp;tgt_vsd);
+-}
+-
+-module_init(tgt_vsd_init);
+-module_exit(tgt_vsd_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000198.html">[Stgt-svn] r211 - branches/uio-mmap/kernel
+</A></li>
+	<LI>Next message: <A HREF="000200.html">[Stgt-svn] r213 - in trunk: . include istgt/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#199">[ date ]</a>
+              <a href="thread.html#199">[ thread ]</a>
+              <a href="subject.html#199">[ subject ]</a>
+              <a href="author.html#199">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

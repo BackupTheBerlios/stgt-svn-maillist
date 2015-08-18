@@ -1,0 +1,272 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r618 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r618%20-%20trunk/usr&In-Reply-To=%3C200611080916.kA89GNX8005050%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000604.html">
+   <LINK REL="Next"  HREF="000606.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r618 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r618%20-%20trunk/usr&In-Reply-To=%3C200611080916.kA89GNX8005050%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r618 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov  8 10:16:23 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000604.html">[Stgt-svn] r617 - trunk/patch
+</A></li>
+        <LI>Next message: <A HREF="000606.html">[Stgt-svn] r619 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#605">[ date ]</a>
+              <a href="thread.html#605">[ thread ]</a>
+              <a href="subject.html#605">[ subject ]</a>
+              <a href="author.html#605">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-08 10:16:23 +0100 (Wed, 08 Nov 2006)
+New Revision: 618
+
+Modified:
+   trunk/usr/bd_aio.c
+   trunk/usr/tgtd.c
+Log:
+Move to IO_CMD_EPOLL_WAIT interface from aio event queue interface.
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-11-08 09:05:22 UTC (rev 617)
++++ trunk/usr/bd_aio.c	2006-11-08 09:16:23 UTC (rev 618)
+@@ -44,48 +44,24 @@
+  * IO_CMD_EPOLL_WAIT, looks more promising. kqueue is promising too.
+  */
+ 
+-#define REQUEST_ASYNC_FD 1
+-
+ /* FIXME */
+ #define MAX_AIO_REQS 1024
+ #define O_DIRECT 040000 /* who defines this?*/
+ 
+ struct bd_aio_info {
+ 	int fd;
+-	int aio_fd;
+ 
+-	io_context_t ctx;
+ 	/* TODO: batch requests*/
+ 	struct iocb iocb[MAX_AIO_REQS];
+ 	struct io_event events[MAX_AIO_REQS];
+ };
+ 
+-static void aio_event_handler(int fd, int events, void *data)
+-{
+-	struct tgt_device *dev;
+-	struct bd_aio_info *bai;
+-	int i, nr;
+-/* 	struct iocb *iocb; */
++extern io_context_t ctx;
+ 
+-	dev = (struct tgt_device *) data;
+-	bai = (struct bd_aio_info *) dev-&gt;bddata;
+-
+-	nr = io_getevents(bai-&gt;ctx, 0, MAX_AIO_REQS, bai-&gt;events, NULL);
+-
+-	for (i = 0; i &lt; nr; i++) {
+-/* 		iocb = bai-&gt;events[i].obj; */
+-/* 		dprintf(&quot;%p %p\n&quot;, iocb, iocb-&gt;data); */
+-/* 		target_cmd_io_done(iocb-&gt;data, 0); */
+-		dprintf(&quot;%p\n&quot;, bai-&gt;events[i].data);
+-		target_cmd_io_done(bai-&gt;events[i].data, 0);
+-	}
+-}
+-
+ static struct tgt_device *bd_aio_open(char *path, int *fd, uint64_t *size)
+ {
+ 	struct tgt_device *dev;
+ 	struct bd_aio_info *bai;
+-	int err;
+ 
+ 	dev = zalloc(sizeof(*dev) + sizeof(*bai));
+ 	if (!dev)
+@@ -96,35 +72,11 @@
+ 		goto free_dev;
+ 
+ 	bai = (struct bd_aio_info *) dev-&gt;bddata;
+-
+-	bai-&gt;ctx = (io_context_t) REQUEST_ASYNC_FD;
+-	bai-&gt;aio_fd = io_setup(MAX_AIO_REQS, &amp;bai-&gt;ctx);
+-	if (bai-&gt;aio_fd &lt; 0) {
+-		eprintf(&quot;Can't setup aio fd, %m\n&quot;);
+-		goto close_fd;
+-	}
+-
+-	/*
+-	 * We use edge triggering because we want only one
+-	 * notification per task.
+-	 */
+-	err = tgt_event_add(bai-&gt;aio_fd, EPOLLIN | EPOLLET,
+-			    aio_event_handler, dev);
+-	if (err)
+-		goto aio_cb_destroy;
+-
+-	dprintf(&quot;Succeeded to setup aio fd, %s\n&quot;, path);
+-
+ 	bai-&gt;fd = *fd;
+-	return dev;
+ 
+-aio_cb_destroy:
+-	io_destroy(bai-&gt;ctx);
+-close_fd:
+-	close(*fd);
++	return dev;
+ free_dev:
+ 	free(dev);
+-
+ 	return NULL;
+ }
+ 
+@@ -133,7 +85,6 @@
+ 	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
+ 
+ 	tgt_event_del(bai-&gt;fd);
+-	io_destroy(bai-&gt;ctx);
+ 	free(dev);
+ }
+ 
+@@ -159,7 +110,7 @@
+ 		io_prep_pwrite(io, bai-&gt;fd, (void *) *uaddr, datalen, offset);
+ 
+ 	io-&gt;data = key;
+-	err = io_submit(bai-&gt;ctx, 1, &amp;io);
++	err = io_submit(ctx, 1, &amp;io);
+ 
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-11-08 09:05:22 UTC (rev 617)
++++ trunk/usr/tgtd.c	2006-11-08 09:16:23 UTC (rev 618)
+@@ -23,6 +23,7 @@
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+ #include &lt;inttypes.h&gt;
++#include &lt;libaio.h&gt;
+ #include &lt;signal.h&gt;
+ #include &lt;stdint.h&gt;
+ #include &lt;stdio.h&gt;
+@@ -46,6 +47,8 @@
+ 	struct list_head e_list;
+ };
+ 
++io_context_t ctx;
++
+ static int ep_fd;
+ static char program_name[] = &quot;tgtd&quot;;
+ static LIST_HEAD(tgt_events_list);
+@@ -168,15 +171,44 @@
+ 	return epoll_ctl(ep_fd, EPOLL_CTL_MOD, fd, &amp;ev);
+ }
+ 
++#define IOCB_CMD_EPOLL_WAIT 9
++
++static void io_prep_epoll_wait(struct iocb *iocb, int epfd,
++			       struct epoll_event *events, int maxevents,
++			       int timeout)
++{
++	memset(iocb, 0, sizeof(*iocb));
++	iocb-&gt;aio_fildes = epfd;
++	iocb-&gt;aio_lio_opcode = IOCB_CMD_EPOLL_WAIT;
++	iocb-&gt;aio_reqprio = 0;
++
++	iocb-&gt;u.c.nbytes = maxevents;
++	iocb-&gt;u.c.offset = timeout;
++	iocb-&gt;u.c.buf = events;
++}
++
+ static void event_loop(void)
+ {
+-	int nevent, i;
+-	static int timeout = 1000 / SCHED_HZ;
++	int nevent, i, err;
+ 	struct epoll_event events[1024];
+ 	struct tgt_event *tev;
++	struct iocb iocbs[1], *iocb;
++	struct io_event aioevents[2048];
++	struct timespec timeout = {1, 0};
+ 
++	err = io_queue_init(2048, &amp;ctx);
++	if (err) {
++		eprintf(&quot;%m\n&quot;);
++		return;
++	}
++
++	iocb = iocbs;
++	io_prep_epoll_wait(iocb, ep_fd, events, ARRAY_SIZE(events), -1);
++	err = io_submit(ctx, 1, &amp;iocb);
++
+ retry:
+-	nevent = epoll_wait(ep_fd, events, ARRAY_SIZE(events), timeout);
++	nevent = io_getevents(ctx, 1, ARRAY_SIZE(aioevents), aioevents, &amp;timeout);
++
+ 	if (nevent &lt; 0) {
+ 		if (errno != EINTR) {
+ 			eprintf(&quot;%m\n&quot;);
+@@ -184,8 +216,18 @@
+ 		}
+ 	} else if (nevent) {
+ 		for (i = 0; i &lt; nevent; i++) {
+-			tev = (struct tgt_event *) events[i].data.ptr;
+-			tev-&gt;handler(tev-&gt;fd, events[i].events, tev-&gt;data);
++			if (iocb == aioevents[i].obj) {
++				int j;
++				for (j = 0; j &lt; aioevents[i].res; j++) {
++					tev = (struct tgt_event *) events[j].data.ptr;
++					tev-&gt;handler(tev-&gt;fd, events[j].events, tev-&gt;data);
++				}
++
++				err = io_submit(ctx, 1, &amp;iocb);
++			} else {
++				/* FIXME */
++				target_cmd_io_done(aioevents[i].data, 0);
++			}
+ 		}
+ 	} else
+ 		schedule();
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000604.html">[Stgt-svn] r617 - trunk/patch
+</A></li>
+	<LI>Next message: <A HREF="000606.html">[Stgt-svn] r619 - trunk/patch
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#605">[ date ]</a>
+              <a href="thread.html#605">[ thread ]</a>
+              <a href="subject.html#605">[ subject ]</a>
+              <a href="author.html#605">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

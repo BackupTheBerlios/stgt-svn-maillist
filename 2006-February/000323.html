@@ -1,0 +1,104 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r336 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r336%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602271159.k1RBxBwF003106%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000322.html">
+   <LINK REL="Next"  HREF="000324.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r336 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r336%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602271159.k1RBxBwF003106%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r336 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Feb 27 12:59:11 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000322.html">[Stgt-svn] r335 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000324.html">[Stgt-svn] r337 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#323">[ date ]</a>
+              <a href="thread.html#323">[ thread ]</a>
+              <a href="subject.html#323">[ subject ]</a>
+              <a href="author.html#323">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-27 12:58:30 +0100 (Mon, 27 Feb 2006)
+New Revision: 336
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+Log:
+Add the hostno file in tgt_target_bind().
+
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-27 11:34:48 UTC (rev 335)
++++ branches/use-scsi-ml/usr/target.c	2006-02-27 11:58:30 UTC (rev 336)
+@@ -486,6 +486,9 @@
+ 
+ int tgt_target_bind(int tid, int host_no)
+ {
++	char path[PATH_MAX], buf[64];
++	int fd, err;
++
+ 	if (!tgtt[tid]) {
+ 		eprintf(&quot;target is not found %d\n&quot;, tid);
+ 		return -EINVAL;
+@@ -496,6 +499,17 @@
+ 		return -EINVAL;
+ 	}
+ 
++	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/hostno&quot;, tid);
++	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
++	if (fd &lt; 0)
++		return -EINVAL;
++
++	snprintf(buf, sizeof(buf), &quot;%d&quot;, host_no);
++	err = write(fd, buf, strlen(buf));
++	close(fd);
++	if (err &lt; 0)
++		return -EINVAL;
++
+ 	hostt[host_no] = tgtt[tid];
+ 	return 0;
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000322.html">[Stgt-svn] r335 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000324.html">[Stgt-svn] r337 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#323">[ date ]</a>
+              <a href="thread.html#323">[ thread ]</a>
+              <a href="subject.html#323">[ subject ]</a>
+              <a href="author.html#323">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

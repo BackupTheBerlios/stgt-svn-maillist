@@ -1,0 +1,84 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r749 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r749%20-%20trunk/usr&In-Reply-To=%3C200701021142.l02BgpXP015843%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000735.html">
+   <LINK REL="Next"  HREF="000737.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r749 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r749%20-%20trunk/usr&In-Reply-To=%3C200701021142.l02BgpXP015843%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r749 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Jan  2 12:42:51 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000735.html">[Stgt-svn] r748 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000737.html">[Stgt-svn] r750 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#736">[ date ]</a>
+              <a href="thread.html#736">[ thread ]</a>
+              <a href="subject.html#736">[ subject ]</a>
+              <a href="author.html#736">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-02 12:42:42 +0100 (Tue, 02 Jan 2007)
+New Revision: 749
+
+Modified:
+   trunk/usr/Makefile
+Log:
+Makefile fix for XEN.
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-01-02 11:27:51 UTC (rev 748)
++++ trunk/usr/Makefile	2007-01-02 11:42:42 UTC (rev 749)
+@@ -16,7 +16,7 @@
+ TGTD_OBJS += $(addprefix xen/, xen.o xs_api.o xenbus.o)
+ TGTD_OBJS += tgtif.o bd_xen.o
+ else
+-INCLUDES += -I$(KERNELSRC)/include
++INCLUDES += -I../include -I$(KERNELSRC)/include
+ LIBS += -laio
+ endif
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000735.html">[Stgt-svn] r748 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000737.html">[Stgt-svn] r750 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#736">[ date ]</a>
+              <a href="thread.html#736">[ thread ]</a>
+              <a href="subject.html#736">[ subject ]</a>
+              <a href="author.html#736">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

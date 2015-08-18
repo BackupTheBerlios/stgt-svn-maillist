@@ -1,0 +1,218 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r197%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200512070954.jB79s9vF015194%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000185.html">
+   <LINK REL="Next"  HREF="000187.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r197%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200512070954.jB79s9vF015194%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel">mnc at berlios.de
+       </A><BR>
+    <I>Wed Dec  7 10:54:09 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000185.html">[Stgt-svn] r196 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000187.html">[Stgt-svn] r198 - in trunk: . kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#186">[ date ]</a>
+              <a href="thread.html#186">[ thread ]</a>
+              <a href="subject.html#186">[ subject ]</a>
+              <a href="author.html#186">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-12-07 10:53:53 +0100 (Wed, 07 Dec 2005)
+New Revision: 197
+
+Modified:
+   trunk/ibmvstgt/kernel/ibmvstgt.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_scsi.h
+Log:
+I think the proto-&gt;create_cmd was a bad idea on part. This erases it and makes the protocol only used between tgt-core.
+
+Modified: trunk/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- trunk/ibmvstgt/kernel/ibmvstgt.c	2005-12-04 07:19:09 UTC (rev 196)
++++ trunk/ibmvstgt/kernel/ibmvstgt.c	2005-12-07 09:53:53 UTC (rev 197)
+@@ -22,7 +22,6 @@
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_target.h&gt;
+ #include &lt;tgt_scsi.h&gt;
+-#include &lt;tgt_protocol.h&gt;
+ 
+ #include &quot;viosrp.h&quot;
+ 
+@@ -297,15 +296,12 @@
+ static int process_cmd(struct iu_entry *iue)
+ {
+ 	struct tgt_target *tt = iue-&gt;adapter-&gt;tt;
+-	struct tgt_protocol *proto;
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	enum dma_data_direction data_dir;
+ 	int tags, len;
+ 	uint8_t lun[8];
+ 
+ 	dprintk(&quot;%p %p %p\n&quot;, tt, iue-&gt;adapter, iue);
+-	proto = tt-&gt;proto;
+-	BUG_ON(!proto);
+ 
+ 	if (getlink(iue))
+ 		__set_bit(V_LINKED, &amp;iue-&gt;req.flags);
+@@ -353,9 +349,8 @@
+ 		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, lun[1], tags);
+ 
+ 	BUG_ON(!iue-&gt;adapter-&gt;ts);
+-	BUG_ON(!proto-&gt;create_cmd);
+-	iue-&gt;tc = proto-&gt;create_cmd(iue-&gt;adapter-&gt;ts, iue, iu-&gt;srp.cmd.cdb,
+-				    len, data_dir, lun, sizeof(lun), tags);
++	iue-&gt;tc = scsi_tgt_create_cmd(iue-&gt;adapter-&gt;ts, iue, iu-&gt;srp.cmd.cdb,
++				      len, data_dir, lun, sizeof(lun), tags);
+ 	BUG_ON(!iue-&gt;tc);
+ 	dprintk(&quot;%p\n&quot;, iue-&gt;tc);
+ 
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-12-04 07:19:09 UTC (rev 196)
++++ trunk/istgt/kernel/iscsi.c	2005-12-07 09:53:53 UTC (rev 197)
+@@ -761,7 +761,6 @@
+ {
+ 	struct iscsi_cmd *req_hdr = cmd_hdr(req);
+ 	struct iscsi_conn *conn = req-&gt;conn;
+-	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	enum dma_data_direction data_dir;
+ 	int tags = MSG_SIMPLE_TAG;;
+ 
+@@ -790,11 +789,11 @@
+ 		break;
+ 	}
+ 
+-	req-&gt;tc = proto-&gt;create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
+-				    be32_to_cpu(req_hdr-&gt;data_length),
+-				    data_dir, req_hdr-&gt;lun,
+-				    sizeof(req_hdr-&gt;lun),
+-				    tags);
++	req-&gt;tc = scsi_tgt_create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
++				     be32_to_cpu(req_hdr-&gt;data_length),
++				     data_dir, req_hdr-&gt;lun,
++				     sizeof(req_hdr-&gt;lun),
++				     tags);
+ 	BUG_ON(!req-&gt;tc);
+ 
+ 	if (data_dir == DMA_TO_DEVICE &amp;&amp; be32_to_cpu(req_hdr-&gt;data_length)) {
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-12-04 07:19:09 UTC (rev 196)
++++ trunk/kernel/tgt_protocol.h	2005-12-07 09:53:53 UTC (rev 197)
+@@ -26,21 +26,7 @@
+ 
+ 	kmem_cache_t *cmd_cache;
+ 	unsigned uspace_pdu_size;
+-
+ 	/*
+-	 * Create a command and allocate a buffer of size data_len for
+-	 * for transfer. The buffer will be allocated with GFP_KERNEL
+-	 * and preprocesed by tgt/scsi_proto so the next time
+-	 * the target driver is notified about the cmd is when
+-	 * the transfer* is called.
+-	 */
+-	struct tgt_cmd *(* create_cmd)(struct tgt_session *session,
+-				       void *tgt_priv, uint8_t *cmd,
+-				       uint32_t data_len,
+-				       enum dma_data_direction data_dir,
+-				       uint8_t *dev_id_buff, int id_buff_size,
+-				       int flags);
+-	/*
+ 	 * Build userspace packet
+ 	 */
+ 	void (* uspace_pdu_build)(struct tgt_cmd *cmd, void *data);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-12-04 07:19:09 UTC (rev 196)
++++ trunk/kernel/tgt_scsi.c	2005-12-07 09:53:53 UTC (rev 197)
+@@ -46,7 +46,7 @@
+  * we may have to add a wrapper becuase people are passing the lun in
+  * differently
+  */
+-static struct tgt_cmd *
++struct tgt_cmd *
+ scsi_tgt_create_cmd(struct tgt_session *session, void *tgt_priv, uint8_t *scb,
+ 		    uint32_t data_len, enum dma_data_direction data_dir,
+ 		    uint8_t *lun, int lun_size, int tags)
+@@ -79,6 +79,8 @@
+ 	return cmd;
+ }
+ 
++EXPORT_SYMBOL_GPL(scsi_tgt_create_cmd);
++
+ /* kspace command failure */
+ int scsi_tgt_sense_data_build(struct tgt_cmd *cmd, uint8_t key,
+ 			      uint8_t ascode, uint8_t ascodeq)
+@@ -148,7 +150,6 @@
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
+-	.create_cmd = scsi_tgt_create_cmd,
+ 	.uspace_pdu_build = scsi_tgt_uspace_pdu_build,
+ 	.uspace_cmd_execute = scsi_tgt_uspace_cmd_exec,
+ 	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
+
+Modified: trunk/kernel/tgt_scsi.h
+===================================================================
+--- trunk/kernel/tgt_scsi.h	2005-12-04 07:19:09 UTC (rev 196)
++++ trunk/kernel/tgt_scsi.h	2005-12-07 09:53:53 UTC (rev 197)
+@@ -27,4 +27,9 @@
+ extern int scsi_tgt_sense_copy(struct tgt_cmd *cmd);
+ extern int scsi_tgt_sense_data_build(struct tgt_cmd *cmd, uint8_t key,
+ 				     uint8_t ascode, uint8_t ascodeq);
++extern struct tgt_cmd *scsi_tgt_create_cmd(struct tgt_session *session,
++			void *tgt_priv, uint8_t *scb, uint32_t data_len,
++			enum dma_data_direction data_dir, uint8_t *lun,
++			int lun_size, int tags);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000185.html">[Stgt-svn] r196 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000187.html">[Stgt-svn] r198 - in trunk: . kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#186">[ date ]</a>
+              <a href="thread.html#186">[ thread ]</a>
+              <a href="subject.html#186">[ subject ]</a>
+              <a href="author.html#186">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

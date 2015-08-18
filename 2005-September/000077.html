@@ -1,0 +1,414 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r84 - in trunk: . kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r84%20-%20in%20trunk%3A%20.%20kernel&In-Reply-To=%3C200509200423.j8K4Nnj9003436%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000076.html">
+   <LINK REL="Next"  HREF="000078.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r84 - in trunk: . kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r84%20-%20in%20trunk%3A%20.%20kernel&In-Reply-To=%3C200509200423.j8K4Nnj9003436%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r84 - in trunk: . kernel">mnc at berlios.de
+       </A><BR>
+    <I>Tue Sep 20 06:23:49 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000076.html">[Stgt-svn] r83 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000078.html">[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#77">[ date ]</a>
+              <a href="thread.html#77">[ thread ]</a>
+              <a href="subject.html#77">[ subject ]</a>
+              <a href="author.html#77">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-20 06:23:45 +0200 (Tue, 20 Sep 2005)
+New Revision: 84
+
+Added:
+   trunk/kernel/tgt_vdev.c
+Removed:
+   trunk/kernel/tgt_vsd.c
+Modified:
+   trunk/initd
+   trunk/kernel/Makefile
+Log:
+rename vsd to vdev. NOTE YOU MUST CHANGE YOUR IETD.CONF TO REFLECT THIS. tgt_vsd IS NOW tgt_vdev
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2005-09-20 03:15:02 UTC (rev 83)
++++ trunk/initd	2005-09-20 04:23:45 UTC (rev 84)
+@@ -10,7 +10,7 @@
+ {
+ 	insmod ${PWD}/kernel/tgt_core.ko
+ 	insmod ${PWD}/kernel/tgt_scsi.ko
+-	insmod ${PWD}/kernel/tgt_vsd.ko
++	insmod ${PWD}/kernel/tgt_vdev.ko
+ 	${PWD}/usr/tgtd
+ 
+ 	modprobe -q crc32c
+@@ -26,7 +26,7 @@
+ 
+ 	rmmod iscsi_trgt
+ 
+-	rmmod tgt_vsd
++	rmmod tgt_vdev
+ 	rmmod tgt_scsi
+ 	rmmod tgt_core
+ }
+
+Modified: trunk/kernel/Makefile
+===================================================================
+--- trunk/kernel/Makefile	2005-09-20 03:15:02 UTC (rev 83)
++++ trunk/kernel/Makefile	2005-09-20 04:23:45 UTC (rev 84)
+@@ -8,7 +8,7 @@
+ obj-m		+= tgt_core.o
+ tgt_core-objs	:= tgt.o tgt_sysfs.o tgt_protocol.o
+ 
+-obj-m		+= tgt_vsd.o tgt_scsi.o
++obj-m		+= tgt_vdev.o tgt_scsi.o
+ else
+ 
+ ifeq ($(KERNELSRC),)
+
+Copied: trunk/kernel/tgt_vdev.c (from rev 83, trunk/kernel/tgt_vsd.c)
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-09-20 03:15:02 UTC (rev 83)
++++ trunk/kernel/tgt_vdev.c	2005-09-20 04:23:45 UTC (rev 84)
+@@ -0,0 +1,147 @@
++/*
++ * Target virtual device functions
++ *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ * This code is licenced under the GPL.
++ */
++
++#include &lt;linux/types.h&gt;
++#include &lt;linux/blkdev.h&gt;
++#include &lt;linux/uio.h&gt;
++#include &lt;linux/fs.h&gt;
++#include &lt;linux/file.h&gt;
++#include &lt;linux/writeback.h&gt;
++
++#include &lt;tgt.h&gt;
++#include &lt;tgt_device.h&gt;
++
++struct tgt_vdev {
++	struct file *filp;
++};
++
++static void tgt_vdev_destroy(struct tgt_device *device)
++{
++	struct tgt_vdev *vdev = device-&gt;dt_data;
++	fput(vdev-&gt;filp);
++}
++
++static int open_file(struct tgt_vdev *vdev, int fd)
++{
++	struct file *filp;
++
++	filp = fget(fd);
++	if (!filp) {
++		printk(&quot;Could not get fd %d\n&quot;, fd);
++		return -EINVAL;
++	}
++
++	vdev-&gt;filp = filp;
++	return 0;
++}
++
++static int tgt_vdev_create(struct tgt_device *device)
++{
++	struct tgt_vdev *vdev = device-&gt;dt_data;
++	struct inode *inode;
++	int err;
++
++	err = open_file(vdev, device-&gt;fd);
++	if (err)
++		return err;
++
++	inode = vdev-&gt;filp-&gt;f_dentry-&gt;d_inode;
++	if (S_ISREG(inode-&gt;i_mode))
++		;
++	else if (S_ISBLK(inode-&gt;i_mode))
++		inode = inode-&gt;i_bdev-&gt;bd_inode;
++	else {
++		err = -EINVAL;
++		goto out;
++	}
++
++	device-&gt;size = inode-&gt;i_size;
++	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
++
++	return 0;
++out:
++	fput(vdev-&gt;filp);
++	return err;
++}
++
++/*
++ * TODO: We need to redo our scatter lists so they take into account
++ * this common usage, but also not violate HW limits
++ */
++static struct iovec* sg_to_iovec(struct scatterlist *sg, int sg_count)
++{
++	struct iovec* iov;
++	int i;
++
++	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
++	if (!iov)
++		return NULL;
++
++	for (i = 0; i &lt; sg_count; i++) {
++		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
++		iov[i].iov_len = sg[i].length;
++	}
++
++	return iov;
++}
++
++static int tgt_vdev_queue(struct tgt_device *device, struct tgt_cmnd *cmnd)
++{
++	struct tgt_vdev *vdev = device-&gt;dt_data;
++	ssize_t size;
++	struct iovec *iov;
++	loff_t pos = cmnd-&gt;offset;
++	int err = 0;
++
++	if (cmnd-&gt;bufflen + pos &gt; device-&gt;size)
++		return -EOVERFLOW;
++
++	iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
++	if (!iov)
++		return -ENOMEM;
++
++	if (cmnd-&gt;rw == READ)
++		size = generic_file_readv(vdev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
++	else
++		size = generic_file_writev(vdev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
++
++	kfree(iov);
++
++/* not yet used
++	if (sync)
++		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
++				      (size_t) cmnd-&gt;bufflen);
++*/
++	if ((size != cmnd-&gt;bufflen) || err)
++		return -EIO;
++	else
++		return 0;
++}
++
++static struct tgt_device_template tgt_vdev = {
++	.name = &quot;tgt_vdev&quot;,
++	.module = THIS_MODULE,
++	.create = tgt_vdev_create,
++	.destroy = tgt_vdev_destroy,
++	.queue_cmnd = tgt_vdev_queue,
++	.priv_data_size = sizeof(struct tgt_vdev),
++};
++
++static int __init tgt_vdev_init(void)
++{
++	return tgt_device_template_register(&amp;tgt_vdev);
++}
++
++static void __exit tgt_vdev_exit(void)
++{
++	tgt_device_template_unregister(&amp;tgt_vdev);
++}
++
++module_init(tgt_vdev_init);
++module_exit(tgt_vdev_exit);
++MODULE_LICENSE(&quot;GPL&quot;);
+
+Deleted: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-09-20 03:15:02 UTC (rev 83)
++++ trunk/kernel/tgt_vsd.c	2005-09-20 04:23:45 UTC (rev 84)
+@@ -1,143 +0,0 @@
+-/*
+- * Target virtual device functions
+- *
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#include &lt;linux/types.h&gt;
+-#include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/uio.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;linux/file.h&gt;
+-#include &lt;linux/writeback.h&gt;
+-
+-#include &lt;tgt.h&gt;
+-#include &lt;tgt_device.h&gt;
+-
+-struct tgt_vsd_dev {
+-	struct file *filp;
+-};
+-
+-static void tgt_vsd_destroy(struct tgt_device *device)
+-{
+-	struct tgt_vsd_dev *vsddev = device-&gt;dt_data;
+-	fput(vsddev-&gt;filp);
+-}
+-
+-static int open_file(struct tgt_vsd_dev *vsddev, int fd)
+-{
+-	struct file *filp;
+-
+-	filp = fget(fd);
+-	if (!filp) {
+-		printk(&quot;Could not get fd %d\n&quot;, fd);
+-		return -EINVAL;
+-	}
+-
+-	vsddev-&gt;filp = filp;
+-	return 0;
+-}
+-
+-static int tgt_vsd_create(struct tgt_device *device)
+-{
+-	struct tgt_vsd_dev *vsddev = device-&gt;dt_data;
+-	struct inode *inode;
+-	int err;
+-
+-	err = open_file(vsddev, device-&gt;fd);
+-	if (err)
+-		return err;
+-
+-	inode = vsddev-&gt;filp-&gt;f_dentry-&gt;d_inode;
+-	if (S_ISREG(inode-&gt;i_mode))
+-		;
+-	else if (S_ISBLK(inode-&gt;i_mode))
+-		inode = inode-&gt;i_bdev-&gt;bd_inode;
+-	else {
+-		err = -EINVAL;
+-		goto out;
+-	}
+-
+-	device-&gt;size = inode-&gt;i_size;
+-	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+-
+-	return 0;
+-out:
+-	fput(vsddev-&gt;filp);
+-	return err;
+-}
+-
+-static struct iovec* sg_to_iovec(struct scatterlist *sg, int sg_count)
+-{
+-	struct iovec* iov;
+-	int i;
+-
+-	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
+-	if (!iov)
+-		return NULL;
+-
+-	for (i = 0; i &lt; sg_count; i++) {
+-		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
+-		iov[i].iov_len = sg[i].length;
+-	}
+-
+-	return iov;
+-}
+-
+-static int tgt_vsd_queue(struct tgt_device *device, struct tgt_cmnd *cmnd)
+-{
+-	struct tgt_vsd_dev *vsddev = device-&gt;dt_data;
+-	ssize_t size;
+-	struct iovec *iov;
+-	loff_t pos = cmnd-&gt;offset;
+-	int err = 0;
+-
+-	if (cmnd-&gt;bufflen + pos &gt; device-&gt;size)
+-		return -EOVERFLOW;
+-
+-	iov = sg_to_iovec(cmnd-&gt;sg, cmnd-&gt;sg_count);
+-	if (!iov)
+-		return -ENOMEM;
+-
+-	if (cmnd-&gt;rw == READ)
+-		size = generic_file_readv(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-	else
+-		size = generic_file_writev(vsddev-&gt;filp, iov, cmnd-&gt;sg_count, &amp;pos);
+-
+-	kfree(iov);
+-
+-/* not yet used
+-	if (sync)
+-		err = sync_page_range(inode, inode-&gt;i_mapping, pos,
+-				      (size_t) cmnd-&gt;bufflen);
+-*/
+-	if ((size != cmnd-&gt;bufflen) || err)
+-		return -EIO;
+-	else
+-		return 0;
+-}
+-
+-static struct tgt_device_template tgt_vsd = {
+-	.name = &quot;tgt_vsd&quot;,
+-	.module = THIS_MODULE,
+-	.create = tgt_vsd_create,
+-	.destroy = tgt_vsd_destroy,
+-	.queue_cmnd = tgt_vsd_queue,
+-	.priv_data_size = sizeof(struct tgt_vsd_dev),
+-};
+-
+-static int __init tgt_vsd_init(void)
+-{
+-	return tgt_device_template_register(&amp;tgt_vsd);
+-}
+-
+-static void __exit tgt_vsd_exit(void)
+-{
+-	tgt_device_template_unregister(&amp;tgt_vsd);
+-}
+-
+-module_init(tgt_vsd_init);
+-module_exit(tgt_vsd_exit);
+-MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000076.html">[Stgt-svn] r83 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000078.html">[Stgt-svn] r85 - in trunk: include iscsi/include iscsi/kernel iscsi/usr kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#77">[ date ]</a>
+              <a href="thread.html#77">[ thread ]</a>
+              <a href="subject.html#77">[ subject ]</a>
+              <a href="author.html#77">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

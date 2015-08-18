@@ -1,0 +1,87 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r225 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r225%20-%20trunk/usr&In-Reply-To=%3C200601061025.k06APSIe029449%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000213.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r225 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r225%20-%20trunk/usr&In-Reply-To=%3C200601061025.k06APSIe029449%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r225 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Jan  6 11:25:28 CET 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000213.html">[Stgt-svn] r226 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#212">[ date ]</a>
+              <a href="thread.html#212">[ thread ]</a>
+              <a href="subject.html#212">[ subject ]</a>
+              <a href="author.html#212">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-01-06 11:25:27 +0100 (Fri, 06 Jan 2006)
+New Revision: 225
+
+Modified:
+   trunk/usr/netlink.c
+Log:
+Stop binding a netlink socket.
+
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-12-30 15:51:50 UTC (rev 224)
++++ trunk/usr/netlink.c	2006-01-06 10:25:27 UTC (rev 225)
+@@ -260,12 +260,6 @@
+ 	src_addr.nl_pid = getpid();
+ 	src_addr.nl_groups = 0; /* not in mcast groups */
+ 
+-	err = bind(fd, (struct sockaddr *)&amp;src_addr, sizeof(src_addr));
+-	if (err &lt; 0) {
+-		eprintf(&quot;%d\n&quot;, fd);
+-		goto out;
+-	}
+-
+ 	memset(&amp;dest_addr, 0, sizeof(dest_addr));
+ 	dest_addr.nl_family = AF_NETLINK;
+ 	dest_addr.nl_pid = 0; /* kernel */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000213.html">[Stgt-svn] r226 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#212">[ date ]</a>
+              <a href="thread.html#212">[ thread ]</a>
+              <a href="subject.html#212">[ subject ]</a>
+              <a href="author.html#212">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

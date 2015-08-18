@@ -1,0 +1,123 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r109 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r109%20-%20trunk/usr&In-Reply-To=%3C200509270349.j8R3n86C025540%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000102.html">
+   
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r109 - trunk/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r109%20-%20trunk/usr&In-Reply-To=%3C200509270349.j8R3n86C025540%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r109 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Sep 27 05:49:08 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000102.html">[Stgt-svn] r108 - in trunk: iscsi/kernel kernel
+</A></li>
+        
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#103">[ date ]</a>
+              <a href="thread.html#103">[ thread ]</a>
+              <a href="subject.html#103">[ subject ]</a>
+              <a href="author.html#103">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-27 05:49:05 +0200 (Tue, 27 Sep 2005)
+New Revision: 109
+
+Modified:
+   trunk/usr/tgtadm.c
+Log:
+Remove old ietadm stuff from tgtadm.
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2005-09-27 03:21:21 UTC (rev 108)
++++ trunk/usr/tgtadm.c	2005-09-27 03:49:05 UTC (rev 109)
+@@ -1,11 +1,16 @@
+ /*
+- * ietadm - manage iSCSI Enterprise Target software.
++ * tgtadm - manage Target Framework software.
+  *
+- * (C) 2004 - 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- *
++ * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  * This code is licenced under the GPL.
+  */
+ 
++/*
++ * This is just taken from ietadm. Possibly, we need to redesign the
++ * greater part of this to handle every target driver.
++ */
++
+ #include &lt;ctype.h&gt;
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+@@ -48,7 +53,7 @@
+ 	else {
+ 		printf(&quot;Usage: %s [OPTION]\n&quot;, program_name);
+ 		printf(&quot;\
+-iSCSI Enterprise Target Administration Utility.\n\
++Linux Target Framework Administration Utility.\n\
+ \n\
+   --op new --tid=[id] --params [name]\n\
+                         add a new target with [id]. [id] must not be zero.\n\
+@@ -71,9 +76,8 @@
+                         automatically.\n\
+   --op delete           stop all activity.\n\
+   --op update --tid=[id] --params=key1=value1,key2=value2,...\n\
+-                        change iSCSI IET target parameters of specific\n\
+-                        target with [id]. You can use parameters in ietd.conf\n\
+-                        as a key.\n\
++                        change the target parameters of specific\n\
++                        target with [id].\n\
+   --op new --tid=[id] --user --params=[user]=[name],Password=[pass]\n\
+                         add a new account with [pass] for specific target.\n\
+                         [user] could be [IncomingUser] or [OutgoingUser].\n\
+@@ -88,7 +92,7 @@
+   --version             display version and exit\n\
+   --help                display this help and exit\n\
+ \n\
+-Report bugs to &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">iscsitarget-devel at sourceforge.net</A>&gt;.\n&quot;);
++Report bugs to &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">stgt-devel at lists.berlios.de</A>&gt;.\n&quot;);
+ 	}
+ 	exit(status == 0 ? 0 : -1);
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000102.html">[Stgt-svn] r108 - in trunk: iscsi/kernel kernel
+</A></li>
+	
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#103">[ date ]</a>
+              <a href="thread.html#103">[ thread ]</a>
+              <a href="subject.html#103">[ subject ]</a>
+              <a href="author.html#103">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

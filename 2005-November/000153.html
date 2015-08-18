@@ -1,0 +1,168 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r159 - trunk/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r159%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051005.jA5A51WB007720%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000152.html">
+   <LINK REL="Next"  HREF="000154.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r159 - trunk/istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r159%20-%20trunk/istgt/kernel&In-Reply-To=%3C200511051005.jA5A51WB007720%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r159 - trunk/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 11:05:01 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000152.html">[Stgt-svn] r158 - trunk/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000154.html">[Stgt-svn] r160 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#153">[ date ]</a>
+              <a href="thread.html#153">[ thread ]</a>
+              <a href="subject.html#153">[ subject ]</a>
+              <a href="author.html#153">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 11:05:00 +0100 (Sat, 05 Nov 2005)
+New Revision: 159
+
+Modified:
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/nthread.c
+Log:
+Minor cleanups of iscsi.h (kill state in struct istgt_cmd because it
+is not used at all and rename write_tcmnd write_sg).
+
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-05 09:44:00 UTC (rev 158)
++++ trunk/istgt/kernel/iscsi.c	2005-11-05 10:05:00 UTC (rev 159)
+@@ -135,9 +135,9 @@
+ 	LIST_HEAD(head);
+ 
+ 	if (!list_empty(&amp;cmnd-&gt;list)) {
+-		eprintk(&quot;%x %x %x %x %lx %lx %u %u %u %u %u %u %u %d %d\n&quot;,
++		eprintk(&quot;%x %x %x %x %lx %u %u %u %u %u %u %u %d %d\n&quot;,
+ 			cmd_itt(cmnd), cmd_ttt(cmnd), cmd_opcode(cmnd),
+-			cmd_scsicode(cmnd), cmnd-&gt;state, cmnd-&gt;flags,
++			cmd_scsicode(cmnd), cmnd-&gt;flags,
+ 			cmnd-&gt;r2t_sn, cmnd-&gt;r2t_length, cmnd-&gt;is_unsolicited_data,
+ 			cmnd-&gt;target_task_tag, cmnd-&gt;outstanding_r2t,
+ 			cmnd-&gt;hdigest, cmnd-&gt;ddigest,
+@@ -344,16 +344,15 @@
+ 	if (!list_empty(&amp;cmnd-&gt;list)) {
+ 		struct iscsi_cmd *req = cmd_hdr(cmnd);
+ 
+-		eprintk(&quot;cmnd %p still on some list?, %x, %x, %x, %x, %x, %x, %x %lx %lx\n&quot;,
++		eprintk(&quot;cmnd %p still on some list?, %x %x %x %x %x %x %x %lx\n&quot;,
+ 			cmnd, req-&gt;opcode, req-&gt;cdb[0], req-&gt;flags, req-&gt;itt,
+-			be32_to_cpu(req-&gt;data_length),
+-			req-&gt;cmdsn, be32_to_cpu(cmnd-&gt;pdu.datasize), cmnd-&gt;state, conn-&gt;state);
++			be32_to_cpu(req-&gt;data_length), req-&gt;cmdsn,
++			be32_to_cpu(cmnd-&gt;pdu.datasize), conn-&gt;state);
+ 
+ 		if (cmnd-&gt;req) {
+ 			struct iscsi_cmd *req = cmd_hdr(cmnd-&gt;req);
+ 			eprintk(&quot;%p %x %u\n&quot;, req, req-&gt;opcode, req-&gt;cdb[0]);
+ 		}
+-		dump_stack();
+ 		BUG();
+ 	}
+ 	list_del(&amp;cmnd-&gt;list);
+@@ -1304,7 +1303,7 @@
+ /* 	assert(offset &lt;= sg-&gt;offset + tio-&gt;size); */
+ /* 	assert(offset + size &lt;= tio-&gt;offset + tio-&gt;size); */
+ 
+-	conn-&gt;write_tcmnd = sg;
++	conn-&gt;write_sg = sg;
+ 	conn-&gt;write_offset = offset;
+ 	conn-&gt;write_size += size;
+ }
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-11-05 09:44:00 UTC (rev 158)
++++ trunk/istgt/kernel/iscsi.h	2005-11-05 10:05:00 UTC (rev 159)
+@@ -145,7 +145,7 @@
+ 	struct iovec write_iov[ISCSI_CONN_IOV_MAX];
+ 	struct iovec *write_iop;
+ 
+-	struct scatterlist *write_tcmnd;
++	struct scatterlist *write_sg;
+ 
+ 	uint32_t write_size;
+ 	uint32_t write_offset;
+@@ -165,7 +165,6 @@
+ struct istgt_cmd {
+ 	struct list_head list;
+ 	struct list_head conn_list;
+-	unsigned long state;
+ 	unsigned long flags;
+ 	struct iscsi_conn *conn;
+ 
+
+Modified: trunk/istgt/kernel/nthread.c
+===================================================================
+--- trunk/istgt/kernel/nthread.c	2005-11-05 09:44:00 UTC (rev 158)
++++ trunk/istgt/kernel/nthread.c	2005-11-05 10:05:00 UTC (rev 159)
+@@ -343,8 +343,9 @@
+ 		}
+ 	}
+ 
+-	if (!(sg = conn-&gt;write_tcmnd)) {
+-		eprintk(&quot;%s\n&quot;, &quot;warning data missing!&quot;);
++	sg = conn-&gt;write_sg;
++	if (!sg) {
++		eprintk(&quot;warning data missing!\n&quot;);
+ 		return 0;
+ 	}
+ 	offset = conn-&gt;write_offset;
+@@ -370,7 +371,7 @@
+ 				goto err;
+ 			}
+ 			if (res == size) {
+-				conn-&gt;write_tcmnd = NULL;
++				conn-&gt;write_sg = NULL;
+ 				conn-&gt;write_size = 0;
+ 				return saved_size;
+ 			}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000152.html">[Stgt-svn] r158 - trunk/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000154.html">[Stgt-svn] r160 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#153">[ date ]</a>
+              <a href="thread.html#153">[ thread ]</a>
+              <a href="subject.html#153">[ subject ]</a>
+              <a href="author.html#153">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

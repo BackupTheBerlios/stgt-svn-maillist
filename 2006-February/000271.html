@@ -1,0 +1,640 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r284 - in branches/use-scsi-ml: kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r284%20-%20in%20branches/use-scsi-ml%3A%20kernel%20usr&In-Reply-To=%3C200602080733.k187XVLR003641%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000270.html">
+   <LINK REL="Next"  HREF="000272.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r284 - in branches/use-scsi-ml: kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r284%20-%20in%20branches/use-scsi-ml%3A%20kernel%20usr&In-Reply-To=%3C200602080733.k187XVLR003641%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r284 - in branches/use-scsi-ml: kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Wed Feb  8 08:33:31 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000270.html">[Stgt-svn] r283 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000272.html">[Stgt-svn] r285 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#271">[ date ]</a>
+              <a href="thread.html#271">[ thread ]</a>
+              <a href="subject.html#271">[ subject ]</a>
+              <a href="author.html#271">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-08 08:33:25 +0100 (Wed, 08 Feb 2006)
+New Revision: 284
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_if.c
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+   branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+   branches/use-scsi-ml/usr/netlink.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Go back to netlink. I'm not sure it's temporary or permanent.
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_if.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/kernel/scsi_tgt_if.c	2006-02-08 07:33:25 UTC (rev 284)
+@@ -21,7 +21,6 @@
+  */
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/file.h&gt;
+-#include &lt;linux/if_packet.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;net/af_packet.h&gt;
+ #include &lt;net/tcp.h&gt;
+@@ -36,48 +35,51 @@
+ 
+ static int tgtd_pid;
+ static struct sock *nl_sk;
+-static struct socket *pk_sock;
+ 
+-static void tpacket_done(struct sock *sk, struct tpacket_hdr *h, int len)
++static int send_event_res(uint16_t type, struct tgt_event *p,
++			  void *data, int dlen, gfp_t flags, pid_t pid)
+ {
+-	h-&gt;tp_status = TP_STATUS_USER;
+-	mb();
+-	{
+-		struct page *p_start, *p_end;
+-		char *h_end = (char *) h + TPACKET_HDRLEN + len - 1;
++	struct tgt_event *ev;
++	struct nlmsghdr *nlh;
++	struct sk_buff *skb;
++	uint32_t len;
+ 
+-		p_start = virt_to_page(h);
+-		p_end = virt_to_page(h_end);
+-		while (p_start &lt;= p_end) {
+-			flush_dcache_page(p_start);
+-			p_start++;
+-		}
+-	}
+-	sk-&gt;sk_data_ready(sk, 0);
++	len = NLMSG_SPACE(sizeof(*ev) + dlen);
++	skb = alloc_skb(len, flags);
++	if (!skb)
++		return -ENOMEM;
++
++	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
++
++	ev = NLMSG_DATA(nlh);
++	memcpy(ev, p, sizeof(*ev));
++	if (dlen)
++		memcpy(ev-&gt;data, data, dlen);
++
++	return netlink_unicast(nl_sk, skb, pid, 0);
+ }
+ 
+-int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun)
++int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t gfp_mask)
+ {
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-	struct sock *sk;
+-	struct tpacket_hdr *h;
++	struct sk_buff *skb;
++	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
+ 	struct tgt_cmd *tcmd;
++	int err, len;
+ 
+-	if (!pk_sock) {
+-		printk(KERN_INFO &quot;Host%d not connected\n&quot;, shost-&gt;host_no);
+-		return -ENOTCONN;
+-	}
+-	sk = pk_sock-&gt;sk;
++	len = NLMSG_SPACE(sizeof(*ev) + sizeof(struct tgt_cmd));
++	/*
++	 * TODO: add MAX_COMMAND_SIZE to ev and add mempool
++	 */
++	skb = alloc_skb(NLMSG_SPACE(len), gfp_mask);
++	if (!skb)
++		return -ENOMEM;
+ 
+-	h = packet_socket_frame(sk);
+-	if (IS_ERR(h)) {
+-		eprintk(&quot;Queue is full\n&quot;);
+-		return PTR_ERR(h);
+-	}
++	nlh = __nlmsg_put(skb, tgtd_pid, 0, TGT_KEVENT_CMD_REQ,
++			  len - sizeof(*nlh), 0);
+ 
+-	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+-	h-&gt;tp_len = TGT_KEVENT_CMD_REQ;
++	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;k.cmd_req.host_no = shost-&gt;host_no;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;request-&gt;tag;
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;request_bufflen;
+@@ -92,75 +94,28 @@
+ 	memcpy(tcmd-&gt;scb, cmd-&gt;cmnd, sizeof(tcmd-&gt;scb));
+ 	memcpy(tcmd-&gt;lun, lun, sizeof(struct scsi_lun));
+ 
+-	tpacket_done(sk, h, sizeof(struct tgt_event) + sizeof(struct tgt_cmd));
+-	return 0;
++	err = netlink_unicast(nl_sk, skb, tgtd_pid, 0);
++	if (err &lt; 0)
++		printk(KERN_ERR &quot;scsi_tgt_uspace_send: could not send skb %d\n&quot;,
++		       err);
++	return err;
+ }
+ 
+ int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+ {
+ 	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-	struct sock *sk;
+-	struct tgt_event *ev;
+-	struct tpacket_hdr *h;
++	struct tgt_event ev;
++	char dummy[sizeof(struct tgt_cmd)];
+ 
+-	if (!pk_sock) {
+-		printk(KERN_INFO &quot;Host%d not connected\n&quot;,
+-		       shost-&gt;host_no);
+-		return -ENOTCONN;
+-	}
+-	sk = pk_sock-&gt;sk;
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.cmd_done.host_no = shost-&gt;host_no;
++	ev.k.cmd_done.cid = cmd-&gt;request-&gt;tag;
++	ev.k.cmd_done.result = cmd-&gt;result;
+ 
+-	h = packet_socket_frame(sk);
+-	if (IS_ERR(h)) {
+-		eprintk(&quot;Queue is full\n&quot;);
+-		return PTR_ERR(h);
+-	}
+-
+-	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+-	h-&gt;tp_len = TGT_KEVENT_CMD_DONE;
+-	ev-&gt;k.cmd_done.host_no = shost-&gt;host_no;
+-	ev-&gt;k.cmd_done.cid = cmd-&gt;request-&gt;tag;
+-	ev-&gt;k.cmd_done.result = cmd-&gt;result;
+-
+-	tpacket_done(sk, h, sizeof(struct tgt_event));
+-	return 0;
++	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, dummy, sizeof(dummy),
++			      gfp_mask, tgtd_pid);
+ }
+ 
+-static int send_event_res(uint16_t type, struct tgt_event *p,
+-			  void *data, int dlen, gfp_t flags, pid_t pid)
+-{
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	struct sk_buff *skb;
+-	uint32_t len;
+-
+-	len = NLMSG_SPACE(sizeof(*ev) + dlen);
+-	skb = alloc_skb(len, flags);
+-	if (!skb)
+-		return -ENOMEM;
+-
+-	nlh = __nlmsg_put(skb, pid, 0, type, len - sizeof(*nlh), 0);
+-
+-	ev = NLMSG_DATA(nlh);
+-	memcpy(ev, p, sizeof(*ev));
+-	if (dlen)
+-		memcpy(ev-&gt;data, data, dlen);
+-
+-	return netlink_unicast(nl_sk, skb, pid, 0);
+-}
+-
+-static int tgtd_bind(struct tgt_event *ev)
+-{
+-	int err, pk_fd = ev-&gt;u.tgtd_bind.pk_fd;
+-
+-	pk_sock = sockfd_lookup(pk_fd, &amp;err);
+-	if (!pk_sock) {
+-		eprintk(&quot;Invalid fd %d\n&quot;, pk_fd);
+-		return err;
+-	}
+-	return 0;
+-}
+-
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	struct tgt_event *ev = NLMSG_DATA(nlh);
+@@ -172,7 +127,6 @@
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_TGTD_BIND:
+ 		tgtd_pid = NETLINK_CREDS(skb)-&gt;pid;
+-		err = tgtd_bind(ev);
+ 		break;
+ 	case TGT_UEVENT_CMD_RES:
+ 		/* TODO: handle multiple cmds in one event */
+@@ -248,8 +202,6 @@
+ void __exit scsi_tgt_if_exit(void)
+ {
+ 	sock_release(nl_sk-&gt;sk_socket);
+-	if (pk_sock)
+-		fput(pk_sock-&gt;file);
+ }
+ 
+ int __init scsi_tgt_if_init(void)
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-08 07:33:25 UTC (rev 284)
+@@ -117,7 +117,7 @@
+ 			break;
+ 
+ 		spin_unlock_irq(q-&gt;queue_lock);
+-		if (scsi_tgt_uspace_send(cmd, tcmd-&gt;lun) &lt; 0)
++		if (scsi_tgt_uspace_send(cmd, tcmd-&gt;lun, GFP_ATOMIC) &lt; 0)
+ 			goto requeue;
+ 		spin_lock_irq(q-&gt;queue_lock);
+ 	}
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_priv.h
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/kernel/scsi_tgt_priv.h	2006-02-08 07:33:25 UTC (rev 284)
+@@ -18,7 +18,7 @@
+ extern void scsi_tgt_if_exit(void);
+ extern int scsi_tgt_if_init(void);
+ 
+-extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun);
++extern int scsi_tgt_uspace_send(struct scsi_cmnd *cmd, struct scsi_lun *lun, gfp_t flags);
+ extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, gfp_t flags);
+ extern int scsi_tgt_kspace_exec(int host_no, u32 cid, int result, u32 len,
+ 				u64 offset, unsigned long uaddr, u8 rw,
+
+Modified: branches/use-scsi-ml/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/usr/netlink.c	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/usr/netlink.c	2006-02-08 07:33:25 UTC (rev 284)
+@@ -21,8 +21,6 @@
+ #include &lt;sys/signal.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;asm/types.h&gt;
+-#include &lt;linux/if_ether.h&gt;
+-#include &lt;linux/if_packet.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+@@ -51,7 +49,7 @@
+ 		      sizeof(daddr));
+ }
+ 
+-static int __nl_read(int fd, void *data, int size, int flags)
++int __nl_read(int fd, void *data, int size, int flags)
+ {
+ 	struct sockaddr_nl saddr;
+ 	socklen_t slen = sizeof(saddr);
+@@ -121,50 +119,13 @@
+ 	return err;
+ }
+ 
+-static int ringbuf_init(int pk_fd, struct ringbuf_info *ri)
++static int tgtd_bind(int nl_fd)
+ {
+-	struct tpacket_req req;
+ 	int err;
+-	socklen_t len = sizeof(req);
+-	unsigned int size = RINGBUF_SIZE;
+-	void *addr;
+-
+-	req.tp_frame_size = TPACKET_ALIGN(TPACKET_HDRLEN +
+-					  sizeof(struct tgt_event) +
+-					  sizeof(struct tgt_cmd));
+-	req.tp_block_size = size;
+-	req.tp_frame_nr = req.tp_block_size / req.tp_frame_size;
+-	req.tp_block_nr = 1;
+-
+-	err = setsockopt(pk_fd, SOL_PACKET, PACKET_RX_RING, &amp;req, len);
+-	dprintf(&quot;%d %u %u\n&quot;, errno, req.tp_frame_size, req.tp_frame_nr);
+-	if (err &lt; 0)
+-		return err;
+-
+-	addr = mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED, pk_fd, 0);
+-
+-	ri-&gt;frame_size = req.tp_frame_size;
+-	ri-&gt;frame_nr = req.tp_frame_nr;
+-	ri-&gt;addr = addr;
+-	ri-&gt;idx = 0;
+-
+-	dprintf(&quot;%p\n&quot;,addr);
+-
+-	if (addr == MAP_FAILED) {
+-		eprintf(&quot;fail to mmap %d\n&quot;, errno);
+-		return -EINVAL;
+-	} else
+-		return 0;
+-}
+-
+-static int tgtd_bind(int nl_fd, int pk_fd)
+-{
+-	int err;
+ 	struct tgt_event *ev;
+ 	char sbuf[NL_BUFSIZE], rbuf[NL_BUFSIZE];
+ 
+ 	ev = (struct tgt_event *) NLMSG_DATA(sbuf);
+-	ev-&gt;u.tgtd_bind.pk_fd = pk_fd;
+ 	err = nl_cmd_call(nl_fd, TGT_UEVENT_TGTD_BIND, sbuf,
+ 			  NLMSG_SPACE(sizeof(struct tgt_event)),
+ 			  rbuf, NL_BUFSIZE);
+@@ -178,9 +139,9 @@
+ 	return 0;
+ }
+ 
+-int nl_init(int *nfd, int *pfd, struct ringbuf_info *ri)
++int nl_init(void)
+ {
+-	int err, nl_fd, pk_fd;
++	int err, nl_fd;
+ 
+ 	nl_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_TGT);
+ 	if (nl_fd &lt; 0) {
+@@ -188,21 +149,9 @@
+ 		exit(1);
+ 	}
+ 
+-	pk_fd = socket(PF_PACKET, SOCK_RAW, 0);
+-	if (pk_fd &lt; 0) {
+-		eprintf(&quot;Fail to create the packet socket %d\n&quot;, errno);
+-		exit(1);
+-	}
+-
+-	err = ringbuf_init(pk_fd, ri);
++	err = tgtd_bind(nl_fd);
+ 	if (err)
+ 		exit(1);
+ 
+-	err = tgtd_bind(nl_fd, pk_fd);
+-	if (err)
+-		exit(1);
+-
+-	*nfd = nl_fd;
+-	*pfd = pk_fd;
+-	return 0;
++	return nl_fd;
+ }
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/usr/target.c	2006-02-08 07:33:25 UTC (rev 284)
+@@ -22,8 +22,6 @@
+ #include &lt;sys/stat.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+-#include &lt;linux/if_ether.h&gt;
+-#include &lt;linux/if_packet.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+@@ -428,20 +426,49 @@
+ 	free(cmd);
+ }
+ 
+-void pk_event_handle(struct tgtd_info *ti, int nl_fd)
++static int set_pdu_size(int fd)
+ {
+-	struct ringbuf_info *ri = &amp;ti-&gt;ri;
+-	struct tpacket_hdr *h;
++	struct nlmsghdr *nlh;
++	char buf[1024];
++	int err;
++
++peek_again:
++	err = __nl_read(fd, buf, sizeof(buf), MSG_PEEK);
++	if (err &lt; 0) {
++		if (errno == EAGAIN || errno == EINTR)
++			goto peek_again;
++		return err;
++	}
++
++	nlh = (struct nlmsghdr *) buf;
++
++	dprintf(&quot;%d\n&quot;, nlh-&gt;nlmsg_len);
++
++	return nlh-&gt;nlmsg_len;
++}
++
++void nl_event_handle(int nl_fd)
++{
++	struct nlmsghdr *nlh;
+ 	struct tgt_event *ev;
+-retry:
+-	h = (struct tpacket_hdr *) (ri-&gt;addr + ri-&gt;idx * ri-&gt;frame_size);
++	static int pdu_size;
++	char buf[1024];
++	int err;
+ 
+-	dprintf(&quot;%x %u %p\n&quot;, h-&gt;tp_status, ri-&gt;idx, ri-&gt;addr);
+-	if (!(h-&gt;tp_status &amp; TP_STATUS_USER))
+-		return;
++	if (!pdu_size)
++		pdu_size = set_pdu_size(nl_fd);
+ 
+-	ev = (struct tgt_event *) ((char *) h + TPACKET_HDRLEN);
+-	switch (h-&gt;tp_len) {
++	err = __nl_read(nl_fd, buf, pdu_size, MSG_WAITALL);
++
++	nlh = (struct nlmsghdr *) buf;
++	ev = (struct tgt_event *) NLMSG_DATA(nlh);
++
++	if (nlh-&gt;nlmsg_len != pdu_size) {
++		eprintf(&quot;unexpected len %d %d\n&quot;, nlh-&gt;nlmsg_len, pdu_size);
++		exit(1);
++	}
++
++	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_KEVENT_CMD_REQ:
+ 		cmd_queue(ev, nl_fd);
+ 		break;
+@@ -449,14 +476,9 @@
+ 		cmd_done(ev);
+ 		break;
+ 	default:
+-		eprintf(&quot;unknown event %u\n&quot;, h-&gt;tp_len);
++		eprintf(&quot;unknown event %u\n&quot;, nlh-&gt;nlmsg_type);
+ 		exit(1);
+ 	}
+-
+-	ri-&gt;idx = ri-&gt;idx == ri-&gt;frame_nr - 1 ? 0: ri-&gt;idx + 1;
+-	h-&gt;tp_status &amp;= ~TP_STATUS_USER;
+-
+-	goto retry;
+ }
+ 
+ int tgt_target_bind(int tid, int host_no)
+
+Modified: branches/use-scsi-ml/usr/tgtd.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.c	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/usr/tgtd.c	2006-02-08 07:33:25 UTC (rev 284)
+@@ -28,7 +28,6 @@
+ 
+ enum {
+ 	POLL_NL, /* netlink socket between kernel and user space */
+-	POLL_PK, /* packet socket between kernel and user space */
+ 	POLL_UD, /* unix domain socket for tgtdadm */
+ };
+ 
+@@ -113,7 +112,7 @@
+ 
+ /* TODO: rewrite makeshift poll code */
+ 
+-static void event_loop(struct tgtd_info *ti, struct pollfd *pfd, int nr_dls)
++static void event_loop(struct driver_info *dlinfo, struct pollfd *pfd, int nr_dls)
+ {
+ 	int err, i, poll_max = (nr_dls + 1) * POLLS_PER_DRV;
+ 	void (* fn)(struct pollfd *, int);
+@@ -128,17 +127,10 @@
+ 		}
+ 
+ 		if (pfd[POLL_NL].revents) {
+-			/* Currently, never happens. */
+-			eprintf(&quot;bug\n&quot;);
+-			exit(1);
++			nl_event_handle(pfd[POLL_NL].fd);
+ 			err--;
+ 		}
+ 
+-		if (pfd[POLL_PK].revents) {
+-			pk_event_handle(ti, pfd[POLL_NL].fd);
+-			err--;
+-		}
+-
+ 		if (pfd[POLL_UD].revents) {
+ 			ipc_event_handle(dlinfo, pfd[POLL_UD].fd);
+ 			err--;
+@@ -155,7 +147,7 @@
+ 	}
+ }
+ 
+-static struct pollfd * poll_init(int nr, int nl_fd, int pk_fd, int ud_fd)
++static struct pollfd * poll_init(int nr, int nl_fd, int ud_fd)
+ {
+ 	struct pollfd *pfd;
+ 	void (* fn)(struct pollfd *, int);
+@@ -169,8 +161,6 @@
+ 
+ 	pfd[POLL_NL].fd = nl_fd;
+ 	pfd[POLL_NL].events = POLLIN;
+-	pfd[POLL_PK].fd = pk_fd;
+-	pfd[POLL_PK].events = POLLIN;
+ 	pfd[POLL_UD].fd = ud_fd;
+ 	pfd[POLL_UD].events = POLLIN;
+ 
+@@ -185,11 +175,10 @@
+ 
+ int main(int argc, char **argv)
+ {
+-	struct tgtd_info ti;
+ 	struct pollfd *pfd;
+-	int ch, longindex, nr, err;
++	int ch, longindex, nr;
+ 	int is_daemon = 1, is_debug = 1;
+-	int nl_fd, pk_fd, ud_fd;
++	int nl_fd, ud_fd;
+ 
+ 	while ((ch = getopt_long(argc, argv, &quot;fd:vh&quot;, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+@@ -223,8 +212,8 @@
+ 	if (tgt_device_init())
+ 		exit(1);
+ 
+-	err = nl_init(&amp;nl_fd, &amp;pk_fd, &amp;ti.ri);
+-	if (err &lt; 0)
++	nl_fd = nl_init();
++	if (nl_fd &lt; 0)
+ 		exit(1);
+ 
+ 	ud_fd = ipc_open();
+@@ -235,9 +224,9 @@
+ 	if (nr &lt; nr)
+ 		exit(1);
+ 
+-	pfd = poll_init(nr, nl_fd, pk_fd, ud_fd);
++	pfd = poll_init(nr, nl_fd, ud_fd);
+ 
+-	event_loop(&amp;ti, pfd, nr);
++	event_loop(dlinfo, pfd, nr);
+ 
+ 	return 0;
+ }
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-07 09:06:41 UTC (rev 283)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-08 07:33:25 UTC (rev 284)
+@@ -8,19 +8,10 @@
+ #define	POLLS_PER_DRV	32
+ #define	RINGBUF_SIZE	(4096 * 8)
+ 
+-struct ringbuf_info {
+-	char *addr;
+-	uint32_t idx;
+-	uint32_t frame_size;
+-	uint32_t frame_nr;
+-};
+-
+-struct tgtd_info {
+-	struct ringbuf_info ri;
+-};
+-
+-extern int nl_init(int *, int *, struct ringbuf_info *);
++extern int nl_init(void);
+ extern int __nl_write(int fd, int type, char *data, int len);
++extern int __nl_read(int fd, void *data, int size, int flags);
++void nl_event_handle(int nl_fd);
+ 
+ extern int ipc_open(void);
+ extern void ipc_event_handle(struct driver_info *, int fd);
+@@ -32,8 +23,6 @@
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no);
+ 
+-extern void pk_event_handle(struct tgtd_info *ti, int nl_fd);
+-
+ extern uint64_t scsi_get_devid(uint8_t *pdu);
+ extern int scsi_cmd_process(int tid, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000270.html">[Stgt-svn] r283 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000272.html">[Stgt-svn] r285 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#271">[ date ]</a>
+              <a href="thread.html#271">[ thread ]</a>
+              <a href="subject.html#271">[ subject ]</a>
+              <a href="author.html#271">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

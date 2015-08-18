@@ -1,0 +1,319 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r701 - trunk/patches
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r701%20-%20trunk/patches&In-Reply-To=%3C200612240857.kBO8vZZe027489%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000687.html">
+   <LINK REL="Next"  HREF="000689.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r701 - trunk/patches</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r701%20-%20trunk/patches&In-Reply-To=%3C200612240857.kBO8vZZe027489%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r701 - trunk/patches">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Dec 24 09:57:35 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000687.html">[Stgt-svn] r700 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000689.html">[Stgt-svn] r702 - trunk/patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#688">[ date ]</a>
+              <a href="thread.html#688">[ thread ]</a>
+              <a href="subject.html#688">[ subject ]</a>
+              <a href="author.html#688">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-24 09:57:34 +0100 (Sun, 24 Dec 2006)
+New Revision: 701
+
+Added:
+   trunk/patches/aioepoll-2.6.20-rc2.diff
+Log:
+Add EPOLL patch for 2.6.20-rc2 (with aio_queue_work dealy disabled).
+
+
+Added: trunk/patches/aioepoll-2.6.20-rc2.diff
+===================================================================
+--- trunk/patches/aioepoll-2.6.20-rc2.diff	2006-12-20 12:48:49 UTC (rev 700)
++++ trunk/patches/aioepoll-2.6.20-rc2.diff	2006-12-24 08:57:34 UTC (rev 701)
+@@ -0,0 +1,242 @@
++diff --git a/fs/aio.c b/fs/aio.c
++index 5f577a6..b546104 100644
++--- a/fs/aio.c
+++++ b/fs/aio.c
++@@ -30,6 +30,7 @@ #include &lt;linux/aio.h&gt;
++ #include &lt;linux/highmem.h&gt;
++ #include &lt;linux/workqueue.h&gt;
++ #include &lt;linux/security.h&gt;
+++#include &lt;linux/eventpoll.h&gt;
++ 
++ #include &lt;asm/kmap_types.h&gt;
++ #include &lt;asm/uaccess.h&gt;
++@@ -802,6 +803,8 @@ static void aio_queue_work(struct kioctx
++ 		timeout = 1;
++ 	else
++ 		timeout = HZ/10;
+++
+++	timeout = 1;
++ 	queue_delayed_work(aio_wq, &amp;ctx-&gt;wq, timeout);
++ }
++ 
++@@ -1487,6 +1490,9 @@ static ssize_t aio_setup_iocb(struct kio
++ 		if (file-&gt;f_op-&gt;aio_fsync)
++ 			kiocb-&gt;ki_retry = aio_fsync;
++ 		break;
+++	case IOCB_CMD_EPOLL_WAIT:
+++		kiocb-&gt;ki_retry = eventpoll_aio_wait;
+++		break;
++ 	default:
++ 		dprintk(&quot;EINVAL: io_submit: no operation provided\n&quot;);
++ 		ret = -EINVAL;
++diff --git a/fs/eventpoll.c b/fs/eventpoll.c
++index 3ae644e..6b78ada 100644
++--- a/fs/eventpoll.c
+++++ b/fs/eventpoll.c
++@@ -35,6 +35,7 @@ #include &lt;linux/eventpoll.h&gt;
++ #include &lt;linux/mount.h&gt;
++ #include &lt;linux/bitops.h&gt;
++ #include &lt;linux/mutex.h&gt;
+++#include &lt;linux/aio.h&gt;
++ #include &lt;asm/uaccess.h&gt;
++ #include &lt;asm/system.h&gt;
++ #include &lt;asm/io.h&gt;
++@@ -642,6 +643,150 @@ eexit_1:
++ 	return error;
++ }
++ 
+++static void eventpoll_aio_timer(unsigned long data)
+++{
+++	struct kiocb *iocb = (struct kiocb *)data;
+++	struct timer_list *timer = (struct timer_list *)iocb-&gt;private;
+++	struct file *file = iocb-&gt;ki_filp;
+++	struct eventpoll *ep = (struct eventpoll *)file-&gt;private_data;
+++	unsigned long flags;
+++
+++	(void)del_timer(timer);
+++	write_lock_irqsave(&amp;ep-&gt;lock, flags);
+++	__wake_up_locked(&amp;ep-&gt;wq, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE);
+++	write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
+++}
+++
+++static int aio_epoll_cancel(struct kiocb *iocb, struct io_event *event)
+++{
+++	struct file *file = iocb-&gt;ki_filp;
+++	struct eventpoll *ep = (struct eventpoll *)file-&gt;private_data;
+++	int ret = -1;
+++	struct list_head *list;
+++	int seen = 0;
+++
+++	write_lock_irq(&amp;ep-&gt;lock);
+++
+++	if (iocb-&gt;private)
+++		del_timer((struct timer_list *)iocb-&gt;private);
+++	/*
+++	 *  We need to know whether the event was removed from the wait
+++	 *  queue in order to return the proper status to the cancellation
+++	 *  code.
+++	 */
+++	list = &amp;ep-&gt;wq.task_list;
+++
+++	do {
+++		struct list_head *next;
+++		if (list == &amp;iocb-&gt;ki_wait.task_list)
+++			seen++;
+++		next = list-&gt;next;
+++		if (next-&gt;prev != list) {
+++			seen += 2;
+++			break;
+++		}
+++		list = next;
+++	} while (list != &amp;ep-&gt;wq.task_list);
+++
+++	if (seen == 1) {
+++		__remove_wait_queue(&amp;ep-&gt;wq, &amp;iocb-&gt;ki_wait);
+++		ret = 0;
+++	}
+++	write_unlock_irq(&amp;ep-&gt;lock);
+++
+++	if (ret == 0) {
+++		/* successfully cancelled request */
+++		kfree(iocb-&gt;private);
+++		iocb-&gt;private = NULL;
+++		/* drop the i/o reference */
+++		aio_put_req(iocb);
+++	} else
+++		ret = -EAGAIN;
+++
+++	event-&gt;res = event-&gt;res2 = 0;
+++	/* drop the cancel reference */
+++	aio_put_req(iocb);
+++
+++	return ret;
+++}
+++
+++/*
+++ * iocb-&gt;ki_nbytes -- number of events
+++ * iocb-&gt;ki_pos    -- relative timeout in milliseconds
+++ * iocb-&gt;private   -- NULL first go;  after that, it's set to the the
+++ *                    absolute timeout in jiffies.
+++ */
+++ssize_t eventpoll_aio_wait(struct kiocb *iocb)
+++{
+++	struct file *file = iocb-&gt;ki_filp;
+++	ssize_t ret = -EINVAL;
+++	int relative_ms;
+++	unsigned long expires;
+++	unsigned long now;
+++	struct timer_list *timer;
+++
+++	if (!is_file_epoll(file) || iocb-&gt;ki_nbytes &gt; EP_MAX_EVENTS ||
+++	    iocb-&gt;ki_nbytes &lt;= 0)
+++		return -EINVAL;
+++
+++	if (!iocb-&gt;private) {
+++		/*
+++		 *  Note that we unconditionally allocate a timer, but we
+++		 *  only use it if a timeout was specified.  Otherwise, it
+++		 *  is just a holder for the &quot;infinite&quot; value.
+++		 */
+++		timer = kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+++		if (!timer)
+++			return -ENOMEM;
+++
+++		if ((long)iocb-&gt;ki_pos &lt; 0 || iocb-&gt;ki_pos &gt;= EP_MAX_MSTIMEO)
+++			expires = MAX_SCHEDULE_TIMEOUT;
+++		else
+++			expires = jiffies + msecs_to_jiffies(iocb-&gt;ki_pos);
+++
+++		init_timer(timer);
+++		timer-&gt;function = eventpoll_aio_timer;
+++		timer-&gt;data = (unsigned long)iocb;
+++		timer-&gt;expires = expires;
+++	} else {
+++		timer = (struct timer_list *)iocb-&gt;private;
+++		expires = timer-&gt;expires;
+++	}
+++
+++	now = jiffies;
+++	if (timer-&gt;expires == MAX_SCHEDULE_TIMEOUT)
+++		relative_ms = EP_MAX_MSTIMEO;
+++	else if (time_before(now, expires))
+++		relative_ms = jiffies_to_msecs(expires - now);
+++	else
+++		relative_ms = 0;
+++
+++	iocb-&gt;ki_cancel = aio_epoll_cancel;
+++	ret = ep_poll(file-&gt;private_data,
+++		      (struct epoll_event __user *)iocb-&gt;ki_buf,
+++		      iocb-&gt;ki_nbytes, relative_ms);
+++
+++	/*
+++	 *  If a timeout was specified, ep_poll returned retry, and we have
+++	 *  not yet registered a timer, go ahead and register one.
+++	 */
+++	if (ret == -EIOCBRETRY &amp;&amp; !iocb-&gt;private) {
+++		iocb-&gt;private = timer;
+++		add_timer(timer);
+++	}
+++
+++	/*
+++	 *  Did we get any events?
+++	 */
+++	if (ret &gt;= 0) {
+++		iocb-&gt;ki_cancel = NULL;
+++		(void)del_timer(timer);
+++		kfree(timer);
+++		iocb-&gt;private = NULL;
+++	}
+++
+++	return ret;
+++}
++ 
++ /*
++  * Implement the event wait interface for the eventpoll file. It is the kernel
++@@ -1564,6 +1709,12 @@ retry:
++ 
++ 	res = 0;
++ 	if (list_empty(&amp;ep-&gt;rdllist)) {
+++		if (in_aio() &amp;&amp; jtimeout) {
+++			__add_wait_queue(&amp;ep-&gt;wq, current-&gt;io_wait);
+++			res = -EIOCBRETRY;
+++			write_unlock_irqrestore(&amp;ep-&gt;lock, flags);
+++			goto out;
+++		}
++ 		/*
++ 		 * We don't have any available event to return to the caller.
++ 		 * We need to sleep here, and we will be wake up by
++@@ -1608,7 +1759,7 @@ retry:
++ 	if (!res &amp;&amp; eavail &amp;&amp;
++ 	    !(res = ep_events_transfer(ep, events, maxevents)) &amp;&amp; jtimeout)
++ 		goto retry;
++-
+++out:
++ 	return res;
++ }
++ 
++diff --git a/include/linux/aio_abi.h b/include/linux/aio_abi.h
++index e3ca0a4..292c811 100644
++--- a/include/linux/aio_abi.h
+++++ b/include/linux/aio_abi.h
++@@ -43,6 +43,7 @@ enum {
++ 	IOCB_CMD_NOOP = 6,
++ 	IOCB_CMD_PREADV = 7,
++ 	IOCB_CMD_PWRITEV = 8,
+++  	IOCB_CMD_EPOLL_WAIT = 9,
++ };
++ 
++ /* read() from /dev/aio returns these structures. */
++diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
++index 84cfa8b..ed04500 100644
++--- a/include/linux/eventpoll.h
+++++ b/include/linux/eventpoll.h
++@@ -62,6 +62,9 @@ static inline void eventpoll_init_file(s
++ /* Used to release the epoll bits inside the &quot;struct file&quot; */
++ void eventpoll_release_file(struct file *file);
++ 
+++/* Used to provide epoll_wait() to sys_io_submit() */
+++ssize_t eventpoll_aio_wait(struct kiocb *iocb);
+++
++ /*
++  * This is called from inside fs/file_table.c:__fput() to unlink files
++  * from the eventpoll interface. We need to have this facility to cleanup
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000687.html">[Stgt-svn] r700 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000689.html">[Stgt-svn] r702 - trunk/patches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#688">[ date ]</a>
+              <a href="thread.html#688">[ thread ]</a>
+              <a href="subject.html#688">[ subject ]</a>
+              <a href="author.html#688">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

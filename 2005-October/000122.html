@@ -1,0 +1,1363 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r128 - in trunk: istgt/include istgt/kernel istgt/usr kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r128%20-%20in%20trunk%3A%20istgt/include%20istgt/kernel%20istgt/usr%20kernel&In-Reply-To=%3C200510281020.j9SAKDRB007442%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000121.html">
+   <LINK REL="Next"  HREF="000123.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r128 - in trunk: istgt/include istgt/kernel istgt/usr kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r128%20-%20in%20trunk%3A%20istgt/include%20istgt/kernel%20istgt/usr%20kernel&In-Reply-To=%3C200510281020.j9SAKDRB007442%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r128 - in trunk: istgt/include istgt/kernel istgt/usr kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 12:20:13 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000121.html">[Stgt-svn] r127 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000123.html">[Stgt-svn] r129 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#122">[ date ]</a>
+              <a href="thread.html#122">[ thread ]</a>
+              <a href="subject.html#122">[ subject ]</a>
+              <a href="author.html#122">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 12:20:10 +0200 (Fri, 28 Oct 2005)
+New Revision: 128
+
+Removed:
+   trunk/istgt/usr/config.h
+Modified:
+   trunk/istgt/include/istgt_u.h
+   trunk/istgt/kernel/config.c
+   trunk/istgt/kernel/conn.c
+   trunk/istgt/kernel/digest.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/istgt/kernel/iscsi.h
+   trunk/istgt/kernel/nthread.c
+   trunk/istgt/kernel/param.c
+   trunk/istgt/kernel/session.c
+   trunk/istgt/usr/chap.c
+   trunk/istgt/usr/conn.c
+   trunk/istgt/usr/ctldev.c
+   trunk/istgt/usr/iscsid.c
+   trunk/istgt/usr/iscsid.h
+   trunk/istgt/usr/istgt.c
+   trunk/istgt/usr/session.c
+   trunk/istgt/usr/target.c
+   trunk/istgt/usr/types.h
+   trunk/kernel/tgt_types.h
+Log:
+Kill all u8, u16, u32, and u64.
+
+
+Modified: trunk/istgt/include/istgt_u.h
+===================================================================
+--- trunk/istgt/include/istgt_u.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/include/istgt_u.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -11,11 +11,11 @@
+ #define SCSI_ID_LEN	24
+ 
+ struct session_info {
+-	u32 tid;
++	int tid;
+ 
+-	u64 sid;
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
++	uint64_t sid;
++	uint32_t exp_cmd_sn;
++	uint32_t max_cmd_sn;
+ };
+ 
+ #define DIGEST_ALL	(DIGEST_NONE | DIGEST_CRC32C)
+@@ -23,12 +23,12 @@
+ #define DIGEST_CRC32C           (1 &lt;&lt; 1)
+ 
+ struct conn_info {
+-	u32 tid;
+-	u64 sid;
++	int tid;
++	uint64_t sid;
+ 
+-	u32 cid;
+-	u32 stat_sn;
+-	u32 exp_stat_sn;
++	uint32_t cid;
++	uint32_t stat_sn;
++	uint32_t exp_stat_sn;
+ 	int header_digest;
+ 	int data_digest;
+ 	int fd;
+@@ -68,14 +68,14 @@
+ };
+ 
+ struct iscsi_param_info {
+-	u32 tid;
+-	u64 sid;
++	int tid;
++	uint64_t sid;
+ 
+-	u32 param_type;
+-	u32 partial;
++	uint32_t param_type;
++	uint32_t partial;
+ 
+-	u32 session_param[session_key_last];
+-	u32 target_param[target_key_last];
++	uint32_t session_param[session_key_last];
++	uint32_t target_param[target_key_last];
+ };
+ 
+ enum iet_event_state {
+@@ -108,10 +108,10 @@
+ 	/* kernel -&gt; user */
+ 	union {
+ 		struct {
+-			u32 tid;
+-			u64 sid;
+-			u32 cid;
+-			u32 state;
++			int tid;
++			uint64_t sid;
++			uint32_t cid;
++			uint32_t state;
+ 		} conn_state_change;
+ 	} k;
+ } __attribute__ ((aligned (sizeof(uint64_t))));
+
+Modified: trunk/istgt/kernel/config.c
+===================================================================
+--- trunk/istgt/kernel/config.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/config.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -79,7 +79,8 @@
+ 	return err;
+ }
+ 
+-int event_send(struct tgt_target *tgt, u32 tid, u64 sid, u32 cid, u32 state)
++int event_send(struct tgt_target *tgt, int tid, uint64_t sid, uint32_t cid,
++	       uint32_t state)
+ {
+ 	struct iet_msg msg;
+ 
+
+Modified: trunk/istgt/kernel/conn.c
+===================================================================
+--- trunk/istgt/kernel/conn.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/conn.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -11,7 +11,8 @@
+ #include &lt;iscsi.h&gt;
+ #include &lt;digest.h&gt;
+ 
+-static struct iscsi_conn *conn_lookup(struct iscsi_session *session, u16 cid)
++static struct iscsi_conn *conn_lookup(struct iscsi_session *session,
++				      uint16_t cid)
+ {
+ 	struct iscsi_conn *conn;
+ 
+
+Modified: trunk/istgt/kernel/digest.c
+===================================================================
+--- trunk/istgt/kernel/digest.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/digest.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -60,12 +60,13 @@
+ 		crypto_free_tfm(conn-&gt;rx_digest_tfm);
+ }
+ 
+-static void digest_header(struct crypto_tfm *tfm, struct iscsi_pdu *pdu, u8 *crc)
++static void digest_header(struct crypto_tfm *tfm, struct iscsi_pdu *pdu,
++			  uint8_t *crc)
+ {
+ 	struct scatterlist sg[2];
+ 	int i = 0;
+ 
+-	sg_init_one(&amp;sg[i], (u8 *) &amp;pdu-&gt;bhs, sizeof(struct iscsi_hdr));
++	sg_init_one(&amp;sg[i], (uint8_t *) &amp;pdu-&gt;bhs, sizeof(struct iscsi_hdr));
+ 	i++;
+ 	if (pdu-&gt;ahssize) {
+ 		sg_init_one(&amp;sg[i], pdu-&gt;ahs, pdu-&gt;ahssize);
+@@ -79,9 +80,9 @@
+ 
+ int digest_rx_header(struct iscsi_cmnd *cmnd)
+ {
+-	u32 crc;
++	uint32_t crc;
+ 
+-	digest_header(cmnd-&gt;conn-&gt;rx_digest_tfm, &amp;cmnd-&gt;pdu, (u8 *) &amp;crc);
++	digest_header(cmnd-&gt;conn-&gt;rx_digest_tfm, &amp;cmnd-&gt;pdu, (uint8_t *) &amp;crc);
+ 	if (crc != cmnd-&gt;hdigest)
+ 		return -EIO;
+ 
+@@ -90,14 +91,15 @@
+ 
+ void digest_tx_header(struct iscsi_cmnd *cmnd)
+ {
+-	digest_header(cmnd-&gt;conn-&gt;tx_digest_tfm, &amp;cmnd-&gt;pdu, (u8 *) &amp;cmnd-&gt;hdigest);
++	digest_header(cmnd-&gt;conn-&gt;tx_digest_tfm, &amp;cmnd-&gt;pdu,
++		      (uint8_t *) &amp;cmnd-&gt;hdigest);
+ }
+ 
+ static void digest_data(struct crypto_tfm *tfm, struct iscsi_cmnd *cmnd,
+-			struct scatterlist *sgv, u32 offset, u8 *crc)
++			struct scatterlist *sgv, uint32_t offset, uint8_t *crc)
+ {
+ 	struct scatterlist sg[ISCSI_CONN_IOV_MAX];
+-	u32 size, length;
++	uint32_t size, length;
+ 	int i, idx, count;
+ 
+ 	size = cmnd-&gt;pdu.datasize;
+@@ -132,7 +134,7 @@
+ int digest_rx_data(struct iscsi_cmnd *cmnd)
+ {
+ 	struct scatterlist *sg;
+-	u32 offset, crc;
++	uint32_t offset, crc;
+ 
+ 	if (cmnd_opcode(cmnd) == ISCSI_OP_SCSI_DATA_OUT) {
+ 		struct iscsi_cmnd *scsi_cmnd = cmnd-&gt;req;
+@@ -146,7 +148,8 @@
+ 	}
+ 
+ 	BUG_ON(!sg);
+-	digest_data(cmnd-&gt;conn-&gt;rx_digest_tfm, cmnd, sg, offset, (u8 *) &amp;crc);
++	digest_data(cmnd-&gt;conn-&gt;rx_digest_tfm, cmnd, sg, offset,
++		    (uint8_t *) &amp;crc);
+ 
+ 	if (!cmnd-&gt;conn-&gt;read_overflow &amp;&amp; (cmnd_opcode(cmnd) != ISCSI_OP_PDU_REJECT)) {
+ 		if (crc != cmnd-&gt;ddigest)
+@@ -162,5 +165,5 @@
+ 
+ 	BUG_ON(!cmnd-&gt;sg);
+ 	digest_data(cmnd-&gt;conn-&gt;tx_digest_tfm, cmnd, cmnd-&gt;sg,
+-		    be32_to_cpu(req-&gt;offset), (u8 *) &amp;cmnd-&gt;ddigest);
++		    be32_to_cpu(req-&gt;offset), (uint8_t *) &amp;cmnd-&gt;ddigest);
+ }
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/iscsi.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -18,7 +18,7 @@
+ static kmem_cache_t *iscsi_cmnd_cache;
+ static char dummy_data[1024];
+ 
+-static u32 cmnd_write_size(struct iscsi_cmnd *cmnd)
++static uint32_t cmnd_write_size(struct iscsi_cmnd *cmnd)
+ {
+ 	struct iscsi_cmd *hdr = cmnd_hdr(cmnd);
+ 
+@@ -27,7 +27,7 @@
+ 	return 0;
+ }
+ 
+-static u32 cmnd_read_size(struct iscsi_cmnd *cmnd)
++static uint32_t cmnd_read_size(struct iscsi_cmnd *cmnd)
+ {
+ 	struct iscsi_cmd *hdr = cmnd_hdr(cmnd);
+ 
+@@ -158,7 +158,7 @@
+ 	struct scatterlist *sg = cmnd-&gt;tc-&gt;sg;
+ 	struct iscsi_cmd *req = cmnd_hdr(cmnd);
+ 	struct iscsi_data_rsp *rsp;
+-	u32 pdusize, expsize, scsisize, size, offset, sn;
++	uint32_t pdusize, expsize, scsisize, size, offset, sn;
+ 	LIST_HEAD(send);
+ 
+ 	dprintk(&quot;%p\n&quot;, cmnd);
+@@ -237,7 +237,7 @@
+ {
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+-	u32 size;
++	uint32_t size;
+ 
+ 	rsp = create_scsi_rsp(req);
+ 	rsp_hdr = (struct iscsi_cmd_rsp *) &amp;rsp-&gt;pdu.bhs;
+@@ -250,8 +250,8 @@
+ }
+ 
+ struct iscsi_sense_data {
+-	u16 length;
+-	u8  data[0];
++	uint16_t length;
++	uint8_t  data[0];
+ } __packed;
+ 
+ static struct iscsi_cmnd *do_create_sense_rsp(struct iscsi_cmnd *req)
+@@ -289,7 +289,7 @@
+ }
+ 
+ static struct iscsi_cmnd *create_sense_rsp(struct iscsi_cmnd *req,
+-					   u8 sense_key, u8 asc, u8 ascq)
++					   uint8_t sense_key, uint8_t asc, uint8_t ascq)
+ {
+ 	struct scsi_tgt_cmd *stc;
+ 	struct iscsi_cmnd *rsp;
+@@ -446,12 +446,12 @@
+ static void update_stat_sn(struct iscsi_cmnd *cmnd)
+ {
+ 	struct iscsi_conn *conn = cmnd-&gt;conn;
+-	u32 exp_stat_sn;
++	uint32_t exp_stat_sn;
+ 
+ 	cmnd-&gt;pdu.bhs.exp_statsn = exp_stat_sn = be32_to_cpu(cmnd-&gt;pdu.bhs.exp_statsn);
+ 	dprintk(&quot;%x,%x\n&quot;, cmnd_opcode(cmnd), exp_stat_sn);
+-	if ((int)(exp_stat_sn - conn-&gt;exp_stat_sn) &gt; 0 &amp;&amp;
+-	    (int)(exp_stat_sn - conn-&gt;stat_sn) &lt;= 0) {
++	if ((int32_t) (exp_stat_sn - conn-&gt;exp_stat_sn) &gt; 0 &amp;&amp;
++	    (int32_t) (exp_stat_sn - conn-&gt;stat_sn) &lt;= 0) {
+ 		// free pdu resources
+ 		cmnd-&gt;conn-&gt;exp_stat_sn = exp_stat_sn;
+ 	}
+@@ -460,17 +460,18 @@
+ static int check_cmd_sn(struct iscsi_cmnd *cmnd)
+ {
+ 	struct iscsi_session *session = cmnd-&gt;conn-&gt;session;
+-	u32 cmd_sn;
++	uint32_t cmd_sn;
+ 
+ 	cmnd-&gt;pdu.bhs.statsn = cmd_sn = be32_to_cpu(cmnd-&gt;pdu.bhs.statsn);
+ 	dprintk(&quot;%d(%d)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
+-	if ((s32)(cmd_sn - session-&gt;exp_cmd_sn) &gt;= 0)
++	if ((int32_t) (cmd_sn - session-&gt;exp_cmd_sn) &gt;= 0)
+ 		return 0;
+ 	eprintk(&quot;sequence error (%x,%x)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
+ 	return -ISCSI_PROTOCOL_ERROR;
+ }
+ 
+-static struct iscsi_cmnd *__cmnd_find_hash(struct iscsi_session *session, u32 itt, u32 ttt)
++static struct iscsi_cmnd *__cmnd_find_hash(struct iscsi_session *session,
++					   uint32_t itt, uint32_t ttt)
+ {
+ 	struct list_head *head;
+ 	struct iscsi_cmnd *cmnd;
+@@ -488,7 +489,8 @@
+ 	return NULL;
+ }
+ 
+-static struct iscsi_cmnd *cmnd_find_hash(struct iscsi_session *session, u32 itt, u32 ttt)
++static struct iscsi_cmnd *cmnd_find_hash(struct iscsi_session *session,
++					 uint32_t itt, uint32_t ttt)
+ {
+ 	struct iscsi_cmnd *cmnd;
+ 
+@@ -507,7 +509,7 @@
+ 	struct iscsi_cmnd *tmp;
+ 	struct list_head *head;
+ 	int err = 0;
+-	u32 itt = cmnd-&gt;pdu.bhs.itt;
++	uint32_t itt = cmnd-&gt;pdu.bhs.itt;
+ 
+ 	dprintk(&quot;%p:%x\n&quot;, cmnd, itt);
+ 	if (itt == ISCSI_RESERVED_TAG) {
+@@ -563,7 +565,7 @@
+ {
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_cmd_rsp *rsp_hdr;
+-	u32 size;
++	uint32_t size;
+ 
+ 	rsp = get_rsp_cmnd(req);
+ 	rsp_hdr = (struct iscsi_cmd_rsp *)&amp;rsp-&gt;pdu.bhs;
+@@ -594,7 +596,7 @@
+ }
+ 
+ static int cmnd_recv_pdu(struct iscsi_conn *conn, struct tgt_cmd *tc,
+-			 u32 offset, u32 size)
++			 uint32_t offset, uint32_t size)
+ {
+ 	int idx, i;
+ 	char *addr;
+@@ -656,7 +658,7 @@
+ {
+ 	struct iscsi_cmnd *rsp;
+ 	struct iscsi_r2t_rsp *rsp_hdr;
+-	u32 length, offset, burst;
++	uint32_t length, offset, burst;
+ 	LIST_HEAD(send);
+ 
+ 	length = req-&gt;r2t_length;
+@@ -830,7 +832,7 @@
+ 
+ static int noop_out_start(struct iscsi_conn *conn, struct iscsi_cmnd *cmnd)
+ {
+-	u32 size, tmp;
++	uint32_t size, tmp;
+ 	int i = 0, err = 0;
+ 
+ 	if (cmnd_ttt(cmnd) != cpu_to_be32(ISCSI_RESERVED_TAG)) {
+@@ -877,7 +879,7 @@
+ 		} else {
+ 			for (i = 0; i &lt; ISCSI_CONN_IOV_MAX; i++) {
+ 				conn-&gt;read_iov[i].iov_base = dummy_data;
+-				tmp = min_t(u32, size, sizeof(dummy_data));
++				tmp = min_t(uint32_t, size, sizeof(dummy_data));
+ 				conn-&gt;read_iov[i].iov_len = tmp;
+ 				conn-&gt;read_size += tmp;
+ 				size -= tmp;
+@@ -892,9 +894,9 @@
+ 	return err;
+ }
+ 
+-static u32 get_next_ttt(struct iscsi_session *session)
++static uint32_t get_next_ttt(struct iscsi_session *session)
+ {
+-	u32 ttt;
++	uint32_t ttt;
+ 
+ 	if (session-&gt;next_ttt == ISCSI_RESERVED_TAG)
+ 		session-&gt;next_ttt++;
+@@ -994,7 +996,7 @@
+ {
+ 	struct iscsi_data *req = (struct iscsi_data *)&amp;cmnd-&gt;pdu.bhs;
+ 	struct iscsi_cmnd *scsi_cmnd = NULL;
+-	u32 offset = be32_to_cpu(req-&gt;offset);
++	uint32_t offset = be32_to_cpu(req-&gt;offset);
+ 
+ 	update_stat_sn(cmnd);
+ 
+@@ -1045,7 +1047,7 @@
+ {
+ 	struct iscsi_data *req = (struct iscsi_data *) &amp;cmnd-&gt;pdu.bhs;
+ 	struct iscsi_cmnd *scsi_cmnd;
+-	u32 offset;
++	uint32_t offset;
+ 
+ 	BUG_ON(!cmnd);
+ 	scsi_cmnd = cmnd-&gt;req;
+@@ -1296,7 +1298,7 @@
+ }
+ 
+ static void __cmnd_send_pdu(struct iscsi_conn *conn, struct scatterlist *sg,
+-			    u32 offset, u32 size)
++			    uint32_t offset, uint32_t size)
+ {
+ /* 	dprintk(D_GENERIC, &quot;%p %u,%u\n&quot;, tio, offset, size); */
+ 	offset += sg-&gt;offset;
+@@ -1311,7 +1313,7 @@
+ 
+ static void cmnd_send_pdu(struct iscsi_conn *conn, struct iscsi_cmnd *cmnd)
+ {
+-	u32 size;
++	uint32_t size;
+ 
+ 	if (!cmnd-&gt;pdu.datasize)
+ 		return;
+@@ -1403,7 +1405,7 @@
+ 	case ISCSI_OP_SCSI_DATA_IN:
+ 	{
+ 		struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *)&amp;cmnd-&gt;pdu.bhs;
+-		u32 offset;
++		uint32_t offset;
+ 
+ 		cmnd_set_sn(cmnd, (rsp-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) ? 1 : 0);
+ 		offset = rsp-&gt;offset;
+@@ -1478,7 +1480,7 @@
+ {
+ 	struct iscsi_session *session = cmnd-&gt;conn-&gt;session;
+ 	struct list_head *entry;
+-	u32 cmd_sn;
++	uint32_t cmd_sn;
+ 
+ 	dprintk(&quot;%p:%x %u,%u\n&quot;,
+ 		cmnd, cmnd_opcode(cmnd), cmnd-&gt;pdu.bhs.statsn,
+
+Modified: trunk/istgt/kernel/iscsi.h
+===================================================================
+--- trunk/istgt/kernel/iscsi.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/iscsi.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -85,13 +85,13 @@
+ 	struct list_head list;
+ 	struct iscsi_target *target;
+ 
+-	u64 sid;
++	uint64_t sid;
+ 
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
++	uint32_t exp_cmd_sn;
++	uint32_t max_cmd_sn;
+ 
+ 	struct iscsi_sess_param param;
+-	u32 max_queued_cmnds;
++	uint32_t max_queued_cmnds;
+ 
+ 	struct list_head conn_list;
+ 	struct list_head pending_list;
+@@ -99,7 +99,7 @@
+ 	spinlock_t cmnd_hash_lock;
+ 	struct list_head cmnd_hash[1 &lt;&lt; IET_HASH_ORDER];
+ 
+-	u32 next_ttt;
++	uint32_t next_ttt;
+ 
+ 	struct tgt_session *ts;
+ };
+@@ -115,11 +115,11 @@
+ 	struct list_head list;			/* list entry in session list */
+ 	struct iscsi_session *session;		/* owning session */
+ 
+-	u16 cid;
++	uint16_t cid;
+ 	unsigned long state;
+ 
+-	u32 stat_sn;
+-	u32 exp_stat_sn;
++	uint32_t stat_sn;
++	uint32_t exp_stat_sn;
+ 
+ 	int hdigest_type;
+ 	int ddigest_type;
+@@ -137,8 +137,8 @@
+ 	struct iscsi_cmnd *read_cmnd;
+ 	struct msghdr read_msg;
+ 	struct iovec read_iov[ISCSI_CONN_IOV_MAX];
+-	u32 read_size;
+-	u32 read_overflow;
++	uint32_t read_size;
++	uint32_t read_overflow;
+ 	int read_state;
+ 
+ 	struct iscsi_cmnd *write_cmnd;
+@@ -147,8 +147,8 @@
+ 
+ 	struct scatterlist *write_tcmnd;
+ 
+-	u32 write_size;
+-	u32 write_offset;
++	uint32_t write_size;
++	uint32_t write_offset;
+ 	int write_state;
+ 
+ 	struct crypto_tfm *rx_digest_tfm;
+@@ -176,14 +176,14 @@
+ 
+ 	struct scatterlist *sg, sense_sg;
+ 
+-	u32 r2t_sn;
+-	u32 r2t_length;
+-	u32 is_unsolicited_data;
+-	u32 target_task_tag;
+-	u32 outstanding_r2t;
++	uint32_t r2t_sn;
++	uint32_t r2t_length;
++	uint32_t is_unsolicited_data;
++	uint32_t target_task_tag;
++	uint32_t outstanding_r2t;
+ 
+-	u32 hdigest;
+-	u32 ddigest;
++	uint32_t hdigest;
++	uint32_t ddigest;
+ 
+ 	struct work_struct work;
+ 	struct completion event;
+@@ -226,12 +226,13 @@
+ 
+ /* config.c */
+ extern int iet_msg_recv(struct tgt_target *, uint32_t, void *);
+-extern int event_send(struct tgt_target *tgt, u32 tid, u64 sid, u32 cid, u32 state);
++extern int event_send(struct tgt_target *tgt, int tid, uint64_t sid,
++		      uint32_t cid, uint32_t state);
+ 
+ /* session.c */
+-extern struct iscsi_session *session_lookup(struct iscsi_target *, u64);
++extern struct iscsi_session *session_lookup(struct iscsi_target *, uint64_t);
+ extern int session_add(struct iscsi_target *, struct session_info *);
+-extern int session_del(struct iscsi_target *, u64);
++extern int session_del(struct iscsi_target *, uint64_t);
+ 
+ /* params.c */
+ extern int iscsi_param_set(struct iscsi_target *, struct iscsi_param_info *, int);
+
+Modified: trunk/istgt/kernel/nthread.c
+===================================================================
+--- trunk/istgt/kernel/nthread.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/nthread.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -227,7 +227,7 @@
+ 		if (res &lt;= 0 || conn-&gt;read_state != RX_INIT_HDIGEST)
+ 			break;
+ 	case RX_INIT_HDIGEST:
+-		iscsi_conn_init_read(conn, &amp;cmnd-&gt;hdigest, sizeof(u32));
++		iscsi_conn_init_read(conn, &amp;cmnd-&gt;hdigest, sizeof(uint32_t));
+ 		conn-&gt;read_state = RX_HDIGEST;
+ 	case RX_HDIGEST:
+ 		res = do_recv(conn, RX_CHECK_HDIGEST);
+@@ -247,7 +247,7 @@
+ 		if (res &lt;= 0 || conn-&gt;read_state != RX_INIT_DDIGEST)
+ 			break;
+ 	case RX_INIT_DDIGEST:
+-		iscsi_conn_init_read(conn, &amp;cmnd-&gt;ddigest, sizeof(u32));
++		iscsi_conn_init_read(conn, &amp;cmnd-&gt;ddigest, sizeof(uint32_t));
+ 		conn-&gt;read_state = RX_DDIGEST;
+ 	case RX_DDIGEST:
+ 		res = do_recv(conn, RX_CHECK_DDIGEST);
+@@ -434,7 +434,7 @@
+ 	struct msghdr msg = {.msg_flags = MSG_NOSIGNAL | MSG_DONTWAIT};
+ 	struct kvec iov;
+ 
+-	iov.iov_base = (char *) (&amp;cmnd-&gt;ddigest) + (sizeof(u32) - rest);
++	iov.iov_base = (char *) (&amp;cmnd-&gt;ddigest) + (sizeof(uint32_t) - rest);
+ 	iov.iov_len = rest;
+ 
+ 	res = kernel_sendmsg(cmnd-&gt;conn-&gt;sock, &amp;msg, &amp;iov, 1, rest);
+@@ -462,8 +462,8 @@
+ 	for (iop = conn-&gt;write_iop; iop-&gt;iov_len; iop++)
+ 		;
+ 	iop-&gt;iov_base = &amp;(cmnd-&gt;hdigest);
+-	iop-&gt;iov_len = sizeof(u32);
+-	conn-&gt;write_size += sizeof(u32);
++	iop-&gt;iov_len = sizeof(uint32_t);
++	conn-&gt;write_size += sizeof(uint32_t);
+ 	iop++;
+ 	iop-&gt;iov_len = 0;
+ 
+@@ -516,7 +516,7 @@
+ 	case TX_INIT_DDIGEST:
+ 		digest_tx_data(cmnd);
+ 		BUG_ON(cmnd-&gt;conn-&gt;write_size);
+-		cmnd-&gt;conn-&gt;write_size += sizeof(u32);
++		cmnd-&gt;conn-&gt;write_size += sizeof(uint32_t);
+ 		conn-&gt;write_state = TX_DDIGEST;
+ 	case TX_DDIGEST:
+ 		res = tx_ddigest(cmnd, TX_END);
+
+Modified: trunk/istgt/kernel/param.c
+===================================================================
+--- trunk/istgt/kernel/param.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/param.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -36,13 +36,13 @@
+ 
+ static void sess_param_check(struct iscsi_param_info *info)
+ {
+-	u32 *iparam = info-&gt;session_param;
++	uint32_t *iparam = info-&gt;session_param;
+ 
+ 	CHECK_PARAM(info, iparam, max_connections, 1, 65535);
+ 	CHECK_PARAM(info, iparam, max_recv_data_length, 512,
+-		    (u32) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
++		    (uint32_t) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
+ 	CHECK_PARAM(info, iparam, max_xmit_data_length, 512,
+-		    (u32) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
++		    (uint32_t) ((ISCSI_CONN_IOV_MAX - 1) * PAGE_CACHE_SIZE));
+ 	CHECK_PARAM(info, iparam, error_recovery_level, 0, 0);
+ 	CHECK_PARAM(info, iparam, data_pdu_inorder, 1, 1);
+ 	CHECK_PARAM(info, iparam, data_sequence_inorder, 1, 1);
+@@ -56,7 +56,7 @@
+ 
+ static void sess_param_set(struct iscsi_sess_param *param, struct iscsi_param_info *info)
+ {
+-	u32 *iparam = info-&gt;session_param;
++	uint32_t *iparam = info-&gt;session_param;
+ 
+ 	SET_PARAM(param, info, iparam, initial_r2t);
+ 	SET_PARAM(param, info, iparam, immediate_data);
+@@ -81,7 +81,7 @@
+ 
+ static void sess_param_get(struct iscsi_sess_param *param, struct iscsi_param_info *info)
+ {
+-	u32 *iparam = info-&gt;session_param;
++	uint32_t *iparam = info-&gt;session_param;
+ 
+ 	GET_PARAM(param, info, iparam, initial_r2t);
+ 	GET_PARAM(param, info, iparam, immediate_data);
+@@ -106,7 +106,7 @@
+ 
+ static void trgt_param_check(struct iscsi_param_info *info)
+ {
+-	u32 *iparam = info-&gt;target_param;
++	uint32_t *iparam = info-&gt;target_param;
+ 
+ 	CHECK_PARAM(info, iparam, queued_cmnds, MIN_NR_QUEUED_CMNDS, MAX_NR_QUEUED_CMNDS);
+ }
+@@ -114,14 +114,14 @@
+ static void trgt_param_set(struct iscsi_target *target, struct iscsi_param_info *info)
+ {
+ 	struct iscsi_trgt_param *param = &amp;target-&gt;trgt_param;
+-	u32 *iparam = info-&gt;target_param;
++	uint32_t *iparam = info-&gt;target_param;
+ 
+ 	SET_PARAM(param, info, iparam, queued_cmnds);
+ }
+ 
+ static void trgt_param_get(struct iscsi_trgt_param *param, struct iscsi_param_info *info)
+ {
+-	u32 *iparam = info-&gt;target_param;
++	uint32_t *iparam = info-&gt;target_param;
+ 
+ 	GET_PARAM(param, info, iparam, queued_cmnds);
+ }
+
+Modified: trunk/istgt/kernel/session.c
+===================================================================
+--- trunk/istgt/kernel/session.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/kernel/session.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -9,7 +9,7 @@
+ #include &lt;iscsi.h&gt;
+ #include &lt;tgt.h&gt;
+ 
+-struct iscsi_session *session_lookup(struct iscsi_target *target, u64 sid)
++struct iscsi_session *session_lookup(struct iscsi_target *target, uint64_t sid)
+ {
+ 	struct iscsi_session *session;
+ 
+@@ -25,8 +25,7 @@
+ 	struct iscsi_session *session;
+ 	int i;
+ 
+-	dprintk(&quot;%p %u %#Lx\n&quot;, target, target-&gt;tid,
+-		(unsigned long long) info-&gt;sid);
++	dprintk(&quot;%p %u %&quot; PRIx64 &quot;\n&quot;, target, target-&gt;tid, info-&gt;sid);
+ 
+ 	session = session_lookup(target, info-&gt;sid);
+ 	if (session)
+@@ -60,7 +59,7 @@
+ 	return 0;
+ }
+ 
+-int session_del(struct iscsi_target *target, u64 sid)
++int session_del(struct iscsi_target *target, uint64_t sid)
+ {
+ 	int i;
+ 	struct iscsi_session *session;
+@@ -69,11 +68,10 @@
+ 	if (!session)
+ 		return -ENOENT;
+ 
+-	dprintk(&quot;%#Lx\n&quot;, (unsigned long long) session-&gt;sid);
++	dprintk(&quot;%&quot; PRIx64 &quot;\n&quot;, session-&gt;sid);
+ 
+ 	if (!list_empty(&amp;session-&gt;conn_list)) {
+-		eprintk(&quot;%llu still have connections\n&quot;,
+-			(unsigned long long) session-&gt;sid);
++		eprintk(&quot;%&quot; PRIx64 &quot; still have connections\n&quot;, session-&gt;sid);
+ 		return -EBUSY;
+ 	}
+ 
+
+Modified: trunk/istgt/usr/chap.c
+===================================================================
+--- trunk/istgt/usr/chap.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/chap.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -57,7 +57,7 @@
+ 	return 0;
+ }
+ 
+-static void decode_hex_string(char *hex_string, u8 *intnum, int intlen)
++static void decode_hex_string(char *hex_string, uint8_t *intnum, int intlen)
+ {
+ 	char *ptr;
+ 	int j;
+@@ -77,7 +77,7 @@
+ 
+ 
+ /* Base64 decoding, taken from UNH-iSCSI &quot;Base64codeToNumber()&quot; */
+-static u8 decode_base64_digit(char base64)
++static uint8_t decode_base64_digit(char base64)
+ {
+ 	switch (base64) {
+ 	case '=':
+@@ -99,12 +99,12 @@
+ }
+ 
+ /* Base64 decoding, taken from UNH-iSCSI &quot;Base64StringToInteger()&quot; */
+-static void decode_base64_string(char *string, u8 *intnum, int int_len)
++static void decode_base64_string(char *string, uint8_t *intnum, int int_len)
+ {
+ 	int len;
+ 	int count;
+ 	int intptr;
+-	u8 num[4];
++	uint8_t num[4];
+ 	int octets;
+ 
+ 	if ((string == NULL) || (intnum == NULL))
+@@ -153,7 +153,7 @@
+ 	}
+ }
+ 
+-static inline void encode_hex_string(u8 *intnum, long length, char *string)
++static inline void encode_hex_string(uint8_t *intnum, long length, char *string)
+ {
+ 	int i;
+ 	char *strptr;
+@@ -164,7 +164,7 @@
+ }
+ 
+ /* Base64 encoding, taken from UNH iSCSI &quot;IntegerToBase64String()&quot; */
+-static void encode_base64_string(u8 *intnum, long length, char *string)
++static void encode_base64_string(uint8_t *intnum, long length, char *string)
+ {
+ 	int count, octets, strptr, delta;
+ 	static const char base64code[] = { 'A', 'B', 'C', 'D', 'E', 'F', 'G',
+@@ -229,7 +229,7 @@
+ 	return encoding_fmt;
+ }
+ 
+-static int chap_alloc_decode_buffer(char *encoded, u8 **decode_buf, int encoding_fmt)
++static int chap_alloc_decode_buffer(char *encoded, uint8_t **decode_buf, int encoding_fmt)
+ {
+ 	int i;
+ 	int decode_len = 0;
+@@ -260,7 +260,7 @@
+ 	return decode_len;
+ }
+ 
+-static int chap_decode_string(char *encoded, u8 *decode_buf, int buf_len, int encoding_fmt)
++static int chap_decode_string(char *encoded, uint8_t *decode_buf, int buf_len, int encoding_fmt)
+ {
+ 	if (encoding_fmt == HEX_FORMAT) {
+ 		if ((strlen(encoded) - 2) &gt; (2 * buf_len)) {
+@@ -286,7 +286,7 @@
+ 	return 0;
+ }
+ 
+-static inline void chap_encode_string(u8 *intnum, int buf_len, char *encode_buf, int encoding_fmt)
++static inline void chap_encode_string(uint8_t *intnum, int buf_len, char *encode_buf, int encoding_fmt)
+ {
+ 	encode_buf[0] = '0';
+ 	if (encoding_fmt == HEX_FORMAT) {
+@@ -298,7 +298,7 @@
+ 	}
+ }
+ 
+-static inline void chap_calc_digest_md5(char chap_id, char *secret, int secret_len, u8 *challenge, int challenge_len, u8 *digest)
++static inline void chap_calc_digest_md5(char chap_id, char *secret, int secret_len, uint8_t *challenge, int challenge_len, uint8_t *digest)
+ {
+ 	MD5_CTX ctx;
+ 
+@@ -309,7 +309,7 @@
+ 	MD5_Final(digest, &amp;ctx);
+ }
+ 
+-static inline void chap_calc_digest_sha1(char chap_id, char *secret, int secret_len, u8 *challenge, int challenge_len, u8 *digest)
++static inline void chap_calc_digest_sha1(char chap_id, char *secret, int secret_len, uint8_t *challenge, int challenge_len, uint8_t *digest)
+ {
+ 	SHA_CTX ctx;
+ 
+@@ -376,7 +376,7 @@
+ static int chap_initiator_auth_check_response(struct connection *conn)
+ {
+ 	char *value;
+-	u8 *his_digest = NULL, *our_digest = NULL;
++	uint8_t *his_digest = NULL, *our_digest = NULL;
+ 	int digest_len = 0, retval = 0, encoding_format;
+ 	char pass[ISCSI_NAME_LEN];
+ 
+@@ -476,7 +476,7 @@
+ static int chap_target_auth_create_response(struct connection *conn)
+ {
+ 	char chap_id, *value, *response = NULL;
+-	u8 *challenge = NULL, *digest = NULL;
++	uint8_t *challenge = NULL, *digest = NULL;
+ 	int encoding_format, response_len;
+ 	int challenge_len = 0, digest_len = 0, retval = 0;
+ 	char pass[ISCSI_NAME_LEN], name[ISCSI_NAME_LEN];
+
+Deleted: trunk/istgt/usr/config.h
+===================================================================
+--- trunk/istgt/usr/config.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/config.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -1,21 +0,0 @@
+-#ifndef CONFIG_H
+-#define CONFIG_H
+-
+-struct config_operations {
+-	int (*init) (char *);
+-/* 	int (*target_add) (u32 *, char *); */
+-/* 	int (*target_stop) (u32); */
+-/* 	int (*target_del) (u32); */
+-/* 	int (*lunit_add) (u32, u32, char *); */
+-/* 	int (*lunit_stop) (u32, u32); */
+-/* 	int (*lunit_del) (u32, u32); */
+-/* 	int (*param_set) (u32, u64, int, u32, struct iscsi_param *); */
+-	int (*account_add) (u32, int, char *, char *);
+-	int (*account_del) (u32, int, char *);
+-	int (*account_query) (u32, int, char *, char *);
+-	int (*initiator_access) (u32, int);
+-};
+-
+-extern struct config_operations *cops;
+-
+-#endif
+
+Modified: trunk/istgt/usr/conn.c
+===================================================================
+--- trunk/istgt/usr/conn.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/conn.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -52,7 +52,7 @@
+ 	free(conn);
+ }
+ 
+-struct connection *conn_find(struct session *session, u32 cid)
++struct connection *conn_find(struct session *session, uint32_t cid)
+ {
+ 	struct connection *conn;
+ 
+
+Modified: trunk/istgt/usr/ctldev.c
+===================================================================
+--- trunk/istgt/usr/ctldev.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/ctldev.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -81,8 +81,8 @@
+ 	}
+ }
+ 
+-static void nlmsg_init(struct nlmsghdr *nlh, u32 pid, u32 seq, int type,
+-		       int len, int flags)
++static void nlmsg_init(struct nlmsghdr *nlh, uint32_t pid, uint32_t seq,
++		       uint16_t type, uint32_t len, uint16_t flags)
+ {
+ 	nlh-&gt;nlmsg_pid = pid;
+ 	nlh-&gt;nlmsg_len = len;
+@@ -94,7 +94,7 @@
+ /*
+  * this will have to be redone and made generic when we move it
+  */
+-static struct nlmsghdr *get_iet_msg(u32 tid, struct iet_msg **msg)
++static struct nlmsghdr *get_iet_msg(int tid, struct iet_msg **msg)
+ {
+ 	int len;
+ 	struct nlmsghdr *nlh;
+@@ -115,7 +115,7 @@
+ }
+ 
+ 
+-static int iscsi_conn_destroy(u32 tid, u64 sid, u32 cid)
++static int iscsi_conn_destroy(int tid, uint64_t sid, uint32_t cid)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -137,7 +137,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_param_get(u32 tid, u64 sid, struct iscsi_param *param)
++static int iscsi_param_get(int tid, uint64_t sid, struct iscsi_param *param)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -172,7 +172,8 @@
+ 	return err;
+ }
+ 
+-static int iscsi_param_set(u32 tid, u64 sid, int type, u32 partial, struct iscsi_param *param)
++static int iscsi_param_set(int tid, uint64_t sid, int type, uint32_t partial,
++			   struct iscsi_param *param)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -205,7 +206,8 @@
+ 	return err;
+ }
+ 
+-static int iscsi_param_partial_set(u32 tid, u64 sid, int type, int key, u32 val)
++static int iscsi_param_partial_set(int tid, uint64_t sid, int type, int key,
++				   uint32_t val)
+ {
+ 	struct iscsi_param *param;
+ 	struct iscsi_param s_param[session_key_last];
+@@ -230,7 +232,7 @@
+ 
+ 	while ((p = strsep(&amp;params, &quot;,&quot;)) != NULL) {
+ 		int idx;
+-		u32 val;
++		uint32_t val;
+ 		if (!*p)
+ 			continue;
+ 		if (!(q = strchr(p, '=')))
+@@ -272,7 +274,8 @@
+ 	return 0;
+ }
+ 
+-static int iscsi_session_create(u32 tid, u64 sid, u32 exp_cmd_sn, u32 max_cmd_sn, char *name)
++static int iscsi_session_create(int tid, uint64_t sid,
++				uint32_t exp_cmd_sn, uint32_t max_cmd_sn)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -295,7 +298,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_session_destroy(u32 tid, u64 sid)
++static int iscsi_session_destroy(int tid, uint64_t sid)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -316,8 +319,9 @@
+ 	return err;
+ }
+ 
+-static int iscsi_conn_create(u32 tid, u64 sid, u32 cid, u32 stat_sn, u32 exp_stat_sn,
+-			     int fd, u32 hdigest, u32 ddigest)
++static int iscsi_conn_create(int tid, uint64_t sid, uint32_t cid,
++			     uint32_t stat_sn, uint32_t exp_stat_sn,
++			     int fd, uint32_t hdigest, uint32_t ddigest)
+ {
+ 	struct iet_msg *msg;
+ 	struct nlmsghdr *nlh;
+@@ -344,7 +348,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_target_create(int *tid, char *name)
++static int iscsi_target_create(int *tid)
+ {
+ 	int err;
+ 	char nlm_ev[8912];
+@@ -368,7 +372,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_target_destroy(u32 tid)
++static int iscsi_target_destroy(int tid)
+ {
+ 	int err;
+ 	char nlm_ev[8912];
+@@ -387,7 +391,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_lunit_create(u32 tid, u32 lun, char *args)
++static int iscsi_lunit_create(int tid, uint64_t lun, char *args)
+ {
+ 	int err, fd;
+ 	char *p, *q, *type = NULL, *path = NULL;
+@@ -455,7 +459,7 @@
+ 	return err;
+ }
+ 
+-static int iscsi_lunit_destroy(u32 tid, u32 lun)
++static int iscsi_lunit_destroy(int tid, uint64_t lun)
+ {
+ 	int err, fd;
+ 	char nlm_ev[8912];
+@@ -463,7 +467,7 @@
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+ 	char path[PATH_MAX], buf[PATH_MAX];
+ 
+-	fprintf(stderr, &quot;%s %d %d %u\n&quot;, __FUNCTION__, __LINE__, tid, lun);
++	dprintf(&quot;%d %&quot; PRIu64 &quot;\n&quot;,tid, lun);
+ 
+ 	memset(nlm_ev, 0, sizeof(nlm_ev));
+ 	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_DESTROY,
+@@ -473,7 +477,8 @@
+ 	ev-&gt;u.d_device.tid = tid;
+ 	ev-&gt;u.d_device.dev_id = lun;
+ 
+-	sprintf(path, &quot;/sys/class/tgt_device/device%d:%d/fd&quot;, tid, lun);
++	sprintf(path, &quot;/sys/class/tgt_device/device%d:%&quot; PRIu64 &quot;/fd&quot;,
++		tid, lun);
+ 	fd = open(path, O_RDONLY);
+ 	if (fd &lt; 0) {
+ 		perror(&quot;iscsi_lunit_destroy could not open fd file&quot;);
+@@ -689,8 +694,8 @@
+ 	FILE *config;
+ 	char buf[BUFSIZE];
+ 	char *p, *q;
+-	int idx;
+-	u32 tid, val;
++	int idx, tid;
++	uint32_t val;
+ 
+ 	eprintf(&quot;%s\n&quot;, &quot;load config&quot;);
+ 
+@@ -715,8 +720,8 @@
+ 		} else if (!strcasecmp(p, &quot;MaxSessions&quot;) &amp;&amp; tid &gt;= 0) {
+ 			/* target-&gt;max_sessions = strtol(q, &amp;q, 0); */
+ 		} else if (!strcasecmp(p, &quot;Lun&quot;) &amp;&amp; tid &gt;= 0) {
+-			u32 lun = strtol(q, &amp;q, 10);
+-			eprintf(&quot;creaing lun %d %u %s\n&quot;, tid, lun, p);
++			uint64_t lun = strtoull(q, &amp;q, 10);
++			eprintf(&quot;creaing lun %d %&quot; PRIu64 &quot; %s\n&quot;, tid, lun, p);
+ 			iscsi_lunit_create(tid, lun, q);
+ 		} else if (!((idx = param_index_by_name(p, target_keys)) &lt; 0) &amp;&amp; tid &gt;= 0) {
+ 			val = strtol(q, &amp;q, 0);
+
+Modified: trunk/istgt/usr/iscsid.c
+===================================================================
+--- trunk/istgt/usr/iscsid.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/iscsid.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -113,7 +113,7 @@
+ 	text_key_add(conn, key, &quot;Reject&quot;);
+ }
+ 
+-static int account_empty(u32 tid, int dir)
++static int account_empty(int tid, int dir)
+ {
+ 	char pass[ISCSI_NAME_LEN];
+ 
+
+Modified: trunk/istgt/usr/iscsid.h
+===================================================================
+--- trunk/istgt/usr/iscsid.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/iscsid.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -57,23 +57,23 @@
+ 	struct qelem clist;
+ 	struct session *session;
+ 
+-	u32 tid;
++	int tid;
+ 	struct iscsi_param session_param[session_key_last];
+ 
+ 	char *initiator;
+ 	uint8_t isid[6];
+ 	uint16_t tsih;
+-	u16 cid;
+-	u16 pad;
++	uint16_t cid;
++	uint16_t pad;
+ 	int session_type;
+ 	int auth_method;
+ 
+-	u32 stat_sn;
+-	u32 exp_stat_sn;
++	uint32_t stat_sn;
++	uint32_t exp_stat_sn;
+ 
+-	u32 cmd_sn;
+-	u32 exp_cmd_sn;
+-	u32 max_cmd_sn;
++	uint32_t cmd_sn;
++	uint32_t exp_cmd_sn;
++	uint32_t max_cmd_sn;
+ 
+ 	struct PDU req;
+ 	void *req_buffer;
+@@ -136,7 +136,7 @@
+ 
+ 	struct qelem sessions_list;
+ 
+-	u32 tid;
++	int tid;
+ 	char name[ISCSI_NAME_LEN];
+ 	char *alias;
+ 
+@@ -150,7 +150,7 @@
+ /* conn.c */
+ extern struct connection *conn_alloc(void);
+ extern void conn_free(struct connection *conn);
+-extern struct connection * conn_find(struct session *session, u32 cid);
++extern struct connection * conn_find(struct session *session, uint32_t cid);
+ extern void conn_take_fd(struct connection *conn, int fd);
+ extern void conn_read_pdu(struct connection *conn);
+ extern void conn_write_pdu(struct connection *conn);
+@@ -166,30 +166,33 @@
+ extern void text_key_add(struct connection *conn, char *key, char *value);
+ 
+ /* session.c */
+-extern struct session *session_find_name(u32 tid, const char *iname, uint8_t *isid);
+-extern struct session *session_find_id(u32 tid, u64 sid);
++extern struct session *session_find_name(int tid, const char *iname, uint8_t *isid);
++extern struct session *session_find_id(int tid, uint64_t sid);
+ extern void session_create(struct connection *conn);
+ extern void session_remove(struct session *session);
+ 
+ /* target.c */
+ extern int target_add(int *tid, char *name);
+ extern int target_del(int tid);
+-extern int target_find_by_name(const char *name, u32 *tid);
+-struct target * target_find_by_id(u32);
++extern int target_find_by_name(const char *name, int *tid);
++struct target * target_find_by_id(int tid);
+ extern void target_list_build(struct connection *, char *, char *);
+ 
+ /* ctldev.c */
+ struct iscsi_kernel_interface {
+-	int (*lunit_create) (u32 tid, u32 lun, char *args);
+-	int (*lunit_destroy) (u32 tid, u32 lun);
+-	int (*param_get) (u32, u64, struct iscsi_param *);
+-	int (*param_set) (u32, u64, int, u32, struct iscsi_param *);
+-	int (*target_create) (int *, char *);
+-	int (*target_destroy) (u32);
+-	int (*session_create) (u32, u64, u32, u32, char *);
+-	int (*session_destroy) (u32, u64);
+-	int (*conn_create) (u32, u64, u32, u32, u32, int, u32, u32);
+-	int (*conn_destroy) (u32 tid, u64 sid, u32 cid);
++	int (*lunit_create) (int tid, uint64_t lun, char *args);
++	int (*lunit_destroy) (int tid, uint64_t lun);
++	int (*param_get) (int tid, uint64_t sid, struct iscsi_param *);
++	int (*param_set) (int tid, uint64_t sid, int type, uint32_t flags,
++			  struct iscsi_param *);
++	int (*target_create) (int *tid);
++	int (*target_destroy) (int tid);
++	int (*session_create) (int tid, uint64_t sid, uint32_t exp,
++			       uint32_t max);
++	int (*session_destroy) (int tid, uint64_t sid);
++	int (*conn_create) (int tid, uint64_t sid, uint32_t cid, uint32_t sn,
++			    uint32_t exp_sn, int fd, uint32_t hd, uint32_t dd);
++	int (*conn_destroy) (int tid, uint64_t sid, uint32_t cid);
+ };
+ 
+ extern struct iscsi_kernel_interface *ki;
+
+Modified: trunk/istgt/usr/istgt.c
+===================================================================
+--- trunk/istgt/usr/istgt.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/istgt.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -272,7 +272,7 @@
+ 					o = conn-&gt;rwsize &amp; 3;
+ 					if (o) {
+ 						for (o = 4 - o; o; o--)
+-							*((u8 *)conn-&gt;buffer + conn-&gt;rwsize++) = 0;
++							*((uint8_t *)conn-&gt;buffer + conn-&gt;rwsize++) = 0;
+ 					}
+ 					goto write_again;
+ 				}
+
+Modified: trunk/istgt/usr/session.c
+===================================================================
+--- trunk/istgt/usr/session.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/session.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -16,7 +16,7 @@
+ 
+ #include &quot;iscsid.h&quot;
+ 
+-static struct session *session_alloc(u32 tid)
++static struct session *session_alloc(int tid)
+ {
+ 	struct session *session;
+ 	struct target *target = target_find_by_id(tid);
+@@ -36,7 +36,7 @@
+ 	return session;
+ }
+ 
+-struct session *session_find_name(u32 tid, const char *iname, uint8_t *isid)
++struct session *session_find_name(int tid, const char *iname, uint8_t *isid)
+ {
+ 	struct session *session;
+ 	struct target *target;
+@@ -55,7 +55,7 @@
+ 	return NULL;
+ }
+ 
+-struct session *session_find_id(u32 tid, u64 sid)
++struct session *session_find_id(int tid, uint64_t sid)
+ {
+ 	struct session *session;
+ 	struct target *target;
+@@ -99,7 +99,7 @@
+ 	log_debug(&quot;session_create: %#&quot; PRIx64, sid);
+ 
+ 	ki-&gt;session_create(conn-&gt;tid, sid, conn-&gt;exp_cmd_sn,
+-			   conn-&gt;max_cmd_sn, session-&gt;initiator);
++			   conn-&gt;max_cmd_sn);
+ 	ki-&gt;param_set(conn-&gt;tid, sid, key_session, 0, conn-&gt;session_param);
+ }
+ 
+
+Modified: trunk/istgt/usr/target.c
+===================================================================
+--- trunk/istgt/usr/target.c	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/target.c	2005-10-28 10:20:10 UTC (rev 128)
+@@ -32,7 +32,7 @@
+ 	}
+ }
+ 
+-int target_find_by_name(const char *name, u32 *tid)
++int target_find_by_name(const char *name, int *tid)
+ {
+ 	struct target *target;
+ 
+@@ -46,7 +46,7 @@
+ 	return -ENOENT;
+ }
+ 
+-struct target* target_find_by_id(u32 tid)
++struct target* target_find_by_id(int tid)
+ {
+ 	struct target *target;
+ 
+@@ -58,7 +58,7 @@
+ 	return NULL;
+ }
+ 
+-static void all_accounts_del(u32 tid, int dir)
++static void all_accounts_del(int tid, int dir)
+ {
+ /* 	char name[ISCSI_NAME_LEN], pass[ISCSI_NAME_LEN]; */
+ 
+@@ -111,7 +111,7 @@
+ 	memset(target, 0, sizeof(*target));
+ 	memcpy(target-&gt;name, name, sizeof(target-&gt;name) - 1);
+ 
+-	if ((err = ki-&gt;target_create(tid, name)) &lt; 0) {
++	if ((err = ki-&gt;target_create(tid)) &lt; 0) {
+ 		log_warning(&quot;can't create a target %d %u\n&quot;, err, *tid);
+ 		goto out;
+ 	}
+
+Modified: trunk/istgt/usr/types.h
+===================================================================
+--- trunk/istgt/usr/types.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/istgt/usr/types.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -27,11 +27,6 @@
+ #error &quot;unknown endianess!&quot;
+ #endif
+ 
+-typedef u_int8_t u8;
+-typedef u_int16_t u16;
+-typedef u_int32_t u32;
+-typedef u_int64_t u64;
+-
+ typedef uint16_t __be16;
+ typedef uint32_t __be32;
+ 
+
+Modified: trunk/kernel/tgt_types.h
+===================================================================
+--- trunk/kernel/tgt_types.h	2005-10-28 02:12:58 UTC (rev 127)
++++ trunk/kernel/tgt_types.h	2005-10-28 10:20:10 UTC (rev 128)
+@@ -3,9 +3,9 @@
+ 
+ #include &lt;linux/types.h&gt;
+ 
+-/* taken from inttypes.h */
++/* Is there a smart way? */
+ 
+-#if BITS_PER_LONG == 64
++#if defined(CONFIG_ALPAH) || defined(CONFIG_IA64) || defined(CONFIG_PPC64) || (defined(CONFIG_S390) &amp;&amp; defined(__x390x__)) || defined(CONFIG_SPARC64)
+ #  define __PRI64_PREFIX	&quot;l&quot;
+ # else
+ #  define __PRI64_PREFIX	&quot;ll&quot;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000121.html">[Stgt-svn] r127 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000123.html">[Stgt-svn] r129 - trunk/istgt/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#122">[ date ]</a>
+              <a href="thread.html#122">[ thread ]</a>
+              <a href="subject.html#122">[ subject ]</a>
+              <a href="author.html#122">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

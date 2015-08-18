@@ -1,0 +1,237 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r495 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-June/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r495%20-%20trunk/kernel&In-Reply-To=%3C200606270427.k5R4RgPP021122%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000481.html">
+   <LINK REL="Next"  HREF="000483.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r495 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r495%20-%20trunk/kernel&In-Reply-To=%3C200606270427.k5R4RgPP021122%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r495 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Jun 27 06:27:42 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000481.html">[Stgt-svn] r494 - in trunk: ibmvstgt/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000483.html">[Stgt-svn] r496 - trunk/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#482">[ date ]</a>
+              <a href="thread.html#482">[ thread ]</a>
+              <a href="subject.html#482">[ subject ]</a>
+              <a href="author.html#482">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-06-27 06:27:41 +0200 (Tue, 27 Jun 2006)
+New Revision: 495
+
+Modified:
+   trunk/kernel/scsi_tgt_lib.c
+Log:
+Move scsi_get_host_command and scsi_put_host_command to scsi_tgt_lib.c
+from scsi.c
+
+A target driver allocates scsi_cmnd structure via
+scsi_get_host_command, then pass it to tgt core via
+scsi_tgt_queue_command. scsi_tgt_queue_command could fail because it
+needs to allocate scsi_tgt_cmd structure (for tgt specific data).
+Allocating scsi_tgt_cmd structure in scsi_host_get_command simplifies
+target drivers.
+
+
+Modified: trunk/kernel/scsi_tgt_lib.c
+===================================================================
+--- trunk/kernel/scsi_tgt_lib.c	2006-06-27 03:54:46 UTC (rev 494)
++++ trunk/kernel/scsi_tgt_lib.c	2006-06-27 04:27:41 UTC (rev 495)
+@@ -70,6 +70,95 @@
+ 	struct list_head cmd_req;
+ };
+ 
++/*
++ * Function:	scsi_host_get_command()
++ *
++ * Purpose:	Allocate and setup a scsi command block and blk request
++ *
++ * Arguments:	shost	- scsi host
++ *		data_dir - dma data dir
++ *		gfp_mask- allocator flags
++ *
++ * Returns:	The allocated scsi command structure.
++ *
++ * This should be called by target LLDs to get a command.
++ */
++struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *shost,
++					enum dma_data_direction data_dir,
++					gfp_t gfp_mask)
++{
++	int write = (data_dir == DMA_TO_DEVICE);
++	struct request *rq;
++	struct scsi_cmnd *cmd;
++	struct scsi_tgt_cmd *tcmd;
++
++	/* Bail if we can't get a reference to the device */
++	if (!get_device(&amp;shost-&gt;shost_gendev))
++		return NULL;
++
++	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
++	if (!tcmd)
++		goto put_dev;
++
++	rq = blk_get_request(shost-&gt;uspace_req_q, write, gfp_mask);
++	if (!rq)
++		goto free_tcmd;
++
++	cmd = __scsi_get_command(shost, gfp_mask);
++	if (!cmd)
++		goto release_rq;
++
++	memset(cmd, 0, sizeof(*cmd));
++	cmd-&gt;sc_data_direction = data_dir;
++	cmd-&gt;jiffies_at_alloc = jiffies;
++	cmd-&gt;request = rq;
++
++	rq-&gt;special = cmd;
++	rq-&gt;flags |= REQ_SPECIAL | REQ_BLOCK_PC;
++	rq-&gt;end_io_data = tcmd;
++
++	return cmd;
++
++release_rq:
++	blk_put_request(rq);
++free_tcmd:
++	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
++put_dev:
++	put_device(&amp;shost-&gt;shost_gendev);
++	return NULL;
++
++}
++EXPORT_SYMBOL_GPL(scsi_host_get_command);
++
++/*
++ * Function:	scsi_host_put_command()
++ *
++ * Purpose:	Free a scsi command block
++ *
++ * Arguments:	shost	- scsi host
++ * 		cmd	- command block to free
++ *
++ * Returns:	Nothing.
++ *
++ * Notes:	The command must not belong to any lists.
++ */
++static void scsi_host_put_command(struct Scsi_Host *shost,
++				  struct scsi_cmnd *cmd)
++{
++	struct request_queue *q = shost-&gt;uspace_req_q;
++	struct request *rq = cmd-&gt;request;
++	struct scsi_tgt_cmd *tcmd = rq-&gt;end_io_data;
++	unsigned long flags;
++
++	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
++
++	spin_lock_irqsave(q-&gt;queue_lock, flags);
++	__blk_put_request(q, rq);
++	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
++
++	__scsi_put_command(shost, cmd, &amp;shost-&gt;shost_gendev);
++}
++
+ static void scsi_unmap_user_pages(struct scsi_tgt_cmd *tcmd)
+ {
+ 	struct bio *bio;
+@@ -110,7 +199,6 @@
+ 		cmd-&gt;request-&gt;flags &amp;= ~1UL;
+ 
+ 	scsi_unmap_user_pages(tcmd);
+-	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+ 	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+ }
+ 
+@@ -177,13 +265,13 @@
+ 		goto retry;
+ }
+ 
+-/**
++/*
+  * scsi_tgt_alloc_queue - setup queue used for message passing
+  * shost: scsi host
+  *
+  * This should be called by the LLD after host allocation.
+  * And will be released when the host is released.
+- **/
++ */
+ int scsi_tgt_alloc_queue(struct Scsi_Host *shost)
+ {
+ 	struct scsi_tgt_queuedata *queuedata;
+@@ -244,29 +332,20 @@
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
+ 
+-/**
++/*
+  * scsi_tgt_queue_command - queue command for userspace processing
+  * @cmd:	scsi command
+  * @scsilun:	scsi lun
+  * @noblock:	set to nonzero if the command should be queued
+- **/
++ */
+ int scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+ 			   u64 tag)
+ {
+ 	struct request_queue *q = cmd-&gt;request-&gt;q;
+ 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+ 	unsigned long flags;
+-	struct scsi_tgt_cmd *tcmd;
++	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+ 
+-	/*
+-	 * It would be better to allocate scsi_tgt_cmd structure in
+-	 * scsi_host_get_command and not to fail due to OOM.
+-	 */
+-	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+-	if (!tcmd)
+-		return -ENOMEM;
+-	cmd-&gt;request-&gt;end_io_data = tcmd;
+-
+ 	bio_list_init(&amp;tcmd-&gt;xfer_list);
+ 	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+ 	tcmd-&gt;lun = scsilun;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000481.html">[Stgt-svn] r494 - in trunk: ibmvstgt/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000483.html">[Stgt-svn] r496 - trunk/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#482">[ date ]</a>
+              <a href="thread.html#482">[ thread ]</a>
+              <a href="subject.html#482">[ subject ]</a>
+              <a href="author.html#482">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

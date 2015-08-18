@@ -1,0 +1,228 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r761 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r761%20-%20trunk/usr&In-Reply-To=%3C200701061214.l06CErdc010078%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000747.html">
+   <LINK REL="Next"  HREF="000749.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r761 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r761%20-%20trunk/usr&In-Reply-To=%3C200701061214.l06CErdc010078%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r761 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Jan  6 13:14:53 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000747.html">[Stgt-svn] r760 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000749.html">[Stgt-svn] r762 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#748">[ date ]</a>
+              <a href="thread.html#748">[ thread ]</a>
+              <a href="subject.html#748">[ subject ]</a>
+              <a href="author.html#748">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-06 13:14:53 +0100 (Sat, 06 Jan 2007)
+New Revision: 761
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/target.h
+Log:
+Remove target_hash_list
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-01-06 10:10:31 UTC (rev 760)
++++ trunk/usr/target.c	2007-01-06 12:14:53 UTC (rev 761)
+@@ -37,29 +37,17 @@
+ #include &quot;tgtadm.h&quot;
+ 
+ static struct target *hostt[MAX_NR_HOST];
+-static struct list_head target_hash_list[1 &lt;&lt; HASH_ORDER];
+ static LIST_HEAD(target_list);
+ 
+ static struct target *target_lookup(int tid)
+ {
+ 	struct target *target;
+-	list_for_each_entry(target, &amp;target_hash_list[hashfn(tid)], t_hlist)
++	list_for_each_entry(target, &amp;target_list, target_siblings)
+ 		if (target-&gt;tid == tid)
+ 			return target;
+ 	return NULL;
+ }
+ 
+-static void target_hlist_insert(struct target *target)
+-{
+-	struct list_head *list = &amp;target_hash_list[hashfn(target-&gt;tid)];
+-	list_add(&amp;target-&gt;t_hlist, list);
+-}
+-
+-static void target_hlist_remove(struct target *target)
+-{
+-	list_del(&amp;target-&gt;t_hlist);
+-}
+-
+ static struct tgt_device *device_lookup(struct target *target, uint64_t lun)
+ {
+ 	struct tgt_device *device;
+@@ -911,7 +899,7 @@
+ 	if (!ac)
+ 		return;
+ 
+-	list_for_each_entry(target, &amp;target_list, t_list) {
++	list_for_each_entry(target, &amp;target_list, target_siblings) {
+ 		account_ctl(target-&gt;tid, ACCOUNT_TYPE_INCOMING, ac-&gt;user, 0);
+ 		account_ctl(target-&gt;tid, ACCOUNT_TYPE_OUTGOING, ac-&gt;user, 0);
+ 	}
+@@ -1120,7 +1108,7 @@
+ 	struct acl_entry *acl;
+ 	struct it_nexus *nexus;
+ 
+-	list_for_each_entry(target, &amp;target_list, t_list) {
++	list_for_each_entry(target, &amp;target_list, target_siblings) {
+ 		shprintf(total, buf, rest,
+ 			 &quot;Target %d: %s\n&quot;
+ 			 TAB1 &quot;System information:\n&quot;
+@@ -1140,6 +1128,22 @@
+ 				shprintf(total, buf, rest, &quot;%s&quot;, nexus-&gt;info);
+ 		}
+ 
++		shprintf(total, buf, rest, TAB1 &quot;LUN information:\n&quot;);
++		list_for_each_entry(device, &amp;target-&gt;device_list, device_siblings)
++			shprintf(total, buf, rest,
++				 TAB2 &quot;LUN: %&quot; PRIu64 &quot;\n&quot;
++				 TAB3 &quot;SCSI ID: %s\n&quot;
++				 TAB3 &quot;SCSI SN: %s\n&quot;
++				 TAB3 &quot;Size: %s\n&quot;
++				 TAB3 &quot;Backing store: %s\n&quot;
++				 TAB3 &quot;Backing store type: %s\n&quot;,
++				 device-&gt;lun,
++				 device-&gt;scsi_id,
++				 device-&gt;scsi_sn,
++				 print_disksize(device-&gt;size),
++				 device-&gt;path,
++				 target_iotype_name(target-&gt;target_iotype));
++
+ 		if (!strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;)) {
+ 			int i, aid;
+ 
+@@ -1161,22 +1165,6 @@
+ 		shprintf(total, buf, rest, TAB1 &quot;ACL information:\n&quot;);
+ 		list_for_each_entry(acl, &amp;target-&gt;acl_list, aclent_list)
+ 			shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;, acl-&gt;address);
+-
+-		shprintf(total, buf, rest, TAB1 &quot;LUN information:\n&quot;);
+-		list_for_each_entry(device, &amp;target-&gt;device_list, device_siblings)
+-			shprintf(total, buf, rest,
+-				 TAB2 &quot;LUN: %&quot; PRIu64 &quot;\n&quot;
+-				 TAB3 &quot;SCSI ID: %s\n&quot;
+-				 TAB3 &quot;SCSI SN: %s\n&quot;
+-				 TAB3 &quot;Size: %s\n&quot;
+-				 TAB3 &quot;Backing store: %s\n&quot;
+-				 TAB3 &quot;Backing store type: %s\n&quot;,
+-				 device-&gt;lun,
+-				 device-&gt;scsi_id,
+-				 device-&gt;scsi_sn,
+-				 print_disksize(device-&gt;size),
+-				 device-&gt;path,
+-				 target_iotype_name(target-&gt;target_iotype));
+ 	}
+ 	return total;
+ overflow:
+@@ -1263,16 +1251,14 @@
+ 	target-&gt;lid = lld;
+ 
+ 	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
+-	target_hlist_insert(target);
+ 
+-	list_for_each_entry(pos, &amp;target_list, t_list) {
++	list_for_each_entry(pos, &amp;target_list, target_siblings)
+ 		if (target-&gt;tid &lt; pos-&gt;tid)
+ 			break;
+-	}
+-	list_add_tail(&amp;target-&gt;t_list, &amp;pos-&gt;t_list);
+ 
+-	INIT_LIST_HEAD(&amp;target-&gt;acl_list);
++	list_add_tail(&amp;target-&gt;target_siblings, &amp;pos-&gt;target_siblings);
+ 
++	INIT_LIST_HEAD(&amp;target-&gt;acl_list);
+ 	INIT_LIST_HEAD(&amp;target-&gt;it_nexus_list);
+ 
+ 	dprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+@@ -1297,8 +1283,7 @@
+ 	if (!list_empty(&amp;target-&gt;cmd_queue.queue))
+ 		return TGTADM_TARGET_ACTIVE;
+ 
+-	target_hlist_remove(target);
+-	list_del(&amp;target-&gt;t_list);
++	list_del(&amp;target-&gt;target_siblings);
+ 
+ 	list_for_each_entry_safe(acl, tmp, &amp;target-&gt;acl_list, aclent_list) {
+ 		list_del(&amp;acl-&gt;aclent_list);
+@@ -1328,10 +1313,3 @@
+ overflow:
+ 	return max;
+ }
+-
+-__attribute__((constructor)) static void target_init(void)
+-{
+-	int i;
+-	for (i = 0; i &lt; ARRAY_SIZE(target_hash_list); i++)
+-		INIT_LIST_HEAD(&amp;target_hash_list[i]);
+-}
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-01-06 10:10:31 UTC (rev 760)
++++ trunk/usr/target.h	2007-01-06 12:14:53 UTC (rev 761)
+@@ -41,8 +41,7 @@
+ 	enum scsi_target_iotype target_iotype;
+ 	enum scsi_target_state target_state;
+ 
+-	struct list_head t_list;
+-	struct list_head t_hlist;
++	struct list_head target_siblings;
+ 
+ 	struct list_head device_list;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000747.html">[Stgt-svn] r760 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000749.html">[Stgt-svn] r762 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#748">[ date ]</a>
+              <a href="thread.html#748">[ thread ]</a>
+              <a href="subject.html#748">[ subject ]</a>
+              <a href="author.html#748">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,139 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r515 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r515%20-%20trunk/usr&In-Reply-To=%3C200608020518.k725IWbS018312%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000503.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r515 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r515%20-%20trunk/usr&In-Reply-To=%3C200608020518.k725IWbS018312%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r515 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Aug  2 07:18:32 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000503.html">[Stgt-svn] r516 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#502">[ date ]</a>
+              <a href="thread.html#502">[ thread ]</a>
+              <a href="subject.html#502">[ subject ]</a>
+              <a href="author.html#502">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-02 07:18:25 +0200 (Wed, 02 Aug 2006)
+New Revision: 515
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/tgtd.c
+Log:
+Add regular file support to tgtd.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-07-27 12:43:39 UTC (rev 514)
++++ trunk/usr/target.c	2006-08-02 05:18:25 UTC (rev 515)
+@@ -30,6 +30,7 @@
+ #include &lt;sys/ioctl.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/socket.h&gt;
++#include &lt;sys/stat.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+ #define BITS_PER_LONG (ULONG_MAX == 0xFFFFFFFFUL ? 32 : 64)
+@@ -223,6 +224,7 @@
+ {
+ 	struct target *target;
+ 	struct tgt_device *device;
++	struct stat64 st;
+ 	int err, dev_fd;
+ 	uint64_t size;
+ 
+@@ -240,16 +242,29 @@
+ 
+ 	dev_fd = open(path, O_RDWR | O_LARGEFILE);
+ 	if (dev_fd &lt; 0) {
+-		eprintf(&quot;Could not open %s errno %d\n&quot;, path, errno);
++		eprintf(&quot;Could not open %s %s\n&quot;, path, strerror(errno));
+ 		return dev_fd;
+ 	}
+ 
+-	err = ioctl(dev_fd, BLKGETSIZE64, &amp;size);
++	err = fstat64(dev_fd, &amp;st);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;Cannot get size %d\n&quot;, dev_fd);
+-		return err;
++		printf(&quot;Cannot get stat %d %s\n&quot;, dev_fd, strerror(errno));
++		goto close_dev_fd;
+ 	}
+ 
++	if (S_ISREG(st.st_mode))
++		size = st.st_size;
++	else if(S_ISBLK(st.st_mode)) {
++		err = ioctl(dev_fd, BLKGETSIZE64, &amp;size);
++		if (err &lt; 0) {
++			eprintf(&quot;Cannot get size %s\n&quot;, strerror(errno));
++			goto close_dev_fd;
++		}
++	} else {
++		eprintf(&quot;Cannot use this mode %x\n&quot;, st.st_mode);
++		goto close_dev_fd;
++	}
++
+ 	if (dev_id &gt;= target-&gt;max_device)
+ 		resize_device_table(target, dev_id);
+ 
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-07-27 12:43:39 UTC (rev 514)
++++ trunk/usr/tgtd.c	2006-08-02 05:18:25 UTC (rev 515)
+@@ -240,7 +240,7 @@
+ 	while ((ch = getopt_long(argc, argv, &quot;l:fd:vh&quot;, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+-		case 'p':
++		case 'l':
+ 			nr_lld = lld_init(optarg, &amp;nr_pfd);
+ 			break;
+ 		case 'f':
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000503.html">[Stgt-svn] r516 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#502">[ date ]</a>
+              <a href="thread.html#502">[ thread ]</a>
+              <a href="subject.html#502">[ subject ]</a>
+              <a href="author.html#502">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,558 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r214 - in trunk: include istgt/kernel kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r214%20-%20in%20trunk%3A%20include%20istgt/kernel%20kernel%20usr&In-Reply-To=%3C200512290127.jBT1RNin006565%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000200.html">
+   <LINK REL="Next"  HREF="000202.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r214 - in trunk: include istgt/kernel kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r214%20-%20in%20trunk%3A%20include%20istgt/kernel%20kernel%20usr&In-Reply-To=%3C200512290127.jBT1RNin006565%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r214 - in trunk: include istgt/kernel kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Dec 29 02:27:23 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000200.html">[Stgt-svn] r213 - in trunk: . include istgt/usr kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000202.html">[Stgt-svn] r215 - in trunk: include usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#201">[ date ]</a>
+              <a href="thread.html#201">[ thread ]</a>
+              <a href="subject.html#201">[ subject ]</a>
+              <a href="author.html#201">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-29 02:27:05 +0100 (Thu, 29 Dec 2005)
+New Revision: 214
+
+Modified:
+   trunk/include/tgt_if.h
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_priv.h
+   trunk/usr/dl.c
+   trunk/usr/dl.h
+   trunk/usr/netlink.c
+   trunk/usr/scsi.c
+Log:
+Remove mgmt code.
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/include/tgt_if.h	2005-12-29 01:27:05 UTC (rev 214)
+@@ -16,13 +16,11 @@
+ 	TGT_UEVENT_DEVICE_CREATE,
+ 	TGT_UEVENT_DEVICE_DESTROY,
+ 	TGT_UEVENT_CMD_RES,
+-	TGT_UEVENT_TASK_MGMT,
+ 
+ 	/* kernel -&gt; user */
+ 	TGT_KEVENT_RESPONSE,
+ 	TGT_KEVENT_CMD_REQ,
+ 	TGT_KEVENT_TARGET_PASSTHRU,
+-	TGT_KEVENT_TASK_MGMT,
+ 	TGT_KEVENT_CMD_DONE,
+ };
+ 
+@@ -68,15 +66,6 @@
+ 			uint8_t rw;
+ 			uint8_t try_map;
+ 		} cmd_res;
+-		struct {
+-			uint64_t rid;
+-			int func;
+-			int tid;
+-			uint64_t sid;
+-			uint64_t dev_id;
+-			uint64_t tag;
+-			int result;
+-		} task_mgmt;
+ 	} u;
+ 
+ 	/* kernel -&gt; user */
+@@ -98,17 +87,8 @@
+ 			int typeid;
+ 		} tgt_passthru;
+ 		struct {
+-			uint64_t rid;
+-			int func;
+ 			int tid;
+ 			int typeid;
+-			uint64_t sid;
+-			uint64_t dev_id;
+-			uint64_t tag;
+-		} task_mgmt;
+-		struct {
+-			int tid;
+-			int typeid;
+ 			unsigned long uaddr;
+ 			uint32_t len;
+ 			int mmapped;
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/istgt/kernel/iscsi.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -1149,14 +1149,15 @@
+ /* 	} */
+ /* } */
+ 
+-static void istgt_task_mgmt_done(uint64_t rid, int err)
++static void execute_task_management(struct istgt_cmd *req)
+ {
++/* 	struct iscsi_conn *conn = req-&gt;conn; */
++/* 	struct iscsi_target *target = conn-&gt;session-&gt;target; */
+ 	struct istgt_cmd *rsp;
+-	struct iscsi_tm_rsp *rsp_hdr;
+-	struct istgt_cmd *req = (void*)(unsigned long) rid;
+ 	struct iscsi_tm *req_hdr = (struct iscsi_tm *)&amp;req-&gt;pdu.bhs;
++	struct iscsi_tm_rsp *rsp_hdr;
++	int function = req_hdr-&gt;flags &amp; ISCSI_FLAG_TM_FUNC_MASK;
+ 
+-	eprintk(&quot;%llu %d\n&quot;, (unsigned long long) rid, err);
+ 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1);
+ 	rsp_hdr = (struct iscsi_tm_rsp *)&amp;rsp-&gt;pdu.bhs;
+ 
+@@ -1166,20 +1167,8 @@
+ /* 	rsp_hdr-&gt;response = ISCSI_TMF_RSP_COMPLETE; */
+ 	rsp_hdr-&gt;response = ISCSI_TMF_RSP_REJECTED;
+ 
+-	iscsi_cmnd_init_write(rsp);
+-}
++	eprintk(&quot;%x %d %x\n&quot;, cmd_itt(req), function, req_hdr-&gt;rtt);
+ 
+-static void execute_task_management(struct istgt_cmd *req)
+-{
+-	struct iscsi_conn *conn = req-&gt;conn;
+-	struct iscsi_target *target = conn-&gt;session-&gt;target;
+-	struct iscsi_tm *req_hdr = (struct iscsi_tm *)&amp;req-&gt;pdu.bhs;
+-	int func = req_hdr-&gt;flags &amp; ISCSI_FLAG_TM_FUNC_MASK;
+-
+-	eprintk(&quot;%p %x %d %x\n&quot;, req, cmd_itt(req), func, req_hdr-&gt;rtt);
+-	tgt_task_mgmt_send(target-&gt;tt, (uint64_t) (unsigned long) req,
+-			   func, 0, 0, GFP_KERNEL);
+-
+ /* 	switch (function) { */
+ /* 	case ISCSI_FUNCTION_ABORT_TASK: */
+ /* 	case ISCSI_FUNCTION_ABORT_TASK_SET: */
+@@ -1224,6 +1213,7 @@
+ /* 		break; */
+ /* 	} */
+ /* out: */
++	iscsi_cmnd_init_write(rsp);
+ }
+ 
+ static void noop_out_exec(struct istgt_cmd *req)
+@@ -1706,7 +1696,6 @@
+ 	.msg_recv = iet_msg_recv,
+ 	.transfer_response = scsi_cmnd_done,
+ 	.transfer_write_data = buffer_ready,
+-	.task_mgmt_done = istgt_task_mgmt_done,
+ 	.priv_data_size = sizeof(struct iscsi_target),
+ };
+ 
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/kernel/tgt.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -913,50 +913,6 @@
+ 	return 0;
+ }
+ 
+-/* Should we create proto-&gt;task_mgmt ? */
+-
+-struct tgt_task_mgmt_info {
+-	struct tgt_target *target;
+-	struct work_struct work;
+-	uint64_t rid;
+-	int res;
+-};
+-
+-static void tgt_task_mgmt_done(void *data)
+-{
+-	struct tgt_task_mgmt_info *mi = (struct tgt_task_mgmt_info *) data;
+-	struct tgt_target *target = mi-&gt;target;
+-
+-	target-&gt;tt-&gt;task_mgmt_done(mi-&gt;rid, mi-&gt;res);
+-	kfree(mi);
+-}
+-
+-int tgt_task_mgmt(uint64_t rid, int func, int tid, uint64_t sid,
+-		  uint64_t dev_id, uint64_t tag, int res)
+-{
+-	int err = 0;
+-	struct tgt_target *target = target_find(tid);
+-	struct tgt_task_mgmt_info *mi;
+-
+-	dprintk(&quot;%llu %d %d %llu %llu %llu %d\n&quot;,
+-		rid, func, tid, sid, dev_id, tag, res);
+-
+-	if (target &amp;&amp; target-&gt;tt-&gt;task_mgmt_done) {
+-		mi = kzalloc(sizeof(*mi), GFP_KERNEL);
+-		if (!mi)
+-			return -ENOMEM;
+-
+-		mi-&gt;target = target;
+-		mi-&gt;rid = rid;
+-		mi-&gt;res = res;
+-		INIT_WORK(&amp;mi-&gt;work, tgt_task_mgmt_done, mi);
+-		queue_work(target-&gt;twq, &amp;mi-&gt;work);
+-	} else
+-		err = -EINVAL;
+-
+-	return err;
+-}
+-
+ static void __exit tgt_exit(void)
+ {
+ 	tgt_nl_exit();
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/kernel/tgt.h	2005-12-29 01:27:05 UTC (rev 214)
+@@ -99,9 +99,6 @@
+ 	       uint32_t data_len, enum dma_data_direction data_dir,
+ 	       uint8_t *dev_buf, int dev_buf_size, int flags);
+ extern void tgt_transfer_response(void *cmd);
+-extern int tgt_task_mgmt_send(struct tgt_target *target, uint64_t rid,
+-			      int func, uint64_t dev_id, uint64_t tag,
+-			      gfp_t gfp_mask);
+ extern int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags);
+ 
+ #define DEBUG_TGT 1
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/kernel/tgt_nl.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -106,27 +106,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
+ 
+-int tgt_task_mgmt_send(struct tgt_target *target, uint64_t rid,
+-		       int func, uint64_t dev_id, uint64_t tag, gfp_t flags)
+-{
+-	struct tgt_event ev;
+-
+-	memset(&amp;ev, 0, sizeof(ev));
+-
+-	dprintk(&quot;%llu %d %llu %llu\n&quot;, rid, func, dev_id, tag);
+-
+-	ev.k.task_mgmt.rid = rid;
+-	ev.k.task_mgmt.func = func;
+-	ev.k.task_mgmt.tid = target-&gt;tid;
+-	ev.k.task_mgmt.typeid = target-&gt;typeid;
+-/* 	ev.k.task_mgmt.sid = (uint64_t) session; */
+-	ev.k.task_mgmt.dev_id = dev_id;
+-	ev.k.task_mgmt.tag = tag;
+-
+-	return send_event_res(TGT_KEVENT_TASK_MGMT, &amp;ev, NULL, 0, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_task_mgmt_send);
+-
+ static int event_recv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
+ {
+ 	int err = 0;
+@@ -188,13 +167,6 @@
+ 				      ev-&gt;u.cmd_res.uaddr, ev-&gt;u.cmd_res.rw,
+ 				      ev-&gt;u.cmd_res.try_map);
+ 		break;
+-	case TGT_UEVENT_TASK_MGMT:
+-		err = tgt_task_mgmt(ev-&gt;u.task_mgmt.rid, ev-&gt;u.task_mgmt.func,
+-				    ev-&gt;u.task_mgmt.tid, ev-&gt;u.task_mgmt.sid,
+-				    ev-&gt;u.task_mgmt.dev_id,
+-				    ev-&gt;u.task_mgmt.tag,
+-				    ev-&gt;u.task_mgmt.result);
+-		break;
+ 	default:
+ 		eprintk(&quot;unknown type %d\n&quot;, nlh-&gt;nlmsg_type);
+ 		err = -EINVAL;
+
+Modified: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/kernel/tgt_priv.h	2005-12-29 01:27:05 UTC (rev 214)
+@@ -12,9 +12,6 @@
+ 			   int result, uint32_t len, uint64_t offset,
+ 			   unsigned long addr,
+ 			   uint8_t rw, uint8_t try_map);
+-extern int tgt_task_mgmt(uint64_t fid, int func, int tid, uint64_t sid,
+-			 uint64_t lun, uint64_t tag, int res);
+-
+ extern struct task_struct *tgtd_tsk;
+ 
+ /* netlink */
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/usr/dl.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -171,14 +171,6 @@
+ 	return NULL;
+ }
+ 
+-void *dl_task_mgmt_fn(int typeid)
+-{
+-	if (dinfo[typeid].pdl)
+-		return dlsym(dinfo[typeid].pdl, &quot;task_mgmt&quot;);
+-
+-	return NULL;
+-}
+-
+ void *dl_cmd_done_fn(int typeid)
+ {
+ 	if (dinfo[typeid].pdl)
+
+Modified: trunk/usr/dl.h
+===================================================================
+--- trunk/usr/dl.h	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/usr/dl.h	2005-12-29 01:27:05 UTC (rev 214)
+@@ -12,7 +12,6 @@
+ extern void *dl_ipc_fn(int typeid);
+ extern void *dl_event_fn(int tid, int typeid);
+ extern void *dl_proto_cmd_process(int tid, int typeid);
+-extern void *dl_task_mgmt_fn(int typeid);
+ extern void *dl_cmd_done_fn(int typeid);
+ 
+ extern char *typeid_to_name(int typeid);
+
+Modified: trunk/usr/netlink.c
+===================================================================
+--- trunk/usr/netlink.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/usr/netlink.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -156,18 +156,6 @@
+ 			  NLMSG_SPACE(sizeof(*ev_res)));
+ }
+ 
+-static void nl_task_mgmt(struct tgt_event *ev)
+-{
+-	void (*fn) (char *);
+-
+-	fn = dl_task_mgmt_fn(ev-&gt;k.task_mgmt.typeid);
+-	if (fn)
+-		fn((char *) ev);
+-	else
+-		eprintf(&quot;Cannot handle task management %d\n&quot;,
+-			ev-&gt;k.task_mgmt.tid);
+-}
+-
+ void nl_event_handle(int fd)
+ {
+ 	struct nlmsghdr *nlh;
+@@ -195,9 +183,6 @@
+ 			eprintf(&quot;Cannot handle async event %d\n&quot;,
+ 				ev-&gt;k.tgt_passthru.tid);
+ 		break;
+-	case TGT_KEVENT_TASK_MGMT:
+-		nl_task_mgmt(ev);
+-		break;
+ 	case TGT_KEVENT_CMD_DONE:
+ 		fn = dl_cmd_done_fn(ev-&gt;k.cmd_done.typeid);
+ 		if (fn)
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2005-12-29 01:19:48 UTC (rev 213)
++++ trunk/usr/scsi.c	2005-12-29 01:27:05 UTC (rev 214)
+@@ -662,157 +662,6 @@
+ 	return result;
+ }
+ 
+-/* TODO: Create transport specific library. */
+-
+-int iscsi_task_mgmt(int *func)
+-{
+-	int err = 0;
+-
+-	switch (*func) {
+-	case ISCSI_TM_FUNC_ABORT_TASK:
+-		*func = ABORT_TASK;
+-		break;
+-	case ISCSI_TM_FUNC_ABORT_TASK_SET:
+-		*func = ABORT_TASK_SET;
+-		break;
+-	case ISCSI_TM_FUNC_CLEAR_ACA:
+-		*func = CLEAR_ACA;
+-		break;
+-	case ISCSI_TM_FUNC_CLEAR_TASK_SET:
+-		*func = CLEAR_TASK_SET;
+-		break;
+-	case ISCSI_TM_FUNC_LOGICAL_UNIT_RESET:
+-		*func = LOGICAL_UNIT_RESET;
+-		break;
+-	case ISCSI_TM_FUNC_TARGET_WARM_RESET:
+-	case ISCSI_TM_FUNC_TARGET_COLD_RESET:
+-		/* TODO: call tgt task mgmt function again and again. */
+-		err = TMF_RSP_REJECTED;
+-		break;
+-	case ISCSI_TM_FUNC_TASK_REASSIGN:
+-	default:
+-		err = TMF_RSP_REJECTED;
+-		break;
+-	}
+-	return err;
+-}
+-
+-int srp_task_mgmt(int *func)
+-{
+-	int err = 0;
+-
+-	switch (*func) {
+-	case SRP_TSK_ABORT_TASK:
+-		*func = ABORT_TASK;
+-		break;
+-	case SRP_TSK_ABORT_TASK_SET:
+-		*func = ABORT_TASK_SET;
+-		break;
+-	case SRP_TSK_CLEAR_TASK_SET:
+-		*func = CLEAR_TASK_SET;
+-		break;
+-	case SRP_TSK_LUN_RESET:
+-		*func = LOGICAL_UNIT_RESET;
+-		break;
+-	case SRP_TSK_CLEAR_ACA:
+-		*func = CLEAR_ACA;
+-		break;
+-	default:
+-		err = TMF_RSP_REJECTED;
+-		break;
+-	}
+-	return err;
+-}
+-
+-static int do_task_mgmt(uint64_t rid, int func, int tid, int type,
+-			uint64_t sid, uint64_t lun, uint64_t tag)
+-{
+-	struct tgt_event *ev;
+-	struct nlmsghdr *nlh;
+-	char nlm_sev[NLMSG_SPACE(sizeof(struct tgt_event))];
+-	char nlm_rev[NLMSG_SPACE(sizeof(struct tgt_event))];
+-	int fd, err;
+-	uint64_t size;
+-	char path[PATH_MAX], buf[128];
+-
+-	snprintf(path, sizeof(path),
+-		 TGT_TYPE_SYSFSDIR &quot;/driver%d/subprotocol&quot;, type);
+-	fd = open(path, O_RDONLY);
+-	if (fd &lt; 0) {
+-		err = TMF_RSP_TARGET_FAILURE;
+-		goto out;
+-	}
+-
+-	err = read(fd, buf, sizeof(buf));
+-	close(fd);
+-	if (err &lt; 0) {
+-		err = TMF_RSP_TARGET_FAILURE;
+-		goto out;
+-	}
+-
+-	if (!strncmp(buf, &quot;iscsi&quot;, 5))
+-		err = iscsi_task_mgmt(&amp;func);
+-	else if (!strncmp(buf, &quot;srp&quot;, 3))
+-		err = srp_task_mgmt(&amp;func);
+-	else {
+-		eprintf(&quot;Cannot subprotocol %s\n&quot;, buf);
+-		err = TMF_RSP_TARGET_FAILURE;
+-	}
+-
+-	if (err) {
+-		err = TMF_RSP_TARGET_FAILURE;
+-		goto out;
+-	}
+-
+-	/* We support only I_T_L or I_T_L_Q now. */
+-
+-	errno = 0;
+-	device_info(tid, lun, &amp;size);
+-	if (errno == ENOENT) {
+-		err = TMF_RSP_INCORRECT_LUN;
+-		goto out;
+-	}
+-	err = 0;
+-
+-out:
+-	memset(nlm_sev, 0, sizeof(nlm_sev));
+-	memset(nlm_rev, 0, sizeof(nlm_rev));
+-
+-	nlh = (struct nlmsghdr *) nlm_sev;
+-	nlh-&gt;nlmsg_pid = getpid();
+-	nlh-&gt;nlmsg_len = NLMSG_SPACE(sizeof(*ev));
+-	nlh-&gt;nlmsg_flags = 0;
+-	nlh-&gt;nlmsg_type = TGT_UEVENT_TASK_MGMT;
+-
+-	ev = NLMSG_DATA(nlh);
+-	ev-&gt;u.task_mgmt.rid = rid;
+-	ev-&gt;u.task_mgmt.func = func;
+-	ev-&gt;u.task_mgmt.tid = tid;
+-	ev-&gt;u.task_mgmt.sid = sid;
+-	ev-&gt;u.task_mgmt.dev_id = lun;
+-	ev-&gt;u.task_mgmt.tag = tag;
+-	ev-&gt;u.task_mgmt.result = err;
+-
+-	err = nl_cmd_call(nl_fd, nlh-&gt;nlmsg_type, (char *) nlh,
+-			  nlh-&gt;nlmsg_len, nlm_rev, sizeof(nlm_rev));
+-
+-	return err;
+-}
+-
+-int task_mgmt(struct tgt_event *ev)
+-{
+-	dprintf(&quot;%&quot; PRIu64 &quot; %d %d %d %&quot; PRIu64 &quot; %&quot; PRIu64 &quot; %&quot; PRIu64 &quot;\n&quot;,
+-		ev-&gt;k.task_mgmt.rid, ev-&gt;k.task_mgmt.func,
+-		ev-&gt;k.task_mgmt.tid, ev-&gt;k.task_mgmt.typeid,
+-		ev-&gt;k.task_mgmt.sid, ev-&gt;k.task_mgmt.dev_id,
+-		ev-&gt;k.task_mgmt.tag);
+-
+-	return do_task_mgmt(ev-&gt;k.task_mgmt.rid, ev-&gt;k.task_mgmt.func,
+-			    ev-&gt;k.task_mgmt.tid, ev-&gt;k.task_mgmt.typeid,
+-			    ev-&gt;k.task_mgmt.sid, ev-&gt;k.task_mgmt.dev_id,
+-			    ev-&gt;k.task_mgmt.tag);
+-}
+-
+ int cmd_done(struct tgt_event *ev)
+ {
+ 	int err = 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000200.html">[Stgt-svn] r213 - in trunk: . include istgt/usr kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000202.html">[Stgt-svn] r215 - in trunk: include usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#201">[ date ]</a>
+              <a href="thread.html#201">[ thread ]</a>
+              <a href="subject.html#201">[ subject ]</a>
+              <a href="author.html#201">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,473 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r82 - in trunk: include iscsi/usr kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r82%20-%20in%20trunk%3A%20include%20iscsi/usr%20kernel&In-Reply-To=%3C200509200312.j8K3CsqK021597%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000074.html">
+   <LINK REL="Next"  HREF="000076.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r82 - in trunk: include iscsi/usr kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r82%20-%20in%20trunk%3A%20include%20iscsi/usr%20kernel&In-Reply-To=%3C200509200312.j8K3CsqK021597%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r82 - in trunk: include iscsi/usr kernel">mnc at berlios.de
+       </A><BR>
+    <I>Tue Sep 20 05:12:54 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000074.html">[Stgt-svn] r81 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000076.html">[Stgt-svn] r83 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#75">[ date ]</a>
+              <a href="thread.html#75">[ thread ]</a>
+              <a href="subject.html#75">[ subject ]</a>
+              <a href="author.html#75">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-20 05:12:46 +0200 (Tue, 20 Sep 2005)
+New Revision: 82
+
+Modified:
+   trunk/include/tgt_if.h
+   trunk/iscsi/usr/Makefile
+   trunk/iscsi/usr/ctldev.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sysfs.c
+   trunk/kernel/tgt_vsd.c
+Log:
+open backing device/file in userspace then pass kernel a fd
+
+Modified: trunk/include/tgt_if.h
+===================================================================
+--- trunk/include/tgt_if.h	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/include/tgt_if.h	2005-09-20 03:12:46 UTC (rev 82)
+@@ -38,6 +38,7 @@
+ 			uint64_t dev_id;
+ 			uint32_t flags;
+ 			char type[32];
++			int fd;
+ 		} c_device;
+ 		struct {
+ 			int tid;
+
+Modified: trunk/iscsi/usr/Makefile
+===================================================================
+--- trunk/iscsi/usr/Makefile	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/iscsi/usr/Makefile	2005-09-20 03:12:46 UTC (rev 82)
+@@ -1,4 +1,4 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -I../include -I../../include
++CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -I../include -I../../include -DNETLINK_TGT=20
+ PROGRAMS = ietd ietadm
+ LIBS = -lcrypto
+ 
+
+Modified: trunk/iscsi/usr/ctldev.c
+===================================================================
+--- trunk/iscsi/usr/ctldev.c	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/iscsi/usr/ctldev.c	2005-09-20 03:12:46 UTC (rev 82)
+@@ -6,7 +6,6 @@
+ 
+ #include &lt;ctype.h&gt;
+ #include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+@@ -17,6 +16,7 @@
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/un.h&gt;
++#include &lt;asm/fcntl.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;iscsid.h&quot;
+@@ -332,27 +332,32 @@
+ static int ipc_cmnd_execute(char *data, int len)
+ {
+ 	int fd, err;
+-	struct sockaddr_un addr;
++	struct sockaddr_nl addr;
+ 	char nlm_ev[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 	struct tgt_event *ev;
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
+ 
+-	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+-	if (fd &lt; 0)
++	fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_TGT);
++	if (fd &lt; 0) {
++		log_error(&quot;Could not create socket %d %d\n&quot;, fd, errno);
+ 		return fd;
+-
++	}
+ 	memset(&amp;addr, 0, sizeof(addr));
+-	addr.sun_family = AF_LOCAL;
+-	memcpy((char *) &amp;addr.sun_path + 1, TGT_IPC_NAMESPACE,
+-	       strlen(TGT_IPC_NAMESPACE));
++	addr.nl_family = AF_NETLINK;
++	addr.nl_pid = 0;
++	addr.nl_groups = 0;
+ 
+ 	err = connect(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+-	if (err &lt; 0)
++	if (err &lt; 0) {
++		log_error(&quot;Could not connect %d %d\n&quot;, err, errno);
+ 		return err;
++	}
+ 
+ 	err = write(fd, data, len);
+-	if (err &lt; 0)
++	if (err &lt; 0) {
++		log_error(&quot;sendmsg failed %d %d\n&quot;, err, errno);
+ 		goto out;
++	}
+ 
+ 	err = read(fd, nlm_ev, sizeof(nlm_ev));
+ 	if (err &lt; 0)
+@@ -423,7 +428,7 @@
+ 
+ static int iscsi_lunit_create(u32 tid, u32 lun, char *args)
+ {
+-	int err;
++	int err, fd;
+ 	char nlm_ev[8912], *p, *q, *type = NULL, *path = NULL;
+ 	char dtype[] = &quot;tgt_vsd&quot;;
+ 	struct tgt_event *ev;
+@@ -460,27 +465,37 @@
+ 	fprintf(stderr, &quot;%s %d %s %s %Zd %Zd\n&quot;,
+ 		__FUNCTION__, __LINE__, type, path, strlen(path), sizeof(*ev));
+ 
++	fd = open(path, O_RDWR | O_LARGEFILE);
++	if (fd &lt; 0) {
++		log_error(&quot;Could not open %s errno %d\n&quot;, path, errno);
++		return errno;
++	}
++
+ 	memset(nlm_ev, 0, sizeof(nlm_ev));
+ 	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_CREATE,
+-		   NLMSG_SPACE(sizeof(*ev) + strlen(path)), 0);
++		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
++	log_error(&quot;pid %d\n&quot;, nlh-&gt;nlmsg_pid);
++
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.c_device.tid = tid;
+ 	ev-&gt;u.c_device.dev_id = lun;
++	ev-&gt;u.c_device.fd = fd;
+ 	strncpy(ev-&gt;u.c_device.type, type, sizeof(ev-&gt;u.c_device.type));
+-	memcpy((char *) ev + sizeof(*ev), path, strlen(path));
+ 
+ 	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
+-
++	if (err)
++		close(fd);
+ 	return err;
+ }
+ 
+ static int iscsi_lunit_destroy(u32 tid, u32 lun)
+ {
+-	int err;
++	int err, fd;
+ 	char nlm_ev[8912];
+ 	struct tgt_event *ev;
+ 	struct nlmsghdr *nlh = (struct nlmsghdr *) nlm_ev;
++	char path[PATH_MAX], buf[PATH_MAX];
+ 
+ 	fprintf(stderr, &quot;%s %d %d %u\n&quot;, __FUNCTION__, __LINE__, tid, lun);
+ 
+@@ -488,12 +503,27 @@
+ 	nlmsg_init(nlh, getpid(), 0, TGT_UEVENT_DEVICE_DESTROY,
+ 		   NLMSG_SPACE(sizeof(*ev)), 0);
+ 
++	sprintf(path, &quot;/sys/class/tgt_device/device%d:%d/fd&quot;, tid, lun);
++	fd = open(path, O_RDONLY);
++	if (fd &lt; 0) {
++		perror(&quot;iscsi_lunit_destroy could not open fd file&quot;);
++		return errno;
++	}
++
++	err = read(fd, buf, sizeof(buf));
++	close(fd);
++	if (err &lt; 0) {
++		perror(&quot;iscsi_lunit_destroy could not read fd file&quot;);
++		return errno;
++	}
++	sscanf(buf, &quot;%d\n&quot;, &amp;fd);
++
+ 	ev = NLMSG_DATA(nlh);
+ 	ev-&gt;u.d_device.tid = tid;
+ 	ev-&gt;u.d_device.dev_id = lun;
+ 
+ 	err = ipc_cmnd_execute(nlm_ev, nlh-&gt;nlmsg_len);
+-
++	close(fd);
+ 	return err;
+ }
+ 
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/kernel/tgt.c	2005-09-20 03:12:46 UTC (rev 82)
+@@ -438,13 +438,14 @@
+ }
+ 
+ static int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+-			      char *path, unsigned long dflags)
++			     int fd, unsigned long dflags)
+ {
+ 	struct tgt_target *target;
+ 	struct tgt_device *device;
+ 	unsigned long flags;
+ 
+-	dprintk(&quot;%d %llu %s %s\n&quot;, tid, dev_id, device_type, path);
++	dprintk(&quot;tid %d dev_id %llu type %s fd %d\n&quot;,
++		tid, dev_id, device_type, fd);
+ 
+ 	target = target_find(tid);
+ 	if (!target)
+@@ -457,14 +458,12 @@
+ 	memset(device, 0, sizeof(*device));
+ 	device-&gt;dev_id = dev_id;
+ 	device-&gt;target = target;
+-	device-&gt;path = kstrdup(path, GFP_KERNEL);
+-	if (!device-&gt;path)
+-		goto free_device;
++	device-&gt;fd = fd;
+ 
+ 	device-&gt;dt = device_template_get(device_type);
+ 	if (!device-&gt;dt) {
+ 		eprintk(&quot;Could not get devive type %s\n&quot;, device_type);
+-		goto free_path;
++		goto free_device;
+ 	}
+ 
+ 	device-&gt;dt_data = kmalloc(device-&gt;dt-&gt;priv_data_size,
+@@ -492,8 +491,6 @@
+ 	kfree(device-&gt;dt_data);
+ put_template:
+ 	device_template_put(device-&gt;dt);
+-free_path:
+-	kfree(device-&gt;path);
+ free_device:
+ 	kfree(device);
+ 	return -EINVAL;
+@@ -784,12 +781,12 @@
+ 	struct tgt_cmnd *cmnd;
+ 	struct tgt_target *target;
+ 
+-	daemon_pid  = NETLINK_CREDS(skb)-&gt;pid;
++	dprintk(&quot;%d %d %d %d\n&quot;, daemon_pid, nlh-&gt;nlmsg_type,
++		nlh-&gt;nlmsg_pid, current-&gt;pid);
+ 
+-	dprintk(&quot;%d %d\n&quot;, daemon_pid, nlh-&gt;nlmsg_type);
+-
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
++		daemon_pid  = NETLINK_CREDS(skb)-&gt;pid;
+ 		dprintk(&quot;start %d\n&quot;, daemon_pid);
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+@@ -808,14 +805,10 @@
+ 			err = -EINVAL;
+ 		break;
+ 	case TGT_UEVENT_DEVICE_CREATE:
+-		if (nlh-&gt;nlmsg_len &lt;= NLMSG_SPACE(sizeof(*ev))) {
+-			err = -EINVAL;
+-			break;
+-		}
+ 		err = tgt_device_create(ev-&gt;u.c_device.tid,
+ 					ev-&gt;u.c_device.dev_id,
+ 					ev-&gt;u.c_device.type,
+-					(char *) ev + sizeof(*ev),
++					ev-&gt;u.c_device.fd,
+ 					ev-&gt;u.c_device.flags);
+ 		break;
+ 	case TGT_UEVENT_DEVICE_DESTROY:
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/kernel/tgt_device.h	2005-09-20 03:12:46 UTC (rev 82)
+@@ -35,7 +35,7 @@
+ 
+ 	struct class_device cdev;
+ 
+-	char *path;
++	int fd;
+ 	uint64_t dev_id;
+ 	uint32_t blk_shift;
+ 	uint64_t size;
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/kernel/tgt_scsi.c	2005-09-20 03:12:46 UTC (rev 82)
+@@ -8,6 +8,7 @@
+ #include &lt;linux/fs.h&gt;
+ #include &lt;linux/module.h&gt;
+ #include &lt;linux/mm.h&gt;
++#include &lt;linux/highmem.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_cmnd.h&gt;
+ 
+@@ -130,11 +131,15 @@
+ 		data[12] = ascode;
+ 		data[13] = ascodeq;
+ 	} else {
++		char *addr;
+ 		/* uspace command failure */
+ 
+ 		len = min(cmnd-&gt;bufflen, sizeof(scsi_tgt_cmnd-&gt;sense_buff));
+ 		alen = 0;
+-		memcpy(data, page_address(cmnd-&gt;sg[0].page), len);
++
++		addr = kmap_atomic(cmnd-&gt;sg[0].page, KM_SOFTIRQ0);
++		memcpy(data, addr, len);
++		kunmap_atomic(addr, KM_SOFTIRQ0);
+ 	}
+ 
+ 	cmnd-&gt;error_buff = data;
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/kernel/tgt_sysfs.c	2005-09-20 03:12:46 UTC (rev 82)
+@@ -154,11 +154,11 @@
+ 	tgt_device_show_fn(field, format_string)		\
+ static CLASS_DEVICE_ATTR(field, S_IRUGO, show_##field, NULL);
+ 
+-tgt_device_rd_attr(path, &quot;%s\n&quot;);
++tgt_device_rd_attr(fd, &quot;%d\n&quot;);
+ tgt_device_rd_attr(size, &quot;%llu\n&quot;);
+ 
+ static struct class_device_attribute *tgt_device_attrs[] = {
+-	&amp;class_device_attr_path,
++	&amp;class_device_attr_fd,
+ 	&amp;class_device_attr_size,
+ 	NULL,
+ };
+@@ -171,7 +171,6 @@
+ 
+ 	class_device_put(&amp;target-&gt;cdev);
+ 	kfree(device-&gt;dt_data);
+-	kfree(device-&gt;path);
+ 	kfree(device);
+ }
+ 
+
+Modified: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-09-20 00:23:02 UTC (rev 81)
++++ trunk/kernel/tgt_vsd.c	2005-09-20 03:12:46 UTC (rev 82)
+@@ -8,9 +8,9 @@
+ 
+ #include &lt;linux/types.h&gt;
+ #include &lt;linux/blkdev.h&gt;
+-#include &lt;linux/namei.h&gt;
+ #include &lt;linux/uio.h&gt;
+ #include &lt;linux/fs.h&gt;
++#include &lt;linux/file.h&gt;
+ #include &lt;linux/writeback.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+@@ -23,36 +23,30 @@
+ static void tgt_vsd_destroy(struct tgt_device *device)
+ {
+ 	struct tgt_vsd_dev *vsddev = device-&gt;dt_data;
+-	filp_close(vsddev-&gt;filp, NULL);
++	fput(vsddev-&gt;filp);
+ }
+ 
+-static int open_file(struct tgt_vsd_dev *vsddev, const char *path)
++static int open_file(struct tgt_vsd_dev *vsddev, int fd)
+ {
+ 	struct file *filp;
+-	mm_segment_t oldfs;
+-	int err = 0;
+ 
+-	oldfs = get_fs();
+-	set_fs(get_ds());
+-	filp = filp_open(path, O_RDWR|O_LARGEFILE, 0);
+-	set_fs(oldfs);
++	filp = fget(fd);
++	if (!filp) {
++		printk(&quot;Could not get fd %d\n&quot;, fd);
++		return -EINVAL;
++	}
+ 
+-	if (IS_ERR(filp)) {
+-		err = PTR_ERR(filp);
+-		printk(&quot;Can't open %s %d\n&quot;, path, err);
+-	} else
+-		vsddev-&gt;filp = filp;
+-
+-	return err;
++	vsddev-&gt;filp = filp;
++	return 0;
+ }
+ 
+ static int tgt_vsd_create(struct tgt_device *device)
+ {
+ 	struct tgt_vsd_dev *vsddev = device-&gt;dt_data;
+ 	struct inode *inode;
+-	int err = 0;
++	int err;
+ 
+-	err = open_file(vsddev, device-&gt;path);
++	err = open_file(vsddev, device-&gt;fd);
+ 	if (err)
+ 		return err;
+ 
+@@ -67,11 +61,11 @@
+ 	}
+ 
+ 	device-&gt;size = inode-&gt;i_size;
+-	printk(&quot;%s %llu\n&quot;, device-&gt;path, inode-&gt;i_size &gt;&gt; 9);
++	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+ 
+ 	return 0;
+ out:
+-	filp_close(vsddev-&gt;filp, NULL);
++	fput(vsddev-&gt;filp);
+ 	return err;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000074.html">[Stgt-svn] r81 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000076.html">[Stgt-svn] r83 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#75">[ date ]</a>
+              <a href="thread.html#75">[ thread ]</a>
+              <a href="subject.html#75">[ subject ]</a>
+              <a href="author.html#75">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

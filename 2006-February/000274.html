@@ -1,0 +1,165 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r287 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r287%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602100732.k1A7Ww3b017206%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000273.html">
+   <LINK REL="Next"  HREF="000275.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r287 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r287%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602100732.k1A7Ww3b017206%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r287 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Feb 10 08:32:58 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000273.html">[Stgt-svn] r286 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000275.html">[Stgt-svn] r288 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#274">[ date ]</a>
+              <a href="thread.html#274">[ thread ]</a>
+              <a href="subject.html#274">[ subject ]</a>
+              <a href="author.html#274">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-10 08:32:04 +0100 (Fri, 10 Feb 2006)
+New Revision: 287
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Fix SEND commands bugs.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-10 07:30:33 UTC (rev 286)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-10 07:32:04 UTC (rev 287)
+@@ -412,7 +412,7 @@
+ 		return 0;
+ 	}
+ 
+-	rest = min(scmd-&gt;bufflen, md-&gt;length);
++	rest = min(scmd-&gt;request_bufflen, md-&gt;length);
+ 
+ 	for (i = 0, done = 0; i &lt; nsg &amp;&amp; rest; i++) {
+ 		token = sg_dma_address(sg + i);
+@@ -492,7 +492,7 @@
+ 
+ 	sidx = soff = 0;
+ 	token = sg_dma_address(sg + sidx);
+-	rest = min(scmd-&gt;bufflen, id-&gt;total_length);
++	rest = min(scmd-&gt;request_bufflen, id-&gt;total_length);
+ 	for (i = 0; i &lt; nmd &amp;&amp; rest; i++) {
+ 		unsigned int mdone, mlen;
+ 
+@@ -585,11 +585,15 @@
+ 	return err;
+ }
+ 
++/* TODO: this can be called multiple times for a single command. */
+ static int recv_cmd_data(struct scsi_cmnd *scmd,
+ 			 void (*done)(struct scsi_cmnd *))
+ {
+-	/* TODO: this can be called multiple times for a single command. */
+-	handle_cmd_data(scmd, RECV);
++	struct iu_entry	*iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
++	int rw;
++
++	rw = test_bit(V_WRITE, &amp;iue-&gt;req.flags) ? RECV : SEND;
++	handle_cmd_data(scmd, rw);
+ 	done(scmd);
+ 	return 0;
+ }
+@@ -631,7 +635,6 @@
+ static int ibmvstgt_cmd_done(struct scsi_cmnd *scmd,
+ 			     void (*done)(struct scsi_cmnd *))
+ {
+-	int sent = 0;
+ 	unsigned long flags;
+ 	struct iu_entry *iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	struct server_adapter *adapter = iue-&gt;adapter;
+@@ -646,44 +649,11 @@
+ 		eprintk(&quot;operation failed %p %d %x\n&quot;,
+ 			iue, scmd-&gt;result, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+ 		send_rsp(iue, HARDWARE_ERROR, 0x00);
+-		goto out;
+-	}
+-
+-	/* FIXME */
+-	switch (vio_iu(iue)-&gt;srp.cmd.cdb[0]) {
+-	case WRITE_6:
+-	case WRITE_10:
+-	case WRITE_12:
+-	case WRITE_16:
+-	case WRITE_VERIFY:
+-	case WRITE_VERIFY_12:
+-	case START_STOP:
+-	case TEST_UNIT_READY:
+-	case SYNCHRONIZE_CACHE:
+-	case VERIFY:
+-	case VERIFY_16:
+-	case RESERVE:
+-	case RELEASE:
+-	case RESERVE_10:
+-	case RELEASE_10:
+-		send_rsp(iue, NO_SENSE, 0x00);
+-		goto out;
+-	default:
+-		break;
+-	}
+-
+-	sent = handle_cmd_data(scmd, SEND);
+-	if (sent != scmd-&gt;bufflen) {
+-		eprintk(&quot;sending data on response %p (tried %u, sent %d\n&quot;,
+-			iue, scmd-&gt;bufflen, sent);
+-		send_rsp(iue, ABORTED_COMMAND, 0x00);
+ 	} else
+ 		send_rsp(iue, NO_SENSE, 0x00);
+ 
+-out:
+ 	done(scmd);
+ 	put_iu(iue);
+-
+ 	return 0;
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000273.html">[Stgt-svn] r286 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000275.html">[Stgt-svn] r288 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#274">[ date ]</a>
+              <a href="thread.html#274">[ thread ]</a>
+              <a href="subject.html#274">[ subject ]</a>
+              <a href="author.html#274">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

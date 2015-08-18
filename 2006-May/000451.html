@@ -1,0 +1,116 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r464 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r464%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061701.k46H1gYY021235%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000450.html">
+   <LINK REL="Next"  HREF="000452.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r464 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r464%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061701.k46H1gYY021235%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r464 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat May  6 19:01:42 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000450.html">[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000452.html">[Stgt-svn] r465 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#451">[ date ]</a>
+              <a href="thread.html#451">[ thread ]</a>
+              <a href="subject.html#451">[ subject ]</a>
+              <a href="author.html#451">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-06 19:01:35 +0200 (Sat, 06 May 2006)
+New Revision: 464
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Fix residual stuff. Seems that I can log in and see devices now.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 15:47:33 UTC (rev 463)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 17:01:35 UTC (rev 464)
+@@ -621,11 +621,13 @@
+ 	switch (ctask-&gt;hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK) {
+ 	case ISCSI_OP_SCSI_CMD:
+ 	{
++		/* FIXME: multiple data rsp (conn-&gt;max_xmit_dlength) */
+ 		if (ctask-&gt;data_count) {
++			struct iscsi_data_rsp *hdr =
++				(struct iscsi_data_rsp *) &amp;dtask-&gt;hdr;
+ 			char *buf = page_address(tcp_ctask-&gt;headbuf.sg.page) +
+ 				tcp_ctask-&gt;headbuf.sg.offset;
+-			struct iscsi_data_rsp *hdr =
+-				(struct iscsi_data_rsp *) &amp;dtask-&gt;hdr;
++			u32 residual, exp_datalen = be32_to_cpu(ctask-&gt;hdr-&gt;data_length);
+ 
+ 			memset(hdr, 0, sizeof(*hdr));
+ 			hdr-&gt;opcode = ISCSI_OP_SCSI_DATA_IN;
+@@ -637,11 +639,20 @@
+ 			hdr-&gt;max_cmdsn =
+ 				cpu_to_be32(session-&gt;exp_cmdsn + session-&gt;cmds_max / 2);
+ 			hdr-&gt;datasn = cpu_to_be32(ctask-&gt;datasn++);
++			hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
+ 
+-			/* FIXME: multiple data rsp (conn-&gt;max_xmit_dlength) */
++			if (ctask-&gt;data_count &lt; exp_datalen) {
++				hdr-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
++				residual = exp_datalen - ctask-&gt;data_count;
++			} else if (ctask-&gt;data_count &gt; exp_datalen) {
++				hdr-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
++				residual =  ctask-&gt;data_count - exp_datalen;
++				ctask-&gt;data_count = exp_datalen;
++			} else
++				residual = 0;
++
++			hdr-&gt;residual_count = cpu_to_be32(residual);
+ 			hton24(hdr-&gt;dlength, ctask-&gt;data_count);
+-			hdr-&gt;residual_count = 0;
+-			hdr-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
+ 
+ 			dprintk(&quot;%p %p %x %x %x %x\n&quot;,
+ 				buf, hdr, buf[0], buf[1], buf[2], buf[3]);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000450.html">[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000452.html">[Stgt-svn] r465 - branches/use-scsi-ml
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#451">[ date ]</a>
+              <a href="thread.html#451">[ thread ]</a>
+              <a href="subject.html#451">[ subject ]</a>
+              <a href="author.html#451">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

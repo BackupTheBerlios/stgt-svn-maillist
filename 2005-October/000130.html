@@ -1,0 +1,110 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r136 - in trunk: . istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r136%20-%20in%20trunk%3A%20.%20istgt/kernel&In-Reply-To=%3C200510281550.j9SFov9W005771%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000129.html">
+   <LINK REL="Next"  HREF="000131.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r136 - in trunk: . istgt/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r136%20-%20in%20trunk%3A%20.%20istgt/kernel&In-Reply-To=%3C200510281550.j9SFov9W005771%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r136 - in trunk: . istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Oct 28 17:50:57 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000129.html">[Stgt-svn] r135 - in trunk: ibmvstgt istgt
+</A></li>
+        <LI>Next message: <A HREF="000131.html">[Stgt-svn] r137 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#130">[ date ]</a>
+              <a href="thread.html#130">[ thread ]</a>
+              <a href="subject.html#130">[ subject ]</a>
+              <a href="author.html#130">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-28 17:50:57 +0200 (Fri, 28 Oct 2005)
+New Revision: 136
+
+Modified:
+   trunk/initd
+   trunk/istgt/kernel/Makefile
+Log:
+Change istgt module name.
+
+Modified: trunk/initd
+===================================================================
+--- trunk/initd	2005-10-28 15:40:12 UTC (rev 135)
++++ trunk/initd	2005-10-28 15:50:57 UTC (rev 136)
+@@ -15,7 +15,7 @@
+ #	insmod ${PWD}/kernel/tgt_sd.ko
+ 
+ 	modprobe -q crc32c
+-	insmod ${PWD}/istgt/kernel/iscsi_trgt.ko
++	insmod ${PWD}/istgt/kernel/istgt.ko
+ 
+ 	${PWD}/usr/tgtd
+ }
+@@ -25,7 +25,7 @@
+ 	${PWD}/usr/tgtadm --driver istgt --op delete
+ 	killall -9 tgtd
+ 
+-	rmmod iscsi_trgt
++	rmmod istgt
+ 
+ #	rmmod tgt_sd
+ 	rmmod tgt_vsd
+
+Modified: trunk/istgt/kernel/Makefile
+===================================================================
+--- trunk/istgt/kernel/Makefile	2005-10-28 15:40:12 UTC (rev 135)
++++ trunk/istgt/kernel/Makefile	2005-10-28 15:50:57 UTC (rev 136)
+@@ -10,8 +10,8 @@
+ EXTRA_CFLAGS += -I$(obj) -I$(obj)/../include -I$(obj)/../../kernel
+ 
+ ifneq ($(KERNELRELEASE),)
+-obj-m		+= iscsi_trgt.o
+-iscsi_trgt-objs	:= iscsi.o nthread.o config.o digest.o\
++obj-m		+= istgt.o
++istgt-objs	:= iscsi.o nthread.o config.o digest.o\
+ 			conn.o session.o target.o param.o
+ else
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000129.html">[Stgt-svn] r135 - in trunk: ibmvstgt istgt
+</A></li>
+	<LI>Next message: <A HREF="000131.html">[Stgt-svn] r137 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#130">[ date ]</a>
+              <a href="thread.html#130">[ thread ]</a>
+              <a href="subject.html#130">[ subject ]</a>
+              <a href="author.html#130">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

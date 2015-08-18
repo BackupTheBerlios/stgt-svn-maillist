@@ -1,0 +1,230 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r424%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160938.k3G9c3nt028756%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000410.html">
+   <LINK REL="Next"  HREF="000412.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r424%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604160938.k3G9c3nt028756%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r424 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Apr 16 11:38:03 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000410.html">[Stgt-svn] r423 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000412.html">[Stgt-svn] r425 - branches/use-scsi-ml/patchset/broken-out
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#411">[ date ]</a>
+              <a href="thread.html#411">[ thread ]</a>
+              <a href="subject.html#411">[ subject ]</a>
+              <a href="author.html#411">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-16 11:38:03 +0200 (Sun, 16 Apr 2006)
+New Revision: 424
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+   branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c
+Log:
+Just cleanups.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-16 09:25:52 UTC (rev 423)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-16 09:38:03 UTC (rev 424)
+@@ -21,7 +21,6 @@
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+  * USA
+  */
+-
+ #include &lt;linux/interrupt.h&gt;
+ #include &lt;linux/module.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+@@ -52,19 +51,14 @@
+ #define h_free_crq(ua) \
+ 			plpar_hcall_norets(H_FREE_CRQ, ua);
+ 
+-MODULE_DESCRIPTION(&quot;IBM Virtual SCSI Target&quot;);
+-MODULE_AUTHOR(&quot;Dave Boutcher&quot;);
+-MODULE_LICENSE(&quot;GPL&quot;);
+-
+ /* tmp - will replace with SCSI logging stuff */
+ #define eprintk(fmt, args...)					\
+ do {								\
+ 	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
++/* #define dprintk eprintk */
++#define dprintk(fmt, args...)
+ 
+-#define dprintk eprintk
+-/* #define dprintk(fmt, args...) */
+-
+ struct vio_port {
+ 	struct vio_dev *dma_dev;
+ 
+@@ -210,9 +204,9 @@
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ }
+ 
+-int ibmvstgt_rdma(struct iu_entry *iue, struct scatterlist *sg, int nsg,
+-		  struct srp_direct_buf *md, int nmd,
+-		  enum dma_data_direction dir, unsigned int rest)
++static int ibmvstgt_rdma(struct iu_entry *iue, struct scatterlist *sg, int nsg,
++			 struct srp_direct_buf *md, int nmd,
++			 enum dma_data_direction dir, unsigned int rest)
+ {
+ 	struct srp_target *target = iue-&gt;target;
+ 	struct vio_port *vport = target_to_port(target);
+@@ -332,7 +326,7 @@
+ 	err = h_copy_rdma(sizeof(*info), vport-&gt;riobn, remote_buffer,
+ 			  vport-&gt;liobn, data_token);
+ 	if (err == H_Success) {
+-		eprintk(&quot;Client connect: %s (%d)\n&quot;,
++		dprintk(&quot;Client connect: %s (%d)\n&quot;,
+ 			info-&gt;partition_name, info-&gt;partition_number);
+ 	}
+ 
+@@ -396,7 +390,7 @@
+ 	union viosrp_iu *iu = vio_iu(iue);
+ 	int fn;
+ 
+-	eprintk(&quot;%p %u\n&quot;, iue, iu-&gt;srp.tsk_mgmt.tsk_mgmt_func);
++	dprintk(&quot;%p %u\n&quot;, iue, iu-&gt;srp.tsk_mgmt.tsk_mgmt_func);
+ 
+ 	switch (iu-&gt;srp.tsk_mgmt.tsk_mgmt_func) {
+ 	case SRP_TSK_ABORT_TASK:
+@@ -434,8 +428,6 @@
+ 	struct viosrp_adapter_info *info;
+ 	struct viosrp_host_config *conf;
+ 
+-	dprintk(&quot;%p %d\n&quot;, iue, iu-&gt;mad.empty_iu.common.type);
+-
+ 	switch (iu-&gt;mad.empty_iu.common.type) {
+ 	case VIOSRP_EMPTY_IU_TYPE:
+ 		eprintk(&quot;%s\n&quot;, &quot;Unsupported EMPTY MAD IU&quot;);
+@@ -469,8 +461,6 @@
+ 	int done = 1;
+ 	u8 opcode = iu-&gt;srp.rsp.opcode;
+ 
+-	dprintk(&quot;%p %u\n&quot;, iue, opcode);
+-
+ 	switch (opcode) {
+ 	case SRP_LOGIN_REQ:
+ 		process_login(iue);
+@@ -511,8 +501,6 @@
+ 		return;
+ 	}
+ 
+-	dprintk(&quot;%p %p\n&quot;, target, iue);
+-
+ 	iue-&gt;remote_token = crq-&gt;IU_data_ptr;
+ 
+ 	err = h_copy_rdma(crq-&gt;IU_length, vport-&gt;riobn,
+@@ -808,9 +796,6 @@
+ 	unsigned int *dma, dma_size;
+ 	int err = -ENOMEM;
+ 
+-	dprintk(&quot;%s %s %x %u\n&quot;, dev-&gt;name, dev-&gt;type,
+-		dev-&gt;unit_address, dev-&gt;irq);
+-
+ 	vport = kzalloc(sizeof(struct vio_port), GFP_KERNEL);
+ 	if (!vport)
+ 		return err;
+@@ -950,5 +935,9 @@
+ 	vio_unregister_driver(&amp;ibmvstgt_driver);
+ }
+ 
++MODULE_DESCRIPTION(&quot;IBM Virtual SCSI Target&quot;);
++MODULE_AUTHOR(&quot;Dave Boutcher&quot;);
++MODULE_LICENSE(&quot;GPL&quot;);
++
+ module_init(ibmvstgt_init);
+ module_exit(ibmvstgt_exit);
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c	2006-04-16 09:25:52 UTC (rev 423)
++++ branches/use-scsi-ml/ibmvstgt/kernel/libsrp.c	2006-04-16 09:38:03 UTC (rev 424)
+@@ -41,10 +41,9 @@
+ do {								\
+ 	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+ } while (0)
++/* #define dprintk eprintk */
++#define dprintk(fmt, args...)
+ 
+-#define dprintk eprintk
+-/* #define dprintk(fmt, args...) */
+-
+ static int srp_iu_pool_alloc(struct srp_queue *q, size_t max,
+ 			     struct srp_buf **ring)
+ {
+@@ -197,7 +196,7 @@
+ 
+ 	nsg = dma_map_sg(target-&gt;dev, sg, scmd-&gt;use_sg, DMA_BIDIRECTIONAL);
+ 	if (!nsg) {
+-		eprintk(&quot;fail to map %p %d\n&quot;, iue, scmd-&gt;use_sg);
++		printk(&quot;fail to map %p %d\n&quot;, iue, scmd-&gt;use_sg);
+ 		return 0;
+ 	}
+ 	err = rdma_io(iue, sg, nsg, md, 1, dir,
+@@ -393,8 +392,6 @@
+ 	struct scsi_cmnd *scmd;
+ 	int tag, len;
+ 
+-	dprintk(&quot;%p %p\n&quot;, iue-&gt;target, iue);
+-
+ 	if (getlink(cmd))
+ 		__set_bit(V_LINKED, &amp;iue-&gt;flags);
+ 
+@@ -442,9 +439,6 @@
+ 	iue-&gt;scmd = scmd;
+ 	scsi_tgt_queue_command(scmd, (struct scsi_lun *) &amp;cmd-&gt;lun, cmd-&gt;tag);
+ 
+-	dprintk(&quot;%p %p %x %lx %d %d %d\n&quot;, iue, scmd, cmd-&gt;cdb[0],
+-		cmd-&gt;lun, data_dir, len, tag);
+-
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(srp_cmd_perform);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000410.html">[Stgt-svn] r423 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000412.html">[Stgt-svn] r425 - branches/use-scsi-ml/patchset/broken-out
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#411">[ date ]</a>
+              <a href="thread.html#411">[ thread ]</a>
+              <a href="subject.html#411">[ subject ]</a>
+              <a href="author.html#411">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

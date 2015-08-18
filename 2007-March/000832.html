@@ -1,0 +1,545 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r845 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r845%20-%20trunk/usr&In-Reply-To=%3C200703180135.l2I1Z8Ap027459%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000831.html">
+   <LINK REL="Next"  HREF="000833.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r845 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r845%20-%20trunk/usr&In-Reply-To=%3C200703180135.l2I1Z8Ap027459%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r845 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar 18 02:35:08 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000831.html">[Stgt-svn] r844 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000833.html">[Stgt-svn] r846 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#832">[ date ]</a>
+              <a href="thread.html#832">[ thread ]</a>
+              <a href="subject.html#832">[ subject ]</a>
+              <a href="author.html#832">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-18 02:35:08 +0100 (Sun, 18 Mar 2007)
+New Revision: 845
+
+Added:
+   trunk/usr/bs_aio.c
+   trunk/usr/bs_mmap.c
+   trunk/usr/bs_xen.c
+Removed:
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/bd_xen.c
+Modified:
+   trunk/usr/Makefile
+Log:
+bd_* are renamed bs_*
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-03-18 01:29:44 UTC (rev 844)
++++ trunk/usr/Makefile	2007-03-18 01:35:08 UTC (rev 845)
+@@ -14,7 +14,7 @@
+ LIBS += -lxenctrl
+ LIBS += -L$(XEN_XENSTORE) -lxenstore $(AIOLIBS)
+ TGTD_OBJS += $(addprefix xen/, xen.o xs_api.o xenbus.o)
+-TGTD_OBJS += tgtif.o bd_xen.o
++TGTD_OBJS += tgtif.o bs_xen.o
+ else
+ INCLUDES += -I../include -I$(KERNELSRC)/include
+ LIBS += -laio
+@@ -29,14 +29,14 @@
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO -DUSE_KERNEL
+ TGTD_OBJS += $(addprefix ibmvio/, ibmvio.o)
+-TGTD_OBJS += bd_mmap.o tgtif.o
++TGTD_OBJS += bs_mmap.o tgtif.o
+ endif
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+ TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o \
+ 	chap.o transport.o iscsi_tcp.o)
+-TGTD_OBJS += bd_aio.o
++TGTD_OBJS += bs_aio.o
+ LIBS += -lcrypto -lpthread
+ endif
+ 
+
+Deleted: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-03-18 01:29:44 UTC (rev 844)
++++ trunk/usr/bd_aio.c	2007-03-18 01:35:08 UTC (rev 845)
+@@ -1,225 +0,0 @@
+-/*
+- * AIO file backed routine
+- *
+- * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;libaio.h&gt;
+-#include &lt;pthread.h&gt;
+-
+-#include &lt;linux/fs.h&gt;
+-#include &lt;sys/epoll.h&gt;
+-
+-#include &quot;list.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgtd.h&quot;
+-
+-/*
+- * We need an interface to wait for both synchronous and asynchronous
+- * descriptors (something like BSD's kqueue). But upstream kernels
+- * don't provide it though some candidates are under development. So
+- * we use a hacky trick with pthread (stolen from RedHat Xen blktap
+- * code).
+- */
+-
+-/* FIXME */
+-#define MAX_AIO_REQS 2048
+-
+-struct bs_aio_info {
+-	io_context_t ctx;
+-
+-	/* TODO: batch requests */
+-/* 	struct iocb iocb[MAX_AIO_REQS]; */
+-	struct io_event events[MAX_AIO_REQS];
+-
+-	pthread_t aio_thread;
+-
+-	int command_fd[2];
+-	int done_fd[2];
+-};
+-
+-static void *bs_aio_endio_thread(void *arg)
+-{
+-	struct bs_aio_info *info = arg;
+-	int command, ret, nr;
+-
+-retry:
+-	ret = read(info-&gt;command_fd[0], &amp;command, sizeof(command));
+-	if (ret &lt; 0) {
+-		eprintf(&quot;AIO pthread will be dead, %m\n&quot;);
+-		if (errno == EAGAIN || errno == EINTR)
+-			goto retry;
+-
+-		goto out;
+-	}
+-
+-	ret = io_getevents(info-&gt;ctx, 1, MAX_AIO_REQS, info-&gt;events, NULL);
+-	nr = ret;
+-	dprintf(&quot;%d&quot;, ret);
+-	if (nr &gt; 0) {
+-	rewrite:
+-		ret = write(info-&gt;done_fd[1], &amp;nr, sizeof(nr));
+-		if (ret &lt; 0) {
+-			eprintf(&quot;can't notify tgtd, %m\n&quot;);
+-		if (errno == EAGAIN || errno == EINTR)
+-			goto rewrite;
+-
+-		goto out;
+-		}
+-	}
+-	goto retry;
+-out:
+-	return NULL;
+-}
+-
+-static void bs_aio_handler(int fd, int events, void *data)
+-{
+-	struct bs_aio_info *info = data;
+-	int i, nr_events, ret;
+-
+-	ret = read(info-&gt;done_fd[0], &amp;nr_events, sizeof(nr_events));
+-	if (ret &lt; 0) {
+-		eprintf(&quot;wrong wakeup\n&quot;);
+-		return;
+-	}
+-
+-	/* FIXME: need to handle failure */
+-	for (i = 0; i &lt; nr_events; i++) {
+-		struct io_event *ep = &amp;info-&gt;events[i];
+-		target_cmd_io_done(ep-&gt;data, 0);
+-	}
+-
+-	write(info-&gt;command_fd[1], &amp;nr_events, sizeof(nr_events));
+-}
+-
+-static int
+-bs_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+-{
+-	int ret;
+-	struct bs_aio_info *info =
+-		(struct bs_aio_info *) ((char *)dev + sizeof(*dev));
+-
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+-	if (*fd &lt; 0)
+-		return *fd;
+-
+-	ret = io_queue_init(MAX_AIO_REQS, &amp;info-&gt;ctx);
+-	if (ret) {
+-		eprintf(&quot;fail to create aio_queue, %m\n&quot;);
+-		goto close_dev_fd;
+-	}
+-
+-	ret = pipe(info-&gt;command_fd);
+-	if (ret)
+-		goto close_ctx;
+-
+-	ret = pipe(info-&gt;done_fd);
+-	if (ret)
+-		goto close_command_fd;
+-
+-	ret = tgt_event_add(info-&gt;done_fd[0], EPOLLIN, bs_aio_handler, info);
+-	if (ret)
+-		goto close_done_fd;
+-
+-	ret = pthread_create(&amp;info-&gt;aio_thread, NULL, bs_aio_endio_thread,
+-			     info);
+-	if (ret)
+-		goto event_del;
+-
+-	write(info-&gt;command_fd[1], &amp;ret, sizeof(ret));
+-
+-	return 0;
+-event_del:
+-	tgt_event_del(info-&gt;done_fd[0]);
+-close_done_fd:
+-	close(info-&gt;done_fd[0]);
+-	close(info-&gt;done_fd[1]);
+-close_command_fd:
+-	close(info-&gt;command_fd[0]);
+-	close(info-&gt;command_fd[1]);
+-close_ctx:
+-	io_destroy(info-&gt;ctx);
+-close_dev_fd:
+-	close(*fd);
+-	return -1;
+-}
+-
+-static void bs_aio_close(struct tgt_device *dev)
+-{
+-	struct bs_aio_info *info;
+-
+-	info = (struct bs_aio_info *) ((char *)dev + sizeof(*dev));
+-
+-	pthread_cancel(info-&gt;aio_thread);
+-	pthread_join(info-&gt;aio_thread, NULL);
+-	io_destroy(info-&gt;ctx);
+-	close(dev-&gt;fd);
+-}
+-
+-static int bs_aio_cmd_submit(struct scsi_cmd *cmd)
+-{
+-	struct tgt_device *dev = cmd-&gt;dev;
+-	struct bs_aio_info *info = (struct bs_aio_info *)((char *)dev + sizeof(*dev));
+-	struct iocb iocb, *io;
+-	int ret;
+-
+-	io = &iocb;
+-	memset(io, 0, sizeof(*io));
+-
+-	dprintf(&quot;%d %d %u %&quot;  PRIx64 &quot; %&quot; PRIx64 &quot; %p\n&quot;, dev-&gt;fd, cmd-&gt;rw, cmd-&gt;len,
+-		cmd-&gt;uaddr, cmd-&gt;offset, cmd);
+-
+-	if (cmd-&gt;rw == READ)
+-		io_prep_pread(io, dev-&gt;fd, (void *)(unsigned long)cmd-&gt;uaddr,
+-			      cmd-&gt;len,	cmd-&gt;offset);
+-	else
+-		io_prep_pwrite(io, dev-&gt;fd, (void *)(unsigned long)cmd-&gt;uaddr,
+-			       cmd-&gt;len, cmd-&gt;offset);
+-
+-	io-&gt;data = cmd;
+-	ret = io_submit(info-&gt;ctx, 1, &amp;io);
+-
+-	if (ret == 1) {
+-		cmd-&gt;async = 1;
+-		return 0;
+-	} else {
+-		dprintf(&quot;%d %d %u %&quot;  PRIx64 &quot; %&quot; PRIx64 &quot; %p\n&quot;, dev-&gt;fd, cmd-&gt;rw, cmd-&gt;len,
+-			cmd-&gt;uaddr, cmd-&gt;offset, cmd);
+-		return 1;
+-	}
+-}
+-
+-static int bs_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	return 0;
+-}
+-
+-struct backingstore_template aio_bst = {
+-	.bs_datasize		= sizeof(struct bs_aio_info),
+-	.bs_open		= bs_aio_open,
+-	.bs_close		= bs_aio_close,
+-	.bs_cmd_submit		= bs_aio_cmd_submit,
+-	.bs_cmd_done		= bs_aio_cmd_done,
+-};
+
+Deleted: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2007-03-18 01:29:44 UTC (rev 844)
++++ trunk/usr/bd_mmap.c	2007-03-18 01:35:08 UTC (rev 845)
+@@ -1,98 +0,0 @@
+-/*
+- * mmap file backed routine
+- *
+- * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;sys/mman.h&gt;
+-
+-#include &quot;list.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgtd.h&quot;
+-
+-static int bs_mmap_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+-{
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+-
+-	return *fd &gt;= 0 ? 0 : *fd;
+-}
+-
+-static void bs_mmap_close(struct tgt_device *dev)
+-{
+-	close(dev-&gt;fd);
+-}
+-
+-#define pgcnt(size, offset)	((((size) + ((offset) &amp; (pagesize - 1))) + (pagesize - 1)) &gt;&gt; pageshift)
+-
+-static int bs_mmap_cmd_submit(struct scsi_cmd *cmd)
+-{
+-	int fd = cmd-&gt;dev-&gt;fd;
+-	void *p;
+-	int err = 0;
+-
+-	if (cmd-&gt;uaddr)
+-		cmd-&gt;uaddr += cmd-&gt;offset;
+-	else {
+-		p = mmap64(NULL, pgcnt(cmd-&gt;len, cmd-&gt;offset) &lt;&lt; pageshift,
+-			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   cmd-&gt;offset &amp; ~((1ULL &lt;&lt; pageshift) - 1));
+-
+-		cmd-&gt;uaddr = (unsigned long) p + (cmd-&gt;offset &amp; (pagesize - 1));
+-		if (p == MAP_FAILED) {
+-			err = -EINVAL;
+-			eprintf(&quot;%&quot; PRIx64 &quot; %u %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;uaddr,
+-				cmd-&gt;len, cmd-&gt;offset);
+-		}
+-	}
+-
+-	dprintf(&quot;%&quot; PRIx64 &quot; %u %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;uaddr, cmd-&gt;len, cmd-&gt;offset);
+-
+-	return err;
+-}
+-
+-static int bs_mmap_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	int err = 0;
+-
+-	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
+-
+-	if (do_munmap) {
+-		len = pgcnt(len, (uaddr &amp; (pagesize - 1))) &lt;&lt; pageshift;
+-		uaddr &amp;= ~(pagesize - 1);
+-		err = munmap((void *) (unsigned long) uaddr, len);
+-		if (err)
+-			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
+-	} else if (do_free)
+-		free((void *) (unsigned long) uaddr);
+-
+-	return err;
+-}
+-
+-struct backingstore_template mmap_bst = {
+-	.bs_open		= bs_mmap_open,
+-	.bs_close		= bs_mmap_close,
+-	.bs_cmd_submit		= bs_mmap_cmd_submit,
+-	.bs_cmd_done		= bs_mmap_cmd_done,
+-};
+
+Deleted: trunk/usr/bd_xen.c
+===================================================================
+--- trunk/usr/bd_xen.c	2007-03-18 01:29:44 UTC (rev 844)
++++ trunk/usr/bd_xen.c	2007-03-18 01:35:08 UTC (rev 845)
+@@ -1,88 +0,0 @@
+-/*
+- * Xen file backed routine
+- *
+- * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, write to the Free Software
+- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+- * 02110-1301 USA
+- */
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;libaio.h&gt;
+-#include &lt;linux/fs.h&gt;
+-#include &lt;sys/epoll.h&gt;
+-#include &lt;sys/uio.h&gt;
+-
+-#include &quot;list.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgtd.h&quot;
+-
+-#define O_DIRECT 040000 /* who defines this?*/
+-
+-static int bs_xen_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
+-{
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE | O_DIRECT, size);
+-
+-	return *fd &gt;= 0 ? 0 : *fd;
+-}
+-
+-static void bs_xen_close(struct tgt_device *dev)
+-{
+-	close(dev-&gt;fd);
+-}
+-
+-/*
+- * Replace this with AIO readv/writev after 2.6.20.
+- */
+-static int bs_xen_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+-			     uint32_t datalen, unsigned long *uaddr,
+-			     uint64_t offset, int *async, void *key)
+-{
+-	struct iovec *iov = (struct iovec *) (void *) *uaddr;
+-	int cnt;
+-	long total;
+-
+-	cnt = total = 0;
+-	do {
+-		total += iov[cnt++].iov_len;
+-	} while (total &lt; datalen);
+-
+-	lseek64(dev-&gt;fd, offset, SEEK_SET);
+-
+-	if (rw == READ)
+-		readv(dev-&gt;fd, iov, cnt);
+-	else
+-		writev(dev-&gt;fd, iov, cnt);
+-
+-	return 0;
+-}
+-
+-static int bs_xen_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	return 0;
+-}
+-
+-struct backingstore_template xen_bst = {
+-	.bs_open		= bs_xen_open,
+-	.bs_close		= bs_xen_close,
+-	.bs_cmd_submit		= bs_xen_cmd_submit,
+-	.bs_cmd_done		= bs_xen_cmd_done,
+-};
+
+Copied: trunk/usr/bs_aio.c (from rev 844, trunk/usr/bd_aio.c)
+
+Copied: trunk/usr/bs_mmap.c (from rev 844, trunk/usr/bd_mmap.c)
+
+Copied: trunk/usr/bs_xen.c (from rev 844, trunk/usr/bd_xen.c)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000831.html">[Stgt-svn] r844 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000833.html">[Stgt-svn] r846 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#832">[ date ]</a>
+              <a href="thread.html#832">[ thread ]</a>
+              <a href="subject.html#832">[ subject ]</a>
+              <a href="author.html#832">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

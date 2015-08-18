@@ -1,0 +1,273 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r154 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r154%20-%20trunk/kernel&In-Reply-To=%3C200511050308.jA538Ipj007227%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000147.html">
+   <LINK REL="Next"  HREF="000149.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r154 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r154%20-%20trunk/kernel&In-Reply-To=%3C200511050308.jA538Ipj007227%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r154 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 04:08:18 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000147.html">[Stgt-svn] r153 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000149.html">[Stgt-svn] r155 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#148">[ date ]</a>
+              <a href="thread.html#148">[ thread ]</a>
+              <a href="subject.html#148">[ subject ]</a>
+              <a href="author.html#148">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-11-05 04:08:11 +0100 (Sat, 05 Nov 2005)
+New Revision: 154
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sd.c
+   trunk/kernel/tgt_vsd.c
+Log:
+rename some of the queueing functions to execute and complete to express that they are not necessarily queueing anything and are really only being asked to run some command  - they may queue the command to a real queue, drop the command, run a FS operation, etc
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt.c	2005-11-05 03:08:11 UTC (rev 154)
+@@ -542,8 +542,8 @@
+ 	struct tgt_target *target = cmd-&gt;session-&gt;target;
+ 	int err;
+ 
+-	if (target-&gt;proto-&gt;dequeue_cmd)
+-		target-&gt;proto-&gt;dequeue_cmd(cmd);
++	if (target-&gt;proto-&gt;complete_cmd)
++		target-&gt;proto-&gt;complete_cmd(cmd);
+ 
+ 	cmd-&gt;done = tgt_cmd_destroy;
+ 	err = target-&gt;tt-&gt;transfer_response(cmd);
+@@ -577,7 +577,7 @@
+ 	if (device)
+ 		dprintk(&quot;found %&quot; PRIu64 &quot;\n&quot;, cmd-&gt;dev_id);
+ 
+-	err = target-&gt;proto-&gt;queue_cmd(cmd);
++	err = target-&gt;proto-&gt;execute_cmd(cmd);
+ 
+ 	switch (err) {
+ 	case TGT_CMD_FAILED:
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt_device.h	2005-11-05 03:08:11 UTC (rev 154)
+@@ -40,7 +40,7 @@
+ 	 * If returning TGT_CMD_COMPLETED or TGT_CMD_FAILED the result
+ 	 * field must be set.
+ 	 */
+-	int (* queue_cmd)(struct tgt_cmd *cmd);
++	int (* execute_cmd)(struct tgt_cmd *cmd);
+ 	/*
+ 	 * complete a userspace command
+ 	 */
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt_protocol.h	2005-11-05 03:08:11 UTC (rev 154)
+@@ -42,8 +42,8 @@
+ 				       uint8_t *dev_id_buff, int id_buff_size,
+ 				       int flags);
+ 
+-	int (* queue_cmd) (struct tgt_cmd *cmd);
+-	void (* dequeue_cmd) (struct tgt_cmd *cmd);
++	int (* execute_cmd) (struct tgt_cmd *cmd);
++	void (* complete_cmd) (struct tgt_cmd *cmd);
+ 	/*
+ 	 * Build userspace packet
+ 	 */
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt_scsi.c	2005-11-05 03:08:11 UTC (rev 154)
+@@ -200,10 +200,10 @@
+ static void device_queue_cmd(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+-	cmd-&gt;device-&gt;dt-&gt;queue_cmd(cmd);
++	cmd-&gt;device-&gt;dt-&gt;execute_cmd(cmd);
+ }
+ 
+-static void scsi_tgt_dequeue_pending_cmd(struct tgt_device *device)
++static void scsi_tgt_execute_pending_cmds(struct tgt_device *device)
+ {
+ 	struct scsi_tgt_device *stdev = device-&gt;pt_data;
+ 	struct tgt_cmd *cmd, *tmp;
+@@ -228,7 +228,7 @@
+ 	}
+ }
+ 
+-static void scsi_tgt_dequeue_cmd(struct tgt_cmd *cmd)
++static void scsi_tgt_complete_cmd(struct tgt_cmd *cmd)
+ {
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 	struct tgt_device *device = cmd-&gt;device;
+@@ -253,12 +253,12 @@
+ 	}
+ 
+ 	if (!list_empty(&amp;stdev-&gt;pending_cmds))
+-		scsi_tgt_dequeue_pending_cmd(device);
++		scsi_tgt_execute_pending_cmds(device);
+ 
+ 	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
+ }
+ 
+-static int scsi_tgt_queue_cmd(struct tgt_cmd *cmd)
++static int scsi_tgt_execute_cmd(struct tgt_cmd *cmd)
+ {
+ 	struct tgt_device *device = cmd-&gt;device;
+ 	struct scsi_tgt_device *stdev = device-&gt;pt_data;
+@@ -281,7 +281,7 @@
+ 	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
+ 
+ 	if (enabled)
+-		err = device-&gt;dt-&gt;queue_cmd(cmd);
++		err = device-&gt;dt-&gt;execute_cmd(cmd);
+ 	else
+ 		err = TGT_CMD_KERN_QUEUED;
+ 
+@@ -316,8 +316,8 @@
+ 	.module = THIS_MODULE,
+ 	.create_cmd = scsi_tgt_create_cmd,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
+-	.queue_cmd = scsi_tgt_queue_cmd,
+-	.dequeue_cmd = scsi_tgt_dequeue_cmd,
++	.execute_cmd = scsi_tgt_execute_cmd,
++	.complete_cmd = scsi_tgt_complete_cmd,
+ 	.attach_device = scsi_tgt_attach_device,
+ 	.detach_device = scsi_tgt_detach_device,
+ 	.priv_dev_data_size = sizeof(struct scsi_tgt_device),
+
+Modified: trunk/kernel/tgt_sd.c
+===================================================================
+--- trunk/kernel/tgt_sd.c	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt_sd.c	2005-11-05 03:08:11 UTC (rev 154)
+@@ -192,7 +192,7 @@
+ /*
+  * TODO part of this will move to a io_handler callout
+  */
+-static int tgt_sd_queue_rq(struct tgt_cmd *cmd)
++static int tgt_sd_execute_rq(struct tgt_cmd *cmd)
+ {
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 	struct file *file = cmd-&gt;device-&gt;file;
+@@ -226,7 +226,7 @@
+ 	return -ENOMEM;
+ }
+ 
+-static int tgt_sd_queue(struct tgt_cmd *cmd)
++static int tgt_sd_execute(struct tgt_cmd *cmd)
+ {
+ 	struct tgt_device *device = cmd-&gt;device;
+ 	loff_t pos = cmd-&gt;offset;
+@@ -239,14 +239,14 @@
+ 	 * TODO this will become device-&gt;io_handler-&gt;queue_cmd
+ 	 * when we seperate the io_handlers
+ 	 */
+-	return tgt_sd_queue_rq(cmd) ? TGT_CMD_FAILED : TGT_CMD_KERN_QUEUED;
++	return tgt_sd_execute_rq(cmd) ? TGT_CMD_FAILED : TGT_CMD_KERN_QUEUED;
+ }
+ 
+ static struct tgt_device_template tgt_sd = {
+ 	.name = &quot;tgt_sd&quot;,
+ 	.module = THIS_MODULE,
+ 	.create = tgt_sd_create,
+-	.queue_cmd = tgt_sd_queue,
++	.execute_cmd = tgt_sd_execute,
+ 	.prep_cmd = tgt_sd_prep,
+ };
+ 
+
+Modified: trunk/kernel/tgt_vsd.c
+===================================================================
+--- trunk/kernel/tgt_vsd.c	2005-11-05 00:00:20 UTC (rev 153)
++++ trunk/kernel/tgt_vsd.c	2005-11-05 03:08:11 UTC (rev 154)
+@@ -107,7 +107,7 @@
+ /*
+  * TODO this will move to a io_handler callout
+  */
+-static int vsd_queue_file_io(struct tgt_cmd *cmd, int op)
++static int vsd_execute_file_io(struct tgt_cmd *cmd, int op)
+ {
+ 	struct file *file = cmd-&gt;device-&gt;file;
+ 	ssize_t ret;
+@@ -136,7 +136,7 @@
+ 	return 0;
+ }
+ 
+-static int tgt_vsd_queue(struct tgt_cmd *cmd)
++static int tgt_vsd_execute(struct tgt_cmd *cmd)
+ {
+ 	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 	int err, rw;
+@@ -168,7 +168,7 @@
+ 	 * TODO this will become device-&gt;io_handler-&gt;queue_cmd
+ 	 * when we seperate the io_handlers
+ 	 */
+-	err = vsd_queue_file_io(cmd, rw);
++	err = vsd_execute_file_io(cmd, rw);
+ 	if (!err) {
+ 		cmd-&gt;result = SAM_STAT_GOOD;
+ 		return TGT_CMD_COMPLETED;
+@@ -187,7 +187,7 @@
+ 	.name = &quot;tgt_vsd&quot;,
+ 	.module = THIS_MODULE,
+ 	.create = tgt_vsd_create,
+-	.queue_cmd = tgt_vsd_queue,
++	.execute_cmd = tgt_vsd_execute,
+ 	.prep_cmd = tgt_vsd_prep,
+ 	.complete_uspace_cmd = tgt_vsd_uspace_complete,
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000147.html">[Stgt-svn] r153 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000149.html">[Stgt-svn] r155 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#148">[ date ]</a>
+              <a href="thread.html#148">[ thread ]</a>
+              <a href="subject.html#148">[ subject ]</a>
+              <a href="author.html#148">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

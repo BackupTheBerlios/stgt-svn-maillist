@@ -1,0 +1,159 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r319 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r319%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602251720.k1PHKtxe028109%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000305.html">
+   <LINK REL="Next"  HREF="000307.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r319 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r319%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602251720.k1PHKtxe028109%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r319 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Feb 25 18:20:55 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000305.html">[Stgt-svn] r318 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000307.html">[Stgt-svn] r320 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#306">[ date ]</a>
+              <a href="thread.html#306">[ thread ]</a>
+              <a href="subject.html#306">[ subject ]</a>
+              <a href="author.html#306">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-25 18:20:54 +0100 (Sat, 25 Feb 2006)
+New Revision: 319
+
+Modified:
+   branches/use-scsi-ml/usr/netlink.c
+   branches/use-scsi-ml/usr/target.c
+Log:
+User-space changes for the new interface.
+
+Modified: branches/use-scsi-ml/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/usr/netlink.c	2006-02-25 17:20:30 UTC (rev 318)
++++ branches/use-scsi-ml/usr/netlink.c	2006-02-25 17:20:54 UTC (rev 319)
+@@ -126,13 +126,13 @@
+ 	char sbuf[NL_BUFSIZE], rbuf[NL_BUFSIZE];
+ 
+ 	ev = (struct tgt_event *) NLMSG_DATA(sbuf);
+-	err = nl_cmd_call(nl_fd, TGT_UEVENT_TGTD_BIND, sbuf,
++	err = nl_cmd_call(nl_fd, TGT_UEVENT_REQ, sbuf,
+ 			  NLMSG_SPACE(sizeof(struct tgt_event)),
+ 			  rbuf, NL_BUFSIZE);
+ 
+ 	ev = (struct tgt_event *) NLMSG_DATA(rbuf);
+-	if (err &lt; 0 || ev-&gt;k.event_res.err &lt; 0) {
+-		eprintf(&quot;%d %d\n&quot;, err, ev-&gt;k.event_res.err);
++	if (err &lt; 0 || ev-&gt;k.event_rsp.err &lt; 0) {
++		eprintf(&quot;%d %d\n&quot;, err, ev-&gt;k.event_rsp.err);
+ 		return -EINVAL;
+ 	}
+ 
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-25 17:20:30 UTC (rev 318)
++++ branches/use-scsi-ml/usr/target.c	2006-02-25 17:20:54 UTC (rev 319)
+@@ -349,7 +349,6 @@
+ 	int result, len = 0;
+ 	char resbuf[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 	struct tgt_event *ev_res = NLMSG_DATA(resbuf);
+-	struct tgt_cmd *scmd;
+ 	uint64_t offset, dev_id;
+ 	uint32_t cid = ev_req-&gt;k.cmd_req.cid;
+ 	uint8_t rw = 0, try_map = 0;
+@@ -362,21 +361,21 @@
+ 		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
+ 		return 0;
+ 	}
+-	scmd = (struct tgt_cmd *) ev_req-&gt;data;
+ 
+-	dev_id = scsi_get_devid(scmd-&gt;lun);
+-	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cid, scmd-&gt;scb[0], dev_id);
++	dev_id = scsi_get_devid(ev_req-&gt;k.cmd_req.lun);
++	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cid, ev_req-&gt;k.cmd_req.scb[0], dev_id);
+ 
+ 	device = device_get(target, dev_id);
+ 	if (device)
+ 		uaddr = target-&gt;devt[dev_id]-&gt;addr;
+ 
+-	result = scsi_cmd_process(host_no, target-&gt;tid, scmd-&gt;scb, &amp;len,
+-				  ev_req-&gt;k.cmd_req.data_len,
+-				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset, scmd-&gt;lun);
++	result = scsi_cmd_process(host_no, target-&gt;tid, ev_req-&gt;k.cmd_req.scb,
++				  &amp;len, ev_req-&gt;k.cmd_req.data_len,
++				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset,
++				  ev_req-&gt;k.cmd_req.lun);
+ 
+ 	dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+-		cid, scmd-&gt;scb[0], uaddr, offset, result);
++		cid, ev_req-&gt;k.cmd_req.scb[0], uaddr, offset, result);
+ 
+ 	/* TODO: preallocate cmd */
+ 	cmd = malloc(sizeof(*cmd));
+@@ -388,16 +387,14 @@
+ 
+ 	insque(&amp;cmd-&gt;clist, &amp;target-&gt;cqueue);
+ 
+-	ev_res-&gt;u.cmd_res.host_no = host_no;
+-	ev_res-&gt;u.cmd_res.cid = cid;
+-	ev_res-&gt;u.cmd_res.len = len;
+-	ev_res-&gt;u.cmd_res.result = result;
+-	ev_res-&gt;u.cmd_res.uaddr = uaddr;
+-	ev_res-&gt;u.cmd_res.rw = rw;
+-	ev_res-&gt;u.cmd_res.try_map = try_map;
+-	ev_res-&gt;u.cmd_res.offset = offset;
++	ev_res-&gt;u.cmd_rsp.host_no = host_no;
++	ev_res-&gt;u.cmd_rsp.cid = cid;
++	ev_res-&gt;u.cmd_rsp.len = len;
++	ev_res-&gt;u.cmd_rsp.result = result;
++	ev_res-&gt;u.cmd_rsp.uaddr = uaddr;
++	ev_res-&gt;u.cmd_rsp.rw = rw;
+ 
+-	return __nl_write(nl_fd, TGT_UEVENT_CMD_RES, resbuf,
++	return __nl_write(nl_fd, TGT_UEVENT_CMD_RSP, resbuf,
+ 			  NLMSG_SPACE(sizeof(*ev_res)));
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000305.html">[Stgt-svn] r318 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000307.html">[Stgt-svn] r320 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#306">[ date ]</a>
+              <a href="thread.html#306">[ thread ]</a>
+              <a href="subject.html#306">[ subject ]</a>
+              <a href="author.html#306">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

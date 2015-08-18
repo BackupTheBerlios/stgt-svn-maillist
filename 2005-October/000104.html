@@ -1,0 +1,526 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r110 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r110%20-%20trunk/kernel&In-Reply-To=%3C200510010817.j918Hsfb018390%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000105.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r110 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r110%20-%20trunk/kernel&In-Reply-To=%3C200510010817.j918Hsfb018390%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r110 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Oct  1 10:17:54 CEST 2005</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000105.html">[Stgt-svn] r111 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#104">[ date ]</a>
+              <a href="thread.html#104">[ thread ]</a>
+              <a href="subject.html#104">[ subject ]</a>
+              <a href="author.html#104">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-01 10:17:53 +0200 (Sat, 01 Oct 2005)
+New Revision: 110
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sd.c
+   trunk/kernel/tgt_target.h
+Log:
+Mike changed the tgt APIs to make it handle hardware targets better.
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt.c	2005-10-01 08:17:53 UTC (rev 110)
+@@ -501,6 +501,56 @@
+ 	return -EINVAL;
+ }
+ 
++void tgt_transfer_response(void *data)
++{
++	struct tgt_cmd *cmd = data;
++	struct tgt_target *target = cmd-&gt;session-&gt;target;
++	int err;
++
++	cmd-&gt;done = tgt_cmd_destroy;
++	err = target-&gt;tt-&gt;transfer_response(cmd);
++	switch (err) {
++	case TGT_CMD_XMIT_FAILED:
++	case TGT_CMD_XMIT_REQUEUE:
++		/*
++		 * TODO add a real queue to avoid re-orders and starvation
++		 * for now just reschedule.
++		 */
++		INIT_WORK(&amp;cmd-&gt;work, tgt_transfer_response, cmd);
++		queue_delayed_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work,
++				   10 * HZ);
++		break;
++	};
++}
++EXPORT_SYMBOL_GPL(tgt_transfer_response);
++
++static void queuecommand(void *data)
++{
++	int err = 0;
++	struct tgt_cmd *cmd = data;
++	struct tgt_target *target = cmd-&gt;session-&gt;target;
++	struct tgt_device *device = cmd-&gt;device;
++
++	dprintk(&quot;cid %llu\n&quot;, cmd-&gt;cid);
++
++	/* Should we do this earlier? */
++	if (!device)
++		cmd-&gt;device = device = tgt_device_find(target, cmd-&gt;dev_id);
++	if (device)
++		dprintk(&quot;found %llu\n&quot;, cmd-&gt;dev_id);
++
++	err = device-&gt;dt-&gt;queue_cmd(cmd);
++
++	switch (err) {
++	case TGT_CMD_FAILED:
++	case TGT_CMD_COMPLETED:
++		dprintk(&quot;command completed %d\n&quot;, err);
++		tgt_transfer_response(cmd);
++	default:
++		dprintk(&quot;command %llu queued\n&quot;, cmd-&gt;cid);
++	};
++}
++
+ static int tgt_device_destroy(int tid, uint64_t dev_id)
+ {
+ 	struct tgt_device *device;
+@@ -581,6 +631,34 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_destroy);
+ 
++static int __tgt_cmd_queue(struct tgt_cmd *cmd)
++{
++	struct tgt_session *session = cmd-&gt;session;
++
++	/*
++	 * we may need to code so that other layers can override this
++	 * done function
++	 */
++	cmd-&gt;done = tgt_cmd_destroy;
++	INIT_WORK(&amp;cmd-&gt;work, queuecommand, cmd);
++	queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
++	return 0;
++}
++
++static void tgt_write_data_transfer_done(struct tgt_cmd *cmd)
++{
++	/*
++	 * TODO check for errors and add state checking. we may have
++	 * to internally queue for the target driver
++	 */
++
++	/*
++	 * we are normally called from a irq so since the tgt_vsd blocks
++	 * we must queue this cmd
++	 */
++	__tgt_cmd_queue(cmd);
++}
++
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_CACHE_MASK)) + PAGE_CACHE_SIZE - 1) &gt;&gt; PAGE_CACHE_SHIFT)
+ 
+ /*
+@@ -621,30 +699,42 @@
+ 
+ 	__tgt_alloc_buffer(cmd);
+ 
+-	if (cmd-&gt;done) {
+-		void (*done)(struct tgt_cmd *) = cmd-&gt;done;
+-		cmd-&gt;done = NULL;
+-		done(cmd);
+-	}
++	/*
++	 * we probably will not be able to rely on the target
++	 * driver knowing the data_dir so this may have to move
++	 * the devices or protocol if it becomes command specific
++	 */
++	if (cmd-&gt;data_dir == DMA_TO_DEVICE) {
++		cmd-&gt;done = tgt_write_data_transfer_done;
++		/*
++		 * TODO handle errors and possibly requeue for the
++		 * target driver
++		 */
++		cmd-&gt;session-&gt;target-&gt;tt-&gt;transfer_write_data(cmd);
++	} else
++		queuecommand(cmd);
+ }
+ 
+-void tgt_cmd_alloc_buffer(struct tgt_cmd *cmd, void (*done)(struct tgt_cmd *))
++void tgt_cmd_alloc_buffer(struct tgt_cmd *cmd)
+ {
++	struct tgt_session *session = cmd-&gt;session;
+ 	BUG_ON(!list_empty(&amp;cmd-&gt;clist));
+ 
+-	if (done) {
+-		struct tgt_session *session = cmd-&gt;session;
+-
+-		INIT_WORK(&amp;cmd-&gt;work, tgt_alloc_buffer, cmd);
+-		cmd-&gt;done = done;
+-		queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-		return;
+-	}
+-
+-	tgt_alloc_buffer(cmd);
++	INIT_WORK(&amp;cmd-&gt;work, tgt_alloc_buffer, cmd);
++	queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_alloc_buffer);
+ 
++int tgt_cmd_queue(struct tgt_cmd *cmd)
++{
++	if (cmd-&gt;bufflen)
++		tgt_cmd_alloc_buffer(cmd);
++	else
++		__tgt_cmd_queue(cmd);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(tgt_cmd_queue);
++
+ int tgt_uspace_cmd_send(struct tgt_cmd *cmd)
+ {
+ 	struct tgt_protocol *proto = cmd-&gt;session-&gt;target-&gt;proto;
+@@ -676,43 +766,12 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_uspace_cmd_send);
+ 
+-/*
+- * TODO we should make cmd-&gt;done a target callback instead. Maybe
+- * target-&gt;tt-&gt;queuecommand. We need this becuase a target driver
+- * may not have the resources to execute the command. We also need
+- * a real queue, I guess, and some queue limits.
+- *
+- * NOTE THIS WILL NOT EXECUTE FROM A THREAD FOR LONG. IT APPEARS
+- * TO BE HORRIBLE FOR PERF AND ONLY NEEDED BECAUSE OF IET. THE LLD SHOULD
+- * BE ABLE TO EXECUTE FROM A SOFTIRQ SINCE WE WILL EVENTUALLY GO ALL ASYNC
+- *
+- */
+-static void tgt_notify_cmd_ready(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-	void (*done)(struct tgt_cmd *);
+-
+-	done = cmd-&gt;done;
+-	cmd-&gt;done = NULL;
+-	done(cmd);
+-}
+-
+-void tgt_cmd_done(struct tgt_cmd *cmd)
+-{
+-	struct tgt_session *session = cmd-&gt;session;
+-
+-	INIT_WORK(&amp;cmd-&gt;work, tgt_notify_cmd_ready, cmd);
+-	queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-}
+-EXPORT_SYMBOL_GPL(tgt_cmd_done);
+-
+ static void uspace_cmd_done(struct tgt_cmd *cmd, void *data,
+ 			     int result, uint32_t len)
+ {
+ 	struct tgt_device *device = cmd-&gt;device;
+ 	char *p = data;
+ 	int i;
+-	BUG_ON(!cmd-&gt;done);
+ 
+ 	dprintk(&quot;cid %llu result %d len %d bufflen %u\n&quot;,
+ 		cmd-&gt;cid, result, len, cmd-&gt;bufflen);
+@@ -744,51 +803,9 @@
+ 	cmd-&gt;result = result;
+ 	if (device-&gt;dt-&gt;complete_uspace_cmd)
+ 		device-&gt;dt-&gt;complete_uspace_cmd(cmd);
+-	tgt_cmd_done(cmd);
++	tgt_transfer_response(cmd);
+ }
+ 
+-static void queuecommand(void *data)
+-{
+-	int err = 0;
+-	struct tgt_cmd *cmd = data;
+-	struct tgt_target *target = cmd-&gt;session-&gt;target;
+-	struct tgt_device *device = cmd-&gt;device;
+-
+-	dprintk(&quot;cid %llu\n&quot;, cmd-&gt;cid);
+-
+-	/* Should we do this earlier? */
+-	if (!device)
+-		cmd-&gt;device = device = tgt_device_find(target, cmd-&gt;dev_id);
+-	if (device)
+-		dprintk(&quot;found %llu\n&quot;, cmd-&gt;dev_id);
+-
+-	err = device-&gt;dt-&gt;queue_cmd(cmd);
+-
+-	switch (err) {
+-	case TGT_CMD_FAILED:
+-	case TGT_CMD_COMPLETED:
+-		dprintk(&quot;command completed %d\n&quot;, err);
+-		tgt_notify_cmd_ready(cmd);
+-	default:
+-		dprintk(&quot;command %llu queued\n&quot;, cmd-&gt;cid);
+-	};
+-}
+-
+-int tgt_cmd_queue(struct tgt_cmd *cmd, void (*done)(struct tgt_cmd *))
+-{
+-	struct tgt_session *session = cmd-&gt;session;
+-
+-	BUG_ON(cmd-&gt;done);
+-	BUG_ON(!done);
+-
+-	cmd-&gt;done = done;
+-	INIT_WORK(&amp;cmd-&gt;work, queuecommand, cmd);
+-	queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_cmd_queue);
+-
+ static struct tgt_cmd *find_cmd_by_id(uint64_t cid)
+ {
+ 	struct list_head *head;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt.h	2005-10-01 08:17:53 UTC (rev 110)
+@@ -22,6 +22,14 @@
+ 	mempool_t *cmd_pool;
+ };
+ 
++enum {
++	TGT_CMD_CREATE,
++	TGT_CMD_RECV,
++	TGT_CMD_QUEUED,
++	TGT_CMD_XMIT,
++	TGT_CMD_DONE,
++};
++
+ struct tgt_cmd {
+ 	struct tgt_session *session;
+ 	struct tgt_device *device;
+@@ -66,11 +74,8 @@
+ extern int tgt_uspace_cmd_send(struct tgt_cmd *cmd);
+ extern struct tgt_cmd *tgt_cmd_create(struct tgt_session *session, void *priv);
+ extern void tgt_cmd_destroy(struct tgt_cmd *cmd);
+-extern void tgt_cmd_alloc_buffer(struct tgt_cmd *cmd,
+-				  void (*done)(struct tgt_cmd *));
+-extern int tgt_cmd_queue(struct tgt_cmd *cmd,
+-			  void (*done)(struct tgt_cmd *));
+-extern void tgt_cmd_done(struct tgt_cmd *cmd);
++extern int tgt_cmd_queue(struct tgt_cmd *cmd);
++extern void tgt_transfer_response(void *cmd);
+ extern int tgt_sysfs_init(void);
+ extern void tgt_sysfs_exit(void);
+ #endif
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt_protocol.h	2005-10-01 08:17:53 UTC (rev 110)
+@@ -28,34 +28,21 @@
+ 	int uspace_pdu_size;
+ 
+ 	/*
+-	 * create a command and allocate a buffer of size data_len for
++	 * Create a command and allocate a buffer of size data_len for
+ 	 * for transfer. The buffer will be allocated with GFP_KERNEL
+-	 * so if you cannot sleep the caller must pass in a done() function.
+-	 * The done function will be called from process context.
+-	 *
+-	 * TODO: This dual behavior is a little strange. We will convert
+-	 * iet to open-iscsi's model so eventually the done() function
+-	 * will be a requirement so we can have a common path.
++	 * and preprocesed by tgt/scsi_proto so the next time
++	 * the target driver is notified about the cmd is when
++	 * the transfer* is called.
+ 	 */
+ 	struct tgt_cmd *(* create_cmd)(struct tgt_session *session,
+-					void *tgt_priv, uint8_t *cmd,
+-					uint32_t data_len,
+-					enum dma_data_direction data_dir,
+-					uint8_t *dev_id_buff, int id_buff_size,
+-					void (*done)(struct tgt_cmd *));
++				       void *tgt_priv, uint8_t *cmd,
++				       uint32_t data_len,
++				       enum dma_data_direction data_dir,
++				       uint8_t *dev_id_buff, int id_buff_size,
++				       int flags);
+ 	/*
+-	 * destroy a command. This will free the command and buffer
++	 * Build userspace packet
+ 	 */
+-	void (* destroy_cmd)(struct tgt_cmd *cmd); 
+-	/*
+-	 * queue a command to be executed in a workqueue. A done() callback
+-	 * must be passed in.
+-	 */
+-	int (* queue_cmd)(struct tgt_cmd *cmd,
+-			   void (*done)(struct tgt_cmd *));
+-	/*
+-	 * build userspace packet
+-	 */
+ 	void (* build_uspace_pdu)(struct tgt_cmd *cmd, void *data);
+ };
+ 
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt_scsi.c	2005-10-01 08:17:53 UTC (rev 110)
+@@ -49,8 +49,7 @@
+ static struct tgt_cmd *
+ scsi_tgt_create_cmd(struct tgt_session *session, void *tgt_priv, uint8_t *scb,
+ 		    uint32_t data_len, enum dma_data_direction data_dir,
+-		    uint8_t *lun, int lun_size,
+-		    void (*done)(struct tgt_cmd *))
++		    uint8_t *lun, int lun_size, int tags)
+ {
+ 	struct tgt_device *device;
+ 	struct tgt_cmd *cmd;
+@@ -63,6 +62,7 @@
+ 	}
+ 	scmd = tgt_cmd_to_scsi(cmd);
+ 	memcpy(scmd-&gt;scb, scb, sizeof(scmd-&gt;scb));
++	scmd-&gt;tags = tags;
+ 
+ 	/* translate target driver LUN to device id */
+ 	cmd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
+@@ -83,8 +83,9 @@
+ 	cmd-&gt;bufflen = data_len;
+ 	/* do scsi device specific setup */
+ 	device-&gt;dt-&gt;prep_cmd(cmd, data_len);
+-	if (cmd-&gt;bufflen)
+-		tgt_cmd_alloc_buffer(cmd, done);
++
++	tgt_cmd_queue(cmd);
++
+ 	return cmd;
+ }
+ 
+@@ -138,8 +139,6 @@
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
+ 	.create_cmd = scsi_tgt_create_cmd,
+-	.destroy_cmd = tgt_cmd_destroy,
+-	.queue_cmd = tgt_cmd_queue,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+
+Modified: trunk/kernel/tgt_sd.c
+===================================================================
+--- trunk/kernel/tgt_sd.c	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt_sd.c	2005-10-01 08:17:53 UTC (rev 110)
+@@ -96,8 +96,7 @@
+ 	} else
+ 		cmd-&gt;result = SAM_STAT_GOOD;
+ 
+-
+-	tgt_cmd_done(cmd);
++	tgt_transfer_response(cmd);
+ 	__blk_put_request(rq-&gt;q, rq);
+ }
+ 
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-09-27 03:49:05 UTC (rev 109)
++++ trunk/kernel/tgt_target.h	2005-10-01 08:17:53 UTC (rev 110)
+@@ -13,16 +13,51 @@
+ 
+ struct tgt_protocol;
+ struct tgt_target;
++struct tgt_cmd;
+ 
++enum {
++	TGT_CMD_XMIT_OK,
++	TGT_CMD_XMIT_FAILED,
++	TGT_CMD_XMIT_REQUEUE,
++};
++
+ struct tgt_target_template {
+ 	const char *name;
+ 	struct module *module;
+ 	unsigned priv_data_size;
+ 
++	/*
++	 * Target creation/destroy callbacks useful when userspace
++	 * initiates these operations
++	 */
+ 	int (* target_create) (struct tgt_target *);
+ 	void (* target_destroy) (struct tgt_target *);
++	/*
++	 * Called when userspace sends the target a driver specific
++	 * message. To send a response the target driver should call
++	 * tgt_msg_send.
++	 */
+ 	int (* msg_recv) (struct tgt_target *, uint32_t, void *);
+ 	/*
++	 * Transfer command response and/or data. If the target driver
++	 * cannot queue the request and would like it requeued then it
++	 * should return an appropriate TGT_CMD_XMIT_*. When the
++	 * the transfer is complete and the target driver is finished with
++	 * the command the cmd-&gt;done() callback must be called. After the
++	 * the cmd-&gt;done callback has been called tgt_core owns the cmd and
++	 * may free it.
++	 *
++	 * TODO rename this
++	 */
++	int (* transfer_response) (struct tgt_cmd *);
++	/*
++	 * Transfer write data to the sg buffer.
++	 *
++	 * TODO rename
++	 */
++	int (* transfer_write_data) (struct tgt_cmd *);
++
++	/*
+ 	 * name of protocol to use
+ 	 */
+ 	const char *protocol;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000105.html">[Stgt-svn] r111 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#104">[ date ]</a>
+              <a href="thread.html#104">[ thread ]</a>
+              <a href="subject.html#104">[ subject ]</a>
+              <a href="author.html#104">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

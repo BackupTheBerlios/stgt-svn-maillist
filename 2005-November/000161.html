@@ -1,0 +1,100 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r167 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r167%20-%20trunk/kernel&In-Reply-To=%3C200511150931.jAF9V4ti018275%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000160.html">
+   <LINK REL="Next"  HREF="000162.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r167 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r167%20-%20trunk/kernel&In-Reply-To=%3C200511150931.jAF9V4ti018275%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r167 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Nov 15 10:31:04 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000160.html">[Stgt-svn] r166 - in trunk: istgt/usr usr
+</A></li>
+        <LI>Next message: <A HREF="000162.html">[Stgt-svn] r168 - in trunk/istgt: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#161">[ date ]</a>
+              <a href="thread.html#161">[ thread ]</a>
+              <a href="subject.html#161">[ subject ]</a>
+              <a href="author.html#161">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-15 10:31:02 +0100 (Tue, 15 Nov 2005)
+New Revision: 167
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_target.h
+Log:
+Just remove unnecessary space.
+
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-11-14 00:37:20 UTC (rev 166)
++++ trunk/kernel/tgt.c	2005-11-15 09:31:02 UTC (rev 167)
+@@ -976,7 +976,7 @@
+ 	if (!cmd) {
+ 		eprintk(&quot;Could not find command %llu\n&quot;,
+ 			(unsigned long long) cid);
+-		return -EINVAL;	
++		return -EINVAL;
+ 	}
+ 
+ 	dprintk(&quot;cmd %p tag %d result %d len %d bufflen %u\n&quot;,
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-11-14 00:37:20 UTC (rev 166)
++++ trunk/kernel/tgt_target.h	2005-11-15 09:31:02 UTC (rev 167)
+@@ -34,7 +34,7 @@
+ /*
+  * this should be a template and device limit probably
+  */
+-#define TGT_QUEUE_DEPTH 64 
++#define TGT_QUEUE_DEPTH 64
+ 
+ struct tgt_target_template {
+ 	const char *name;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000160.html">[Stgt-svn] r166 - in trunk: istgt/usr usr
+</A></li>
+	<LI>Next message: <A HREF="000162.html">[Stgt-svn] r168 - in trunk/istgt: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#161">[ date ]</a>
+              <a href="thread.html#161">[ thread ]</a>
+              <a href="subject.html#161">[ subject ]</a>
+              <a href="author.html#161">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

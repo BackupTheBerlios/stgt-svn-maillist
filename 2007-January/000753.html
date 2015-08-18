@@ -1,0 +1,136 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r766 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r766%20-%20trunk/usr&In-Reply-To=%3C200701070313.l073DCpq030597%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000752.html">
+   <LINK REL="Next"  HREF="000754.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r766 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r766%20-%20trunk/usr&In-Reply-To=%3C200701070313.l073DCpq030597%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r766 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Jan  7 04:13:12 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000752.html">[Stgt-svn] r765 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000754.html">[Stgt-svn] r767 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#753">[ date ]</a>
+              <a href="thread.html#753">[ thread ]</a>
+              <a href="subject.html#753">[ subject ]</a>
+              <a href="author.html#753">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-07 04:13:11 +0100 (Sun, 07 Jan 2007)
+New Revision: 766
+
+Modified:
+   trunk/usr/target.c
+Log:
+Rename account list stuff.
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-01-06 17:56:24 UTC (rev 765)
++++ trunk/usr/target.c	2007-01-07 03:13:11 UTC (rev 766)
+@@ -723,16 +723,16 @@
+ 	int aid;
+ 	char *user;
+ 	char *password;
+-	struct list_head ac_list;
++	struct list_head account_siblings;
+ };
+ 
+-static LIST_HEAD(accounts_list);
++static LIST_HEAD(account_list);
+ 
+ static struct account_entry *__account_lookup_id(int aid)
+ {
+ 	struct account_entry *ac;
+ 
+-	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++	list_for_each_entry(ac, &amp;account_list, account_siblings)
+ 		if (ac-&gt;aid == aid)
+ 			return ac;
+ 	return NULL;
+@@ -742,7 +742,7 @@
+ {
+ 	struct account_entry *ac;
+ 
+-	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++	list_for_each_entry(ac, &amp;account_list, account_siblings)
+ 		if (!strcmp(ac-&gt;user, user))
+ 			return ac;
+ 	return NULL;
+@@ -805,7 +805,7 @@
+ 	if (!ac-&gt;password)
+ 		goto free_username;
+ 
+-	list_add(&amp;ac-&gt;ac_list, &amp;accounts_list);
++	list_add(&amp;ac-&gt;account_siblings, &amp;account_list);
+ 	return 0;
+ free_username:
+ 	free(ac-&gt;user);
+@@ -910,7 +910,7 @@
+ 		account_ctl(target-&gt;tid, ACCOUNT_TYPE_OUTGOING, ac-&gt;user, 0);
+ 	}
+ 
+-	list_del(&amp;ac-&gt;ac_list);
++	list_del(&amp;ac-&gt;account_siblings);
+ 	free(ac-&gt;user);
+ 	free(ac-&gt;password);
+ 	free(ac);
+@@ -1331,10 +1331,10 @@
+ 	int total = 0, max = rest;
+ 	struct account_entry *ac;
+ 
+-	if (!list_empty(&amp;accounts_list))
++	if (!list_empty(&amp;account_list))
+ 		shprintf(total, buf, rest, &quot;Account list:\n&quot;);
+ 
+-	list_for_each_entry(ac, &amp;accounts_list, ac_list)
++	list_for_each_entry(ac, &amp;account_list, account_siblings)
+ 		shprintf(total, buf, rest, TAB1 &quot;%s\n&quot;, ac-&gt;user);
+ 
+ 	return total;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000752.html">[Stgt-svn] r765 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000754.html">[Stgt-svn] r767 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#753">[ date ]</a>
+              <a href="thread.html#753">[ thread ]</a>
+              <a href="subject.html#753">[ subject ]</a>
+              <a href="author.html#753">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

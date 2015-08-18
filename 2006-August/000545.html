@@ -1,0 +1,470 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r558 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r558%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608290627.k7T6RfQ6016907%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000544.html">
+   <LINK REL="Next"  HREF="000546.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r558 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r558%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608290627.k7T6RfQ6016907%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r558 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Aug 29 08:27:41 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000544.html">[Stgt-svn] r557 - in trunk/usr: . ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000546.html">[Stgt-svn] r559 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#545">[ date ]</a>
+              <a href="thread.html#545">[ thread ]</a>
+              <a href="subject.html#545">[ subject ]</a>
+              <a href="author.html#545">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-29 08:27:37 +0200 (Tue, 29 Aug 2006)
+New Revision: 558
+
+Added:
+   trunk/usr/bd_aio.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/bd_mmap.c
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+Log:
+Add AIO backedio operation.
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/Makefile	2006-08-29 06:27:37 UTC (rev 558)
+@@ -1,18 +1,28 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o bd_mmap.o
++TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO
+ TGTD_OBJS += $(addprefix ibmvio/, ibmvio.o)
++BD_MMAP=1
+ endif
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+ TGTD_OBJS += $(addprefix iscsi/, istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o)
+-LIBS = -lcrypto
++LIBS += -lcrypto
+ endif
+ 
++ifneq ($(BD_MMAP),)
++TGTD_OBJS += bd_mmap.o
++endif
++
++# ifneq ($(BD_AIO),)
++# TGTD_OBJS += bd_aio.o
++# LIBS += -laio
++# endif
++
+ all: $(PROGRAMS)
+ 
+ tgtd: $(TGTD_OBJS)
+
+Added: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/bd_aio.c	2006-08-29 06:27:37 UTC (rev 558)
+@@ -0,0 +1,135 @@
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;signal.h&gt;
++
++#include &lt;linux/fs.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;libaio.h&quot;
++
++/*
++ * We need an interface to wait for both synchronous and asynchronous
++ * descriptors (something like BSD's kqueue). Now we use a kernel
++ * patch to return an fd associated with the AIO context because Xen
++ * blktap uses it (so we avoid introducing another patch). However,
++ * I'm not sure the patch will go into mainline. Another approach,
++ * IO_CMD_EPOLL_WAIT, looks more promising. kqueue is promising too.
++ */
++
++#define REQUEST_ASYNC_FD 1
++
++/* FIXME */
++#define MAX_AIO_REQS 1024
++#define O_DIRECT 040000 /* who defines this?*/
++
++struct bd_aio_info {
++	int fd;
++	int aio_fd;
++
++	io_context_t ctx;
++	/* TODO: batch requests*/
++	struct iocb iocb[MAX_AIO_REQS];
++	struct io_event events[MAX_AIO_REQS];
++};
++
++static void aio_event_handler(int fd, void *data)
++{
++	struct tgt_device *dev = (struct tgt_device *) data;
++	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
++	int i, nr;
++	struct iocb *iocb;
++
++	nr = io_getevents(bai-&gt;ctx, 0, MAX_AIO_REQS, bai-&gt;events, NULL);
++
++	for (i = 0; i &lt; nr; i++) {
++		iocb = bai-&gt;events[i].obj;
++		target_cmd_io_done(iocb-&gt;data, 0);
++	}
++}
++
++static struct tgt_device *bd_aio_open(char *path, int *fd, uint64_t *size)
++{
++	struct tgt_device *dev;
++	struct bd_aio_info *bai;
++	int err;
++
++	dev = malloc(sizeof(*dev) + sizeof(struct bd_aio_info));
++	if (!dev)
++		return NULL;
++
++	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE | O_DIRECT, size);
++	if (*fd &lt; 0)
++		goto free_info;
++
++	bai = (struct bd_aio_info *)dev-&gt;bddata;
++
++	bai-&gt;ctx = (io_context_t) REQUEST_ASYNC_FD;
++	bai-&gt;aio_fd = io_setup(MAX_AIO_REQS, &amp;bai-&gt;ctx);
++	if (bai-&gt;aio_fd &lt; 0)
++		goto close_fd;
++
++	err = tgt_event_add(bai-&gt;aio_fd, POLL_IN, aio_event_handler, dev);
++	if (err)
++		goto aio_cb_destroy;
++
++	bai-&gt;fd = *fd;
++	return dev;
++
++aio_cb_destroy:
++	io_destroy(bai-&gt;ctx);
++close_fd:
++	close(*fd);
++free_info:
++	free(dev);
++
++	return NULL;
++}
++
++static void bd_aio_close(struct tgt_device *dev)
++{
++	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
++
++	tgt_event_del(bai-&gt;fd);
++	io_destroy(bai-&gt;ctx);
++	free(dev);
++}
++
++static int bd_aio_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
++			     unsigned long *uaddr,
++			     uint64_t offset, int *async, void *key)
++{
++	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
++	struct iocb iocb, *io;
++
++	*async = 1;
++
++	io = &iocb;
++	memset(io, 0, sizeof(*io));
++
++	io-&gt;data = key;
++	if (rw == READ)
++		io_prep_pread(io, bai-&gt;fd, uaddr, datalen, offset);
++	else
++		io_prep_pwrite(io, bai-&gt;fd, uaddr, datalen, offset);
++
++	return io_submit(bai-&gt;ctx, 1, &amp;io);
++}
++
++static int bd_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	return 0;
++}
++
++struct backedio_template aio_bdt = {
++	.bd_open	= bd_aio_open,
++	.bd_close	= bd_aio_close,
++	.bd_cmd_submit	= bd_aio_cmd_submit,
++	.bd_cmd_done	= bd_aio_cmd_done,
++};
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/bd_mmap.c	2006-08-29 06:27:37 UTC (rev 558)
+@@ -67,7 +67,8 @@
+ }
+ 
+ static int bd_mmap_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+-			      unsigned long *uaddr, uint64_t offset)
++			      unsigned long *uaddr, uint64_t offset, int *async,
++			      void *key)
+ {
+ 	int fd = dev-&gt;fd;
+ 	void *p;
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/ibmvio/ibmvio.h	2006-08-29 06:27:37 UTC (rev 558)
+@@ -11,6 +11,6 @@
+ 	.scsi_report_luns	= scsi_report_luns,
+ 	.scsi_inquiry		= scsi_inquiry,
+ 	.cmd_end_notify		= kspace_send_cmd_res,
+-	.mgtm_end_notify	= kspace_send_tsk_mgmt_res,
++	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+ 	.bdt			= &amp;mmap_bdt,
+ };
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/scsi.c	2006-08-29 06:27:37 UTC (rev 558)
+@@ -464,14 +464,15 @@
+ int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+-		     struct tgt_device *dev, struct list_head *dev_list)
++		     struct tgt_device *dev, struct list_head *dev_list, int *async,
++		     void *key)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t *data, *scb = pdu;
+ 
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+-	*offset = 0;
++	*async = *offset = 0;
+ 	data = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
+ 							  datalen);
+ 
+@@ -529,7 +530,7 @@
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+ 		result = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_submit(dev, *rw, datalen,
+-							      uaddr, *offset);
++							      uaddr, *offset, async, key);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/target.c	2006-08-29 06:27:37 UTC (rev 558)
+@@ -252,7 +252,7 @@
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+ 	struct cmd *cmd;
+-	int result, enabled, len = 0;
++	int result, enabled, async, len = 0;
+ 	uint64_t offset, dev_id;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	unsigned long uaddr = 0;
+@@ -291,15 +291,18 @@
+ 					  &amp;len, data_len,
+ 					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+ 					  lun, cmd-&gt;dev,
+-					  &amp;target-&gt;device_list);
++					  &amp;target-&gt;device_list, &amp;async, (void *) cmd);
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+ 		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+ 			tag, scb[0], uaddr, offset, result);
+ 
++		cmd-&gt;rw = rw;
+ 		set_cmd_processed(cmd);
+-		tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(host_no, len, result, rw, uaddr, tag);
++		if (!async)
++			tgt_drivers[target-&gt;lid]-&gt;cmd_end_notify(host_no, len, result,
++								 rw, uaddr, tag);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf(&quot;blocked %&quot; PRIx64 &quot; %x %&quot; PRIu64 &quot; %d\n&quot;,
+@@ -315,10 +318,22 @@
+ 	return 0;
+ }
+ 
++void target_cmd_io_done(void *key, int result)
++{
++	struct cmd *cmd = (struct cmd *) key;
++
++	/* TODO: sense in case of error. */
++	tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
++							cmd-&gt;len, result,
++							cmd-&gt;rw, cmd-&gt;uaddr,
++							cmd-&gt;tag);
++	return;
++}
++
+ static void post_cmd_done(struct tgt_cmd_queue *q)
+ {
+ 	struct cmd *cmd, *tmp;
+-	int enabled, result, len = 0;
++	int enabled, result, async, len = 0;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	uint64_t offset;
+ 	unsigned long uaddr = 0;
+@@ -330,23 +345,21 @@
+ 			dprintf(&quot;perform %&quot; PRIx64 &quot; %x\n&quot;, cmd-&gt;tag, cmd-&gt;attribute);
+ 			result = scsi_cmd_perform(cmd-&gt;c_target-&gt;lid,
+ 						  cmd-&gt;hostno, cmd-&gt;scb,
+-						  &amp;len,
+-						  cmd-&gt;len,
+-						  &amp;uaddr,
+-						  &amp;rw,
+-						  &amp;mmapped,
+-						  &amp;offset,
+-						  cmd-&gt;lun,
+-						  cmd-&gt;dev,
+-						  &amp;cmd-&gt;c_target-&gt;device_list);
++						  &amp;len, cmd-&gt;len, &amp;uaddr,
++						  &amp;rw, &amp;mmapped, &amp;offset,
++						  cmd-&gt;lun, cmd-&gt;dev,
++						  &amp;cmd-&gt;c_target-&gt;device_list,
++						  &amp;async, (void *) cmd);
++			cmd-&gt;rw = rw;
+ 			cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+-			tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
+-									len,
+-									result,
+-									rw,
+-									uaddr,
+-									cmd-&gt;tag);
++			if (!async)
++				tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
++										len,
++										result,
++										rw,
++										uaddr,
++										cmd-&gt;tag);
+ 		} else
+ 			break;
+ 	}
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/target.h	2006-08-29 06:27:37 UTC (rev 558)
+@@ -52,6 +52,7 @@
+ 	uint8_t lun[8];
+ 	int attribute;
+ 	uint64_t tag;
++	int rw;
+ 	struct mgmt_req *mreq;
+ };
+ 
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/tgtd.c	2006-08-29 06:27:37 UTC (rev 558)
+@@ -204,7 +204,7 @@
+ 	struct sigaction sa_old;
+ 	struct sigaction sa_new;
+ 	int err, ch, longindex, nr_lld = 0, maxfds = MAX_FDS;
+-	int is_daemon = 1, is_debug = 1;
++	int is_daemon = 1, is_debug = 0;
+ 	char *modes = NULL;
+ 
+ 	/* do not allow ctrl-c for now... */
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-29 01:04:15 UTC (rev 557)
++++ trunk/usr/tgtd.h	2006-08-29 06:27:37 UTC (rev 558)
+@@ -31,7 +31,8 @@
+ 	void (*bd_close)(struct tgt_device *dev);
+ 	void *(*bd_cmd_buffer_alloc)(int devio, uint32_t datalen);
+ 	int (*bd_cmd_submit)(struct tgt_device *dev, int rw, uint32_t datalen,
+-			     unsigned long *uaddr, uint64_t offset);
++			     unsigned long *uaddr, uint64_t offset, int *async,
++			     void *key);
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
+@@ -58,11 +59,14 @@
+ extern void target_mgmt_request(int host_no, int req_id, int function,
+ 				uint8_t *lun, uint64_t tag);
+ 
++extern void target_cmd_io_done(void *key, int result);
++
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+ extern int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+-			    struct tgt_device *dev, struct list_head *dev_list);
++			    struct tgt_device *dev, struct list_head *dev_list,
++			    int *async, void *key);
+ 
+ extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000544.html">[Stgt-svn] r557 - in trunk/usr: . ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000546.html">[Stgt-svn] r559 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#545">[ date ]</a>
+              <a href="thread.html#545">[ thread ]</a>
+              <a href="subject.html#545">[ subject ]</a>
+              <a href="author.html#545">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,348 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r360 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r360%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031208.k23C83Or021543%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000346.html">
+   <LINK REL="Next"  HREF="000348.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r360 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r360%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031208.k23C83Or021543%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r360 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 13:08:03 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000346.html">[Stgt-svn] r359 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000348.html">[Stgt-svn] r361 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#347">[ date ]</a>
+              <a href="thread.html#347">[ thread ]</a>
+              <a href="subject.html#347">[ subject ]</a>
+              <a href="author.html#347">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 13:07:51 +0100 (Fri, 03 Mar 2006)
+New Revision: 360
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Some preparation code for ordering support.
+
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-03-03 10:20:26 UTC (rev 359)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-03 12:07:51 UTC (rev 360)
+@@ -604,7 +604,7 @@
+ 	return lun;
+ }
+ 
+-int scsi_cmd_process(int host_no, uint8_t *pdu, int *len,
++int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+ 		     struct tgt_device *dev, struct qelem *dev_list)
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-03 10:20:26 UTC (rev 359)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 12:07:51 UTC (rev 360)
+@@ -32,7 +32,7 @@
+ #include &lt;sys/socket.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+-#define	BITS_PER_LONG 32
++#define	BITS_PER_LONG	32
+ #include &lt;linux/hash.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+@@ -41,6 +41,11 @@
+ #include &quot;tgtadm.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
++/* better if we can include the followings in kernel header files. */
++#define	MSG_SIMPLE_TAG	0x20
++#define	MSG_HEAD_TAG	0x21
++#define	MSG_ORDERED_TAG	0x22
++
+ #define	MAX_NR_TARGET		1024
+ #define	MAX_NR_HOST		1024
+ #define	DEFAULT_NR_DEVICE	64
+@@ -49,6 +54,10 @@
+ #define	HASH_ORDER	4
+ #define	cmd_hashfn(cid)	hash_long((cid), HASH_ORDER)
+ 
++enum {
++	TGT_QUEUE_BLOCKED,
++};
++
+ struct cmd {
+ 	struct qelem hlist;
+ 	struct qelem qlist;
+@@ -57,6 +66,13 @@
+ 	uint32_t len;
+ 	int mmapped;
+ 	struct tgt_device *dev;
++
++	/* Kill the followings when we use shared memory instead of netlink. */
++	int hostno;
++	uint32_t data_len;
++	uint8_t scb[16];
++	uint8_t lun[8];
++	int attribute;
+ };
+ 
+ struct target {
+@@ -139,6 +155,13 @@
+ 	insque(&amp;dev-&gt;dlist, pos);
+ }
+ 
++void tgt_cmd_queue_init(struct tgt_cmd_queue *q)
++{
++	q-&gt;active_cmd = 0;
++	q-&gt;state = 0;
++	INIT_LIST_HEAD(&amp;q-&gt;queue);
++}
++
+ int tgt_device_create(int tid, uint64_t dev_id, char *path)
+ {
+ 	struct target *target;
+@@ -194,6 +217,7 @@
+ 			device-&gt;addr);
+ 
+ 	tgt_device_link(target, device);
++	tgt_cmd_queue_init(&amp;device-&gt;cmd_queue);
+ 
+ 	eprintf(&quot;Succeed to add a logical unit %&quot; PRIu64 &quot; to the target %d\n&quot;,
+ 		dev_id, tid);
+@@ -237,61 +261,92 @@
+ 	return 0;
+ }
+ 
+-static int cmd_queue(struct tgt_event *ev_req, int nl_fd)
++static int tgt_kspace_send_cmd(int nl_fd, struct cmd *cmd, int result, int rw)
+ {
+-	struct target *target;
+-	struct tgt_device *device;
+-	int result, len = 0;
+ 	char resbuf[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 	struct tgt_event *ev_res = NLMSG_DATA(resbuf);
++
++	ev_res-&gt;u.cmd_rsp.host_no = cmd-&gt;hostno;
++	ev_res-&gt;u.cmd_rsp.cid = cmd-&gt;cid;
++	ev_res-&gt;u.cmd_rsp.len = cmd-&gt;len;
++	ev_res-&gt;u.cmd_rsp.result = result;
++	ev_res-&gt;u.cmd_rsp.uaddr = cmd-&gt;uaddr;
++	ev_res-&gt;u.cmd_rsp.rw = rw;
++
++	return __nl_write(nl_fd, TGT_UEVENT_CMD_RSP, resbuf,
++			  NLMSG_SPACE(sizeof(*ev_res)));
++}
++
++static int cmd_pre_perform(struct tgt_cmd_queue *queue, int attribute)
++{
++	return 1;
++}
++
++static void cmd_post_perform(struct cmd *cmd, unsigned long uaddr,
++			     int len, uint8_t mmapped)
++{
++	cmd-&gt;uaddr = uaddr;
++	cmd-&gt;len = len;
++	cmd-&gt;mmapped = mmapped;
++}
++
++static void cmd_queue(struct tgt_event *ev_req, int nl_fd)
++{
++	struct target *target;
++	struct tgt_cmd_queue *q;
++	struct cmd *cmd;
++	int result, enabled, len = 0;
+ 	uint64_t offset, dev_id;
+-	uint32_t cid = ev_req-&gt;k.cmd_req.cid;
+-	uint8_t rw = 0, try_map = 0;
++	uint8_t rw = 0, mmapped = 0;
+ 	unsigned long uaddr = 0;
+-	int host_no = ev_req-&gt;k.cmd_req.host_no;
+-	struct cmd *cmd;
+ 
+-	target = host_to_target(host_no);
++	target = host_to_target(ev_req-&gt;k.cmd_req.host_no);
+ 	if (!target) {
+-		eprintf(&quot;%d is not bind to any target\n&quot;, host_no);
+-		return 0;
++		eprintf(&quot;%d is not bind to any target\n&quot;,
++			ev_req-&gt;k.cmd_req.host_no);
++		return;
+ 	}
+ 
++	/* TODO: preallocate cmd */
++	cmd = malloc(sizeof(*cmd));
++	cmd-&gt;hostno = ev_req-&gt;k.cmd_req.host_no;
++ 	cmd-&gt;cid = ev_req-&gt;k.cmd_req.cid;
++	insque(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cmd-&gt;cid)]);
++
+ 	dev_id = scsi_get_devid(ev_req-&gt;k.cmd_req.lun);
+-	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cid, ev_req-&gt;k.cmd_req.scb[0], dev_id);
++	dprintf(&quot;%u %x %&quot; PRIx64 &quot;\n&quot;, cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0],
++		dev_id);
+ 
+-	device = device_get(target, dev_id);
+-	if (device)
++	cmd-&gt;dev = device_get(target, dev_id);
++	if (cmd-&gt;dev) {
+ 		uaddr = target-&gt;devt[dev_id]-&gt;addr;
++		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
++	} else
++		q = &amp;target-&gt;cmd_queue;
+ 
+-	result = scsi_cmd_process(host_no, ev_req-&gt;k.cmd_req.scb,
+-				  &amp;len, ev_req-&gt;k.cmd_req.data_len,
+-				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset,
+-				  ev_req-&gt;k.cmd_req.lun, device,
+-				  &amp;target-&gt;device_list);
++	enabled = cmd_pre_perform(q, ev_req-&gt;k.cmd_req.attribute);
+ 
+-	dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+-		cid, ev_req-&gt;k.cmd_req.scb[0], uaddr, offset, result);
++	if (enabled) {
++		result = scsi_cmd_perform(cmd-&gt;hostno, ev_req-&gt;k.cmd_req.scb,
++					  &amp;len, ev_req-&gt;k.cmd_req.data_len,
++					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
++					  ev_req-&gt;k.cmd_req.lun, cmd-&gt;dev,
++					  &amp;target-&gt;device_list);
+ 
+-	/* TODO: preallocate cmd */
+-	cmd = malloc(sizeof(*cmd));
+- 	cmd-&gt;cid = cid;
+-	cmd-&gt;dev = device;
+-	cmd-&gt;uaddr = uaddr;
+-	cmd-&gt;len = len;
+-	cmd-&gt;mmapped = try_map;
++		cmd_post_perform(cmd, uaddr, len, mmapped);
++		q-&gt;active_cmd++;
+ 
+-	insque(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)]);
++		dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
++			cmd-&gt;cid, ev_req-&gt;k.cmd_req.scb[0], uaddr,
++			offset, result);
+ 
+-	ev_res-&gt;u.cmd_rsp.host_no = host_no;
+-	ev_res-&gt;u.cmd_rsp.cid = cid;
+-	ev_res-&gt;u.cmd_rsp.len = len;
+-	ev_res-&gt;u.cmd_rsp.result = result;
+-	ev_res-&gt;u.cmd_rsp.uaddr = uaddr;
+-	ev_res-&gt;u.cmd_rsp.rw = rw;
+-
+-	return __nl_write(nl_fd, TGT_UEVENT_CMD_RSP, resbuf,
+-			  NLMSG_SPACE(sizeof(*ev_res)));
++		tgt_kspace_send_cmd(nl_fd, cmd, result, rw);
++	} else {
++		memcpy(cmd-&gt;scb, ev_req-&gt;k.cmd_req.scb, sizeof(cmd-&gt;scb));
++		memcpy(cmd-&gt;lun, ev_req-&gt;k.cmd_req.lun, sizeof(cmd-&gt;lun));
++		cmd-&gt;len = ev_req-&gt;k.cmd_req.data_len;
++		insque(&amp;cmd-&gt;qlist, q);
++	}
+ }
+ 
+ static struct cmd *find_cmd(struct target *target, uint32_t cid)
+@@ -327,6 +382,7 @@
+ static void cmd_done(struct tgt_event *ev)
+ {
+ 	struct target *target;
++	struct tgt_cmd_queue *q;
+ 	struct cmd *cmd;
+ 	int err, do_munmap, host_no = ev-&gt;k.cmd_done.host_no;
+ 	uint32_t cid = ev-&gt;k.cmd_done.cid;
+@@ -343,6 +399,14 @@
+ 		return;
+ 	}
+ 	remque(&amp;cmd-&gt;hlist);
++
++	if (cmd-&gt;dev)
++		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
++	else
++		q = &amp;target-&gt;cmd_queue;
++
++	q-&gt;active_cmd--;
++
+ 	do_munmap = cmd-&gt;mmapped;
+ 	if (do_munmap) {
+ 		if (!cmd-&gt;dev) {
+@@ -454,6 +518,8 @@
+ 	if (err &lt; 0)
+ 		goto free_device_table;
+ 
++	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
++
+ 	eprintf(&quot;Succeed to create a new target %d\n&quot;, tid);
+ 	tgtt[tid] = target;
+ 	return 0;
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-03-03 10:20:26 UTC (rev 359)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-03-03 12:07:51 UTC (rev 360)
+@@ -8,8 +8,9 @@
+ #define	SCSI_ID_LEN	24
+ 
+ struct tgt_cmd_queue {
++	int active_cmd;
+ 	unsigned long state;
+-	struct qelem cmd_queue;
++	struct qelem queue;
+ };
+ 
+ struct tgt_device {
+@@ -42,7 +43,7 @@
+ extern int tgt_target_bind(int tid, int host_no);
+ 
+ extern uint64_t scsi_get_devid(uint8_t *pdu);
+-extern int scsi_cmd_process(int host_no, uint8_t *pdu, int *len,
++extern int scsi_cmd_perform(int host_no, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+ 			    struct tgt_device *dev, struct qelem *dev_list);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000346.html">[Stgt-svn] r359 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000348.html">[Stgt-svn] r361 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#347">[ date ]</a>
+              <a href="thread.html#347">[ thread ]</a>
+              <a href="subject.html#347">[ subject ]</a>
+              <a href="author.html#347">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

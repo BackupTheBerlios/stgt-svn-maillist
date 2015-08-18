@@ -1,0 +1,99 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r182 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r182%20-%20trunk/kernel&In-Reply-To=%3C200511181219.jAICJB5l005708%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000170.html">
+   <LINK REL="Next"  HREF="000172.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r182 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r182%20-%20trunk/kernel&In-Reply-To=%3C200511181219.jAICJB5l005708%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r182 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Nov 18 13:19:11 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000170.html">[Stgt-svn] r181 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000172.html">[Stgt-svn] r183 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#171">[ date ]</a>
+              <a href="thread.html#171">[ thread ]</a>
+              <a href="subject.html#171">[ subject ]</a>
+              <a href="author.html#171">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-18 13:19:09 +0100 (Fri, 18 Nov 2005)
+New Revision: 182
+
+Modified:
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sd.c
+Log:
+Trivial cleanups of printk.
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-11-18 12:11:42 UTC (rev 181)
++++ trunk/kernel/tgt_scsi.c	2005-11-18 12:19:09 UTC (rev 182)
+@@ -167,7 +167,7 @@
+ 
+ 	cmd = tgt_cmd_create(session, tgt_priv);
+ 	if (!cmd) {
+-		printk(KERN_ERR &quot;Could not allocate command\n&quot;);
++		eprintk(&quot;Could not allocate command\n&quot;);
+ 		return NULL;
+ 	}
+ 	scmd = tgt_cmd_to_scsi(cmd);
+
+Modified: trunk/kernel/tgt_sd.c
+===================================================================
+--- trunk/kernel/tgt_sd.c	2005-11-18 12:11:42 UTC (rev 181)
++++ trunk/kernel/tgt_sd.c	2005-11-18 12:19:09 UTC (rev 182)
+@@ -53,7 +53,7 @@
+ 		return -EINVAL;
+ 
+ 	device-&gt;size = inode-&gt;i_size;
+-	printk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
++	dprintk(&quot;%d %llu\n&quot;, device-&gt;fd, inode-&gt;i_size &gt;&gt; 9);
+ 
+ 	return 0;
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000170.html">[Stgt-svn] r181 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000172.html">[Stgt-svn] r183 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#171">[ date ]</a>
+              <a href="thread.html#171">[ thread ]</a>
+              <a href="subject.html#171">[ subject ]</a>
+              <a href="author.html#171">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

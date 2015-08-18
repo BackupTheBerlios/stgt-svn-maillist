@@ -1,0 +1,190 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r108 - in trunk: iscsi/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r108%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509270321.j8R3LPfA018215%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000101.html">
+   <LINK REL="Next"  HREF="000103.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r108 - in trunk: iscsi/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r108%20-%20in%20trunk%3A%20iscsi/kernel%20kernel&In-Reply-To=%3C200509270321.j8R3LPfA018215%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r108 - in trunk: iscsi/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Sep 27 05:21:25 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000101.html">[Stgt-svn] r107 - in trunk: iscsi/usr usr
+</A></li>
+        <LI>Next message: <A HREF="000103.html">[Stgt-svn] r109 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#102">[ date ]</a>
+              <a href="thread.html#102">[ thread ]</a>
+              <a href="subject.html#102">[ subject ]</a>
+              <a href="author.html#102">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-27 05:21:21 +0200 (Tue, 27 Sep 2005)
+New Revision: 108
+
+Modified:
+   trunk/iscsi/kernel/target.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_protocol.c
+Log:
+Replace some kmalloc with kzalloc.
+
+Modified: trunk/iscsi/kernel/target.c
+===================================================================
+--- trunk/iscsi/kernel/target.c	2005-09-26 14:10:03 UTC (rev 107)
++++ trunk/iscsi/kernel/target.c	2005-09-27 03:21:21 UTC (rev 108)
+@@ -65,8 +65,6 @@
+ 
+ 	down(&amp;target_list_sem);
+ 
+-	memset(target, 0, sizeof(*target));
+-
+ 	target-&gt;tt = tt;
+ 	target-&gt;tid = target-&gt;tt-&gt;tid;
+ 
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-09-26 14:10:03 UTC (rev 107)
++++ trunk/kernel/tgt.c	2005-09-27 03:21:21 UTC (rev 108)
+@@ -93,10 +93,10 @@
+ 	unsigned long flags;
+ 	struct target_type_internal *ti;
+ 
+-	ti = kmalloc(sizeof(*ti), GFP_KERNEL);
++	ti = kzalloc(sizeof(*ti), GFP_KERNEL);
+ 	if (!ti)
+ 		return -ENOMEM;
+-	memset(ti, 0, sizeof(*ti));
++
+ 	INIT_LIST_HEAD(&amp;ti-&gt;list);
+ 	ti-&gt;tt = tt;
+ 
+@@ -162,10 +162,9 @@
+ 		return NULL;
+ 	}
+ 
+-	target = kmalloc(sizeof(*target), GFP_KERNEL);
++	target = kzalloc(sizeof(*target), GFP_KERNEL);
+ 	if (!target)
+ 		return NULL;
+-	memset(target, 0, sizeof(*target));
+ 
+ 	ti = target_template_get(target_type);
+ 	if (!ti)
+@@ -187,7 +186,7 @@
+ 	if (!target-&gt;twq)
+ 		goto put_template;
+ 
+-	target-&gt;tt_data = kmalloc(target-&gt;tt-&gt;priv_data_size, GFP_KERNEL);
++	target-&gt;tt_data = kzalloc(target-&gt;tt-&gt;priv_data_size, GFP_KERNEL);
+ 	if (!target-&gt;tt_data)
+ 		goto free_workqueue;
+ 
+@@ -299,10 +298,10 @@
+ 
+ 	dprintk(&quot;%p %d\n&quot;, target, max_cmds);
+ 
+-	session = kmalloc(sizeof(*session), done ? GFP_ATOMIC : GFP_KERNEL);
++	session = kzalloc(sizeof(*session), done ? GFP_ATOMIC : GFP_KERNEL);
+ 	if (!session)
+ 		return NULL;
+-	memset(session, 0, sizeof(*session));
++
+ 	session-&gt;target = target;
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+ 
+@@ -376,10 +375,10 @@
+ 	unsigned long flags;
+ 	struct device_type_internal *ti;
+ 
+-	ti = kmalloc(sizeof(*ti), GFP_KERNEL);
++	ti = kzalloc(sizeof(*ti), GFP_KERNEL);
+ 	if (!ti)
+ 		return -ENOMEM;
+-	memset(ti, 0, sizeof(*ti));
++
+ 	INIT_LIST_HEAD(&amp;ti-&gt;list);
+ 	ti-&gt;sdt = sdt;
+ 
+@@ -451,11 +450,10 @@
+ 	if (!target)
+ 		return -EINVAL;
+ 
+-	device = kmalloc(sizeof(*device), GFP_KERNEL);
++	device = kzalloc(sizeof(*device), GFP_KERNEL);
+ 	if (!device)
+ 		return -ENOMEM;
+ 
+-	memset(device, 0, sizeof(*device));
+ 	device-&gt;dev_id = dev_id;
+ 	device-&gt;target = target;
+ 	device-&gt;fd = fd;
+@@ -472,7 +470,7 @@
+ 		goto put_fd;
+ 	}
+ 
+-	device-&gt;dt_data = kmalloc(device-&gt;dt-&gt;priv_data_size, GFP_KERNEL);
++	device-&gt;dt_data = kzalloc(device-&gt;dt-&gt;priv_data_size, GFP_KERNEL);
+ 	if (!device-&gt;dt_data)
+ 		goto put_template;
+ 
+
+Modified: trunk/kernel/tgt_protocol.c
+===================================================================
+--- trunk/kernel/tgt_protocol.c	2005-09-26 14:10:03 UTC (rev 107)
++++ trunk/kernel/tgt_protocol.c	2005-09-27 03:21:21 UTC (rev 108)
+@@ -46,10 +46,9 @@
+ 	unsigned long flags;
+ 	struct tgt_proto_internal *tp;
+ 
+-	tp = kmalloc(sizeof(*tp), GFP_KERNEL);
++	tp = kzalloc(sizeof(*tp), GFP_KERNEL);
+ 	if (!tp)
+ 		return -ENOMEM;
+-	memset(tp, 0, sizeof(*tp));
+ 	INIT_LIST_HEAD(&amp;tp-&gt;list);
+ 	tp-&gt;proto = proto;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000101.html">[Stgt-svn] r107 - in trunk: iscsi/usr usr
+</A></li>
+	<LI>Next message: <A HREF="000103.html">[Stgt-svn] r109 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#102">[ date ]</a>
+              <a href="thread.html#102">[ thread ]</a>
+              <a href="subject.html#102">[ subject ]</a>
+              <a href="author.html#102">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

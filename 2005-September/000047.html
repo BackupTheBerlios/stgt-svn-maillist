@@ -1,0 +1,90 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r54 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r54%20-%20trunk/kernel&In-Reply-To=%3C200509071755.j87HtvaF006081%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000046.html">
+   <LINK REL="Next"  HREF="000048.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r54 - trunk/kernel</H1>
+    <B>Mike Christie at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r54%20-%20trunk/kernel&In-Reply-To=%3C200509071755.j87HtvaF006081%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r54 - trunk/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Wed Sep  7 19:55:57 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000046.html">[Stgt-svn] r53 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000048.html">[Stgt-svn] r55 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#47">[ date ]</a>
+              <a href="thread.html#47">[ thread ]</a>
+              <a href="subject.html#47">[ subject ]</a>
+              <a href="author.html#47">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-09-07 19:55:57 +0200 (Wed, 07 Sep 2005)
+New Revision: 54
+
+Modified:
+   trunk/kernel/stgt.c
+Log:
+trivial cleanup reflecting that stgt.c is not scsi specific now
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-07 17:54:33 UTC (rev 53)
++++ trunk/kernel/stgt.c	2005-09-07 17:55:57 UTC (rev 54)
+@@ -1,5 +1,5 @@
+ /*
+- * SCSI Targets Framework
++ * Core Target Framework code
+  *
+  * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+  * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+@@ -15,7 +15,6 @@
+ #include &lt;linux/mempool.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ #include &lt;net/tcp.h&gt;
+-#include &lt;scsi/scsi.h&gt;
+ 
+ #include &lt;stgt.h&gt;
+ #include &lt;stgt_target.h&gt;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000046.html">[Stgt-svn] r53 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000048.html">[Stgt-svn] r55 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#47">[ date ]</a>
+              <a href="thread.html#47">[ thread ]</a>
+              <a href="subject.html#47">[ subject ]</a>
+              <a href="author.html#47">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

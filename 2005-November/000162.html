@@ -1,0 +1,174 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r168 - in trunk/istgt: include kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r168%20-%20in%20trunk/istgt%3A%20include%20kernel&In-Reply-To=%3C200511150958.jAF9wWw8010131%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000161.html">
+   <LINK REL="Next"  HREF="000163.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r168 - in trunk/istgt: include kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r168%20-%20in%20trunk/istgt%3A%20include%20kernel&In-Reply-To=%3C200511150958.jAF9wWw8010131%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r168 - in trunk/istgt: include kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Nov 15 10:58:32 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000161.html">[Stgt-svn] r167 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000163.html">[Stgt-svn] r169 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#162">[ date ]</a>
+              <a href="thread.html#162">[ thread ]</a>
+              <a href="subject.html#162">[ subject ]</a>
+              <a href="author.html#162">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-15 10:58:22 +0100 (Tue, 15 Nov 2005)
+New Revision: 168
+
+Modified:
+   trunk/istgt/include/iscsi_proto.h
+   trunk/istgt/kernel/iscsi.c
+Log:
+Changes for the latest version of iscsi_proto.h. We can remove our own iscsi_proto.h with 2.6.15-rc1 or later.
+
+
+Modified: trunk/istgt/include/iscsi_proto.h
+===================================================================
+--- trunk/istgt/include/iscsi_proto.h	2005-11-15 09:31:02 UTC (rev 167)
++++ trunk/istgt/include/iscsi_proto.h	2005-11-15 09:58:22 UTC (rev 168)
+@@ -548,9 +548,11 @@
+ 	uint8_t flags;
+ 	uint8_t reason;
+ 	uint8_t rsvd2;
+-	uint8_t rsvd3;
++	uint8_t hlength;
+ 	uint8_t dlength[3];
+-	uint8_t rsvd4[16];
++	uint8_t rsvd3[8];
++	__be32  ffffffff;
++	uint8_t rsvd4[4];
+ 	__be32	statsn;
+ 	__be32	exp_cmdsn;
+ 	__be32	max_cmdsn;
+@@ -560,17 +562,17 @@
+ };
+ 
+ /* Reason for Reject */
+-#define CMD_BEFORE_LOGIN	1
+-#define DATA_DIGEST_ERROR	2
+-#define DATA_SNACK_REJECT	3
+-#define ISCSI_PROTOCOL_ERROR	4
+-#define CMD_NOT_SUPPORTED	5
+-#define IMM_CMD_REJECT		6
+-#define TASK_IN_PROGRESS	7
+-#define INVALID_SNACK		8
+-#define BOOKMARK_REJECTED	9
+-#define BOOKMARK_NO_RESOURCES	10
+-#define NEGOTIATION_RESET	11
++#define ISCSI_REASON_CMD_BEFORE_LOGIN	1
++#define ISCSI_REASON_DATA_DIGEST_ERROR	2
++#define ISCSI_REASON_DATA_SNACK_REJECT	3
++#define ISCSI_REASON_PROTOCOL_ERROR	4
++#define ISCSI_REASON_CMD_NOT_SUPPORTED	5
++#define ISCSI_REASON_IMM_CMD_REJECT		6
++#define ISCSI_REASON_TASK_IN_PROGRESS	7
++#define ISCSI_REASON_INVALID_SNACK		8
++#define ISCSI_REASON_BOOKMARK_INVALID	9
++#define ISCSI_REASON_BOOKMARK_NO_RESOURCES	10
++#define ISCSI_REASON_NEGOTIATION_RESET	11
+ 
+ /* Max. number of Key=Value pairs in a text message */
+ #define MAX_KEY_VALUE_PAIRS	8192
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-11-15 09:31:02 UTC (rev 167)
++++ trunk/istgt/kernel/iscsi.c	2005-11-15 09:58:22 UTC (rev 168)
+@@ -464,7 +464,7 @@
+ 	if ((int32_t) (cmd_sn - session-&gt;exp_cmd_sn) &gt;= 0)
+ 		return 0;
+ 	eprintk(&quot;sequence error (%x,%x)\n&quot;, cmd_sn, session-&gt;exp_cmd_sn);
+-	return -ISCSI_PROTOCOL_ERROR;
++	return -ISCSI_REASON_PROTOCOL_ERROR;
+ }
+ 
+ static struct istgt_cmd *__cmnd_find_hash(struct iscsi_session *session,
+@@ -510,7 +510,7 @@
+ 
+ 	dprintk(&quot;%p:%x\n&quot;, cmnd, itt);
+ 	if (itt == ISCSI_RESERVED_TAG) {
+-		err = -ISCSI_PROTOCOL_ERROR;
++		err = -ISCSI_REASON_PROTOCOL_ERROR;
+ 		goto out;
+ 	}
+ 
+@@ -523,7 +523,7 @@
+ 		list_add_tail(&amp;cmnd-&gt;hash_list, head);
+ 		set_cmd_hashed(cmnd);
+ 	} else
+-		err = -TASK_IN_PROGRESS;
++		err = -ISCSI_REASON_TASK_IN_PROGRESS;
+ 
+ 	spin_unlock(&amp;session-&gt;cmnd_hash_lock);
+ 
+@@ -838,7 +838,7 @@
+ 		 * See 10.18.2 in the draft 20.
+ 		 */
+ 		eprintk(&quot;initiator bug %x\n&quot;, cmd_itt(cmnd));
+-		err = -ISCSI_PROTOCOL_ERROR;
++		err = -ISCSI_REASON_PROTOCOL_ERROR;
+ 		goto out;
+ 	}
+ 
+@@ -1572,10 +1572,10 @@
+ 		break;
+ 	case ISCSI_OP_TEXT:
+ 	case ISCSI_OP_SNACK:
+-		err = -CMD_NOT_SUPPORTED;
++		err = -ISCSI_REASON_CMD_NOT_SUPPORTED;
+ 		break;
+ 	default:
+-		err = -CMD_NOT_SUPPORTED;
++		err = -ISCSI_REASON_CMD_NOT_SUPPORTED;
+ 		break;
+ 	}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000161.html">[Stgt-svn] r167 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000163.html">[Stgt-svn] r169 - in trunk: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#162">[ date ]</a>
+              <a href="thread.html#162">[ thread ]</a>
+              <a href="subject.html#162">[ subject ]</a>
+              <a href="author.html#162">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

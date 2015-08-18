@@ -1,0 +1,845 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r792 - in trunk/usr: . ibmvio iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r792%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200703031036.l23AaBrZ015886%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000778.html">
+   <LINK REL="Next"  HREF="000780.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r792 - in trunk/usr: . ibmvio iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r792%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200703031036.l23AaBrZ015886%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r792 - in trunk/usr: . ibmvio iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar  3 11:36:11 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000778.html">[Stgt-svn] r791 - in trunk/usr: . ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000780.html">[Stgt-svn] r793 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#779">[ date ]</a>
+              <a href="thread.html#779">[ thread ]</a>
+              <a href="subject.html#779">[ subject ]</a>
+              <a href="author.html#779">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-03 11:36:10 +0100 (Sat, 03 Mar 2007)
+New Revision: 792
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/scsi.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+clean up sense code
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/driver.h	2007-03-03 10:36:10 UTC (rev 792)
+@@ -14,8 +14,8 @@
+ 
+ 	/* the following three should be killed shortly */
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+-	int (*scsi_report_luns)(int host_no, struct scsi_cmd *cmd, void *key);
+-	int (*scsi_inquiry)(int host_no, struct scsi_cmd *cmd, void *key);
++	int (*scsi_report_luns)(int host_no, struct scsi_cmd *cmd);
++	int (*scsi_inquiry)(int host_no, struct scsi_cmd *cmd);
+ 
+ 	int (*cmd_end_notify)(uint64_t nid, int result, struct scsi_cmd *);
+ 	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/ibmvio/ibmvio.c	2007-03-03 10:36:10 UTC (rev 792)
+@@ -125,19 +125,24 @@
+ 	return sizeof(*id);
+ }
+ 
+-int scsi_inquiry(int host_no, struct scsi_cmd *cmd, void *key)
++int scsi_inquiry(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int result = SAM_STAT_CHECK_CONDITION;
+ 	uint8_t *data, *scb = cmd-&gt;scb;
+ 	int *len = &amp;cmd-&gt;len;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto sense;
++
+ 	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
+ 	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+ 
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto err;
+-
+ 	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+@@ -181,19 +186,22 @@
+ 		}
+ 	}
+ 
+-	if (result != SAM_STAT_GOOD)
+-		goto err;
++	if (result != SAM_STAT_GOOD) {
++		free(data);
++		goto sense;
++	}
+ 
+ 	*len = min_t(int, *len, scb[4]);
++	cmd-&gt;uaddr = (unsigned long)data;
+ 
+ 	if (!cmd-&gt;dev)
+ 		data[0] = TYPE_NO_LUN;
+ 
+ 	return SAM_STAT_GOOD;
+ 
+-err:
+-	*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+-				0x24, 0);
++sense:
++	*len = 0;
++	sense_data_build(cmd, key, asc, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+@@ -206,27 +214,29 @@
+ 	return ((uint64_t) result) &lt;&lt; 48;
+ }
+ 
+-int scsi_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
++int scsi_report_luns(int host_no, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_device *dev;
+ 	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
+ 	uint64_t lun, *data;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096;
+-	int result = SAM_STAT_GOOD;
+ 	int *len = &amp;cmd-&gt;len;
+ 	uint8_t *lun_buf = cmd-&gt;lun;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
++	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
++	if (alen &lt; 16)
++		goto sense;
++
+ 	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
+ 	memset(data, 0, pagesize);
+ 	cmd-&gt;uaddr = (unsigned long)data;
+ 
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+-	if (alen &lt; 16) {
+-		*len = sense_data_build((void *)data, 0x70, ILLEGAL_REQUEST,
+-					0x24, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+ 
+@@ -256,8 +266,11 @@
+ done:
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+-
+-	return result;
++	return SAM_STAT_GOOD;
++sense:
++	*len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/ibmvio/ibmvio.h	2007-03-03 10:36:10 UTC (rev 792)
+@@ -1,5 +1,5 @@
+-extern int scsi_inquiry(int host_no, struct scsi_cmd *cmd, void *key);
+-extern int scsi_report_luns(int host_no, struct scsi_cmd *cmd, void *key);
++extern int scsi_inquiry(int host_no, struct scsi_cmd *cmd);
++extern int scsi_report_luns(int host_no, struct scsi_cmd *cmd);
+ 
+ extern uint64_t scsi_lun_to_int(uint8_t *p);
+ 
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/iscsi/iscsid.c	2007-03-03 10:36:10 UTC (rev 792)
+@@ -766,7 +766,7 @@
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_sense_data *sense;
+-	uint16_t sense_len = task-&gt;len;
++	unsigned char sense_len;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
+@@ -775,18 +775,15 @@
+ 	rsp-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
+ 
+-	sense = (void *) (unsigned long) task-&gt;addr;
++	sense = (struct iscsi_sense_data *)task-&gt;scmd-&gt;sense_buffer;
++	sense_len = task-&gt;scmd-&gt;sense_len;
+ 
+-	/* FIXME: we assume that sense_buffer is large enough
+-	 * (sense_len + 2 bytes). It's true now, but... */
+-
+ 	memmove(sense-&gt;data, sense, sense_len);
+ 	sense-&gt;length = cpu_to_be16(sense_len);
+ 
+ 	conn-&gt;rsp.datasize = sense_len + sizeof(*sense);
+ 	hton24(rsp-&gt;dlength, sense_len + sizeof(*sense));
+-	conn-&gt;rsp.data = (void *) (unsigned long) task-&gt;addr;
+-	task-&gt;offset += sense_len + sizeof(*sense);
++	conn-&gt;rsp.data = sense;
+ 
+ 	return 0;
+ }
+@@ -945,6 +942,7 @@
+ 	task-&gt;result = result;
+ 	task-&gt;len = cmd-&gt;len;
+ 	task-&gt;rw = cmd-&gt;rw;
++	task-&gt;scmd = cmd;
+ 
+ 	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/iscsi/iscsid.h	2007-03-03 10:36:10 UTC (rev 792)
+@@ -112,6 +112,12 @@
+ 	int exp_r2tsn;
+ 
+ 	void *c_buffer;
++
++	/*
++	 * temp hack.
++	 * TODO: move most of iscsi_task to scsi_cmd
++	 */
++	struct scsi_cmd *scmd;
+ };
+ 
+ struct iscsi_connection {
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/scsi.c	2007-03-03 10:36:10 UTC (rev 792)
+@@ -30,18 +30,17 @@
+ 
+ #define BLK_SHIFT	9
+ 
+-int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+-		     uint8_t ascode, uint8_t ascodeq)
++void sense_data_build(struct scsi_cmd *cmd, uint8_t key, uint8_t asc, uint8_t asq)
+ {
+-	int len = 6;
++	int len = 0xa;
+ 
+-	data[0] = res_code | 1U &lt;&lt; 7;
+-	data[2] = key;
+-	data[7] = len;
+-	data[12] = ascode;
+-	data[13] = ascodeq;
++	cmd-&gt;sense_buffer[0] = 0x70;
++	cmd-&gt;sense_buffer[2] = key;
++	cmd-&gt;sense_buffer[7] = len;
++	cmd-&gt;sense_buffer[12] = asc;
++	cmd-&gt;sense_buffer[13] = asq;
+ 
+-	return len + 8;
++	cmd-&gt;sense_len = len + 8;
+ }
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+@@ -73,58 +72,52 @@
+ 	return fn(p);
+ }
+ 
+-static int sbc_test_unit(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_test_unit(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret = SAM_STAT_GOOD;
+-	uint8_t *data;
+ 
+ 	/* how should we test a backing-storage file? */
+ 
+ 	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
++		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
++		if (ret)
+ 			ret = SAM_STAT_RESERVATION_CONFLICT;
+ 	} else {
+-		data = valloc(pagesize);
+-		cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0x24, 0);
+-		cmd-&gt;uaddr = (unsigned long)data;
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x24, 0);
+ 		ret = SAM_STAT_CHECK_CONDITION;
+ 	}
+ 	return ret;
+ }
+ 
+-static int sbc_request_sense(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_request_sense(int host_no, struct scsi_cmd *cmd)
+ {
+-	uint8_t *data;
+-
+-	data = valloc(pagesize);
+-	if (!data)
+-		return SAM_STAT_CHECK_CONDITION;
+-
+-	cmd-&gt;len = sense_data_build(data, 0x70, NO_SENSE, 0, 0);
+-	cmd-&gt;uaddr = (unsigned long)data;
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, NO_SENSE, 0, 0);
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int __spc_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
++static int __spc_report_luns(int host_no, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_device *dev;
+ 	struct list_head *dev_list = &amp;cmd-&gt;c_target-&gt;device_list;
+ 	uint64_t lun, *data;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+-	int result = SAM_STAT_GOOD;
+ 	int *len = &amp;cmd-&gt;len;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
++	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
++	if (alen &lt; 16)
++		goto sense;
++
+ 	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
+ 	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long)data;
+ 
+-	alen = __be32_to_cpu(*(uint32_t *)&amp;cmd-&gt;scb[6]);
+-	if (alen &lt; 16) {
+-		*len = sense_data_build((void *)data, 0x70, ILLEGAL_REQUEST,
+-					0x24, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
+-
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+ 
+@@ -151,22 +144,26 @@
+ 		}
+ 	}
+ 
++	cmd-&gt;uaddr = (unsigned long)data;
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+-
+-	return result;
++	return SAM_STAT_GOOD;
++sense:
++	*len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int spc_report_luns(int host_no, struct scsi_cmd *cmd, void *key)
++static int spc_report_luns(int host_no, struct scsi_cmd *cmd)
+ {
+ 	struct target *target = cmd-&gt;c_target;
+ 	int ret, lid = target-&gt;lid;
+ 
+ 	/* temp hack */
+ 	if (tgt_drivers[lid]-&gt;scsi_report_luns)
+-		ret = tgt_drivers[lid]-&gt;scsi_report_luns(host_no, cmd, key);
++		ret = tgt_drivers[lid]-&gt;scsi_report_luns(host_no, cmd);
+ 	else
+-		ret = __spc_report_luns(host_no, cmd, key);
++		ret = __spc_report_luns(host_no, cmd);
+ 
+ 	return ret;
+ }
+@@ -197,18 +194,17 @@
+ 	return off &lt;&lt; BLK_SHIFT;
+ }
+ 
+-static int sbc_rw(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_rw(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
+ 	unsigned long uaddr;
+-	uint8_t *data;
+ 	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+ 
+ 	if (cmd-&gt;dev) {
+-		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no)) {
+-			ret = SAM_STAT_RESERVATION_CONFLICT;
+-			goto sense;
+-		}
++		ret = device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
++		if (ret)
++			return SAM_STAT_RESERVATION_CONFLICT;
+ 	} else {
+ 		ret = SAM_STAT_CHECK_CONDITION;
+ 		goto sense;
+@@ -228,41 +224,45 @@
+ 	cmd-&gt;offset = sbc_rw_offset(cmd-&gt;scb);
+ 	uaddr = cmd-&gt;uaddr;
+ 	ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
+-		     cmd-&gt;offset, &amp;cmd-&gt;async, key);
++		     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
+ 	if (ret == SAM_STAT_GOOD) {
+ 		cmd-&gt;mmapped = 1;
+ 		cmd-&gt;uaddr = uaddr;
+ 		return SAM_STAT_GOOD;
++	} else {
++		key = HARDWARE_ERROR;
++		asc = 0;
+ 	}
+-
+ sense:
+ 	cmd-&gt;rw = READ;
+ 	cmd-&gt;offset = 0;
+-	data = valloc(pagesize);
+-	if (data) {
+-		cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0x25, 0);
+-		cmd-&gt;uaddr = (unsigned long) data;
+-	}
+-	return ret;
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+ #define VENDOR_ID	&quot;IET&quot;
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-static int __sbc_inquiry(int host_no, struct scsi_cmd *cmd, void *key)
++static int __sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int len, ret = SAM_STAT_CHECK_CONDITION;
+ 	uint8_t *data;
+ 	uint8_t *scb = cmd-&gt;scb;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto sense;
++
+ 	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
+ 	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+ 
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto err;
+-
+ 	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+@@ -338,37 +338,35 @@
+ 	}
+ 
+ 	if (ret != SAM_STAT_GOOD)
+-		goto err;
++		goto sense;
+ 
+-	len = min_t(int, len, scb[4]);
++	cmd-&gt;len = min_t(int, len, scb[4]);
++	cmd-&gt;uaddr = (unsigned long) data;
+ 
+ 	if (!cmd-&gt;dev)
+ 		data[0] = TYPE_NO_LUN;
+ 
+-	cmd-&gt;len = len;
+-
+ 	return SAM_STAT_GOOD;
+-
+-err:
+-	cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0x24, 0);
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int sbc_inquiry(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret, lid = cmd-&gt;c_target-&gt;lid;
+ 
+ 	if (tgt_drivers[lid]-&gt;scsi_inquiry)
+-		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd, key);
++		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd);
+ 	else
+-		ret = __sbc_inquiry(host_no, cmd, key);
++		ret = __sbc_inquiry(host_no, cmd);
+ 	return ret;
+ }
+ 
+-static int sbc_reserve(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_reserve(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
+-	uint8_t *data;
+ 
+ 	if (cmd-&gt;dev) {
+ 		ret = device_reserve(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no);
+@@ -377,20 +375,16 @@
+ 		else
+ 			ret = SAM_STAT_GOOD;
+ 	} else {
+-		data = valloc(pagesize);
+-		if (data) {
+-			cmd-&gt;uaddr = (unsigned long)data;
+-			cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0x25, 0);
+-		}
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
+ 		ret = SAM_STAT_CHECK_CONDITION;
+ 	}
+ 	return ret;
+ }
+ 
+-static int sbc_release(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_release(int host_no, struct scsi_cmd *cmd)
+ {
+-	int ret = SAM_STAT_CHECK_CONDITION;
+-	uint8_t *data;
++	int ret;
+ 
+ 	if (cmd-&gt;dev) {
+ 		ret = device_release(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no, 0);
+@@ -399,39 +393,39 @@
+ 		else
+ 			ret = SAM_STAT_GOOD;
+ 	} else {
+-		data = valloc(pagesize);
+-		if (data) {
+-			cmd-&gt;uaddr = (unsigned long) data;
+-			cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, 0x25, 0);
+-		}
++		cmd-&gt;len = 0;
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
++		ret = SAM_STAT_CHECK_CONDITION;
+ 	}
+ 	return ret;
+ }
+ 
+-static int sbc_read_capacity(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_read_capacity(int host_no, struct scsi_cmd *cmd)
+ {
+ 	uint32_t *data;
+ 	uint64_t size;
+ 	uint8_t *scb = cmd-&gt;scb;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+ 
+-	data = valloc(pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+ 	if (cmd-&gt;dev) {
+ 		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+ 			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		cmd-&gt;len = sense_data_build((uint8_t *)data, 0x70,
+-					    ILLEGAL_REQUEST, 0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
+-	}
++	} else
++		goto sense;
+ 
+ 	if (!(scb[8] &amp; 0x1) &amp; (scb[2] | scb[3] | scb[4] | scb[5])) {
+-		cmd-&gt;len = sense_data_build((uint8_t *)data, 0x70,
+-					    ILLEGAL_REQUEST, 0x24, 0);
+-		return SAM_STAT_CHECK_CONDITION;
++		asc = 0x24;
++		goto sense;
+ 	}
+ 
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	cmd-&gt;uaddr = (unsigned long) data;
++
+ 	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+ 	data[0] = (size &gt;&gt; 32) ?
+@@ -440,18 +434,22 @@
+ 	cmd-&gt;len = 8;
+ 
+ 	return SAM_STAT_GOOD;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int sbc_sync_cache(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_sync_cache(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret, len;
+-	uint8_t *data, ascode;
++	uint8_t key = ILLEGAL_REQUEST, asc;
+ 
+ 	if (cmd-&gt;dev) {
+ 		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+ 			return SAM_STAT_RESERVATION_CONFLICT;
+ 	} else {
+-		ascode = 0x25;
++		asc = 0x25;
+ 		goto sense;
+ 	}
+ 
+@@ -466,7 +464,8 @@
+ 		 * is this the right sense code?
+ 		 * what should I put for the asc/ascq?
+ 		 */
+-		ascode = 0;
++		key = HARDWARE_ERROR;
++		asc = 0;
+ 		goto sense;
+ 	default:
+ 		len = 0;
+@@ -474,10 +473,8 @@
+ 	}
+ 
+ sense:
+-	data = valloc(pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-	cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST, ascode, 0);
+-
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+@@ -542,25 +539,27 @@
+ 	return sizeof(geo_m_pg);
+ }
+ 
+-static int sbc_mode_sense(int host_no, struct scsi_cmd *cmd, void *key)
++static int sbc_mode_sense(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret = SAM_STAT_GOOD, len;
+ 	uint8_t pcode = cmd-&gt;scb[2] &amp; 0x3f;
+ 	uint64_t size;
+ 	uint8_t *data = NULL;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
+ 
+-	data = valloc(pagesize);
+-	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+ 	if (cmd-&gt;dev) {
+ 		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+ 			return SAM_STAT_RESERVATION_CONFLICT;
+-	} else {
+-		cmd-&gt;len = sense_data_build((uint8_t *)data, 0x70,
+-					    ILLEGAL_REQUEST, 0x25, 0);
+-		return SAM_STAT_CHECK_CONDITION;
++	} else
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
+ 	}
++	memset(data, 0, pagesize);
+ 
+ 	len = 4;
+ 	size = cmd-&gt;dev-&gt;size &gt;&gt; BLK_SHIFT;
+@@ -605,16 +604,21 @@
+ 		len += insert_iec_m_pg(data + len);
+ 		break;
+ 	default:
+-		ret = SAM_STAT_CHECK_CONDITION;
+-		len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,0x24, 0);
++		asc = 0x24;
++		goto sense;
+ 	}
+ 
+ 	data[0] = len - 1;
+ 	cmd-&gt;len = len;
++	cmd-&gt;uaddr = (unsigned long) data;
+ 	return ret;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int spc_start_stop(int host_no, struct scsi_cmd *cmd, void *key)
++static int spc_start_stop(int host_no, struct scsi_cmd *cmd)
+ {
+ 	cmd-&gt;len = 0;
+ 
+@@ -622,29 +626,16 @@
+ 		if (device_reserved(cmd-&gt;cmd_nexus_id, cmd-&gt;dev-&gt;lun, host_no))
+ 			return SAM_STAT_RESERVATION_CONFLICT;
+ 	} else {
+-		uint8_t *data;
+-
+-		data = valloc(pagesize);
+-		memset(data, 0, pagesize);
+-		cmd-&gt;uaddr = (unsigned long) data;
+-
+-		cmd-&gt;len = sense_data_build((uint8_t *)data, 0x70,
+-					    ILLEGAL_REQUEST, 0x25, 0);
++		sense_data_build(cmd, ILLEGAL_REQUEST, 0x25, 0);
+ 		return SAM_STAT_CHECK_CONDITION;
+ 	}
+-
+ 	return SAM_STAT_GOOD;
+ }
+ 
+-static int spc_illegal_op(int host_no, struct scsi_cmd *cmd, void *key)
++static int spc_illegal_op(int host_no, struct scsi_cmd *cmd)
+ {
+-	uint8_t *data;
+-
+-	data = valloc(pagesize);
+-	memset(data, 0, pagesize);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-	cmd-&gt;len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,0x24, 0);
+-
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, ILLEGAL_REQUEST,0x24, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+@@ -790,5 +781,5 @@
+ {
+ 	unsigned char op = cmd-&gt;scb[0];
+ 
+-	return sbc_ops[op].cmd_perform(host_no, cmd, key);
++	return sbc_ops[op].cmd_perform(host_no, cmd);
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/tgtd.h	2007-03-03 10:36:10 UTC (rev 792)
+@@ -84,8 +84,9 @@
+ 	int async;
+ 	struct mgmt_req *mreq;
+ 
+-#define SCSI_SENSE_BUFFERSIZE	96
++#define SCSI_SENSE_BUFFERSIZE	252
+ 	unsigned char sense_buffer[SCSI_SENSE_BUFFERSIZE];
++	int sense_len;
+ };
+ 
+ #ifdef USE_KERNEL
+@@ -102,7 +103,7 @@
+ #endif
+ 
+ struct device_command_operations {
+-	int (*cmd_perform)(int host_no, struct scsi_cmd *cmd, void *key);
++	int (*cmd_perform)(int host_no, struct scsi_cmd *cmd);
+ };
+ 
+ extern int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result);
+@@ -141,8 +142,8 @@
+ 
+ extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+ extern int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key);
+-extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+-			    uint8_t ascode, uint8_t ascodeq);
++extern void sense_data_build(struct scsi_cmd *cmd, uint8_t key, uint8_t asc,
++			     uint8_t asq);
+ 
+ extern enum scsi_target_state tgt_get_target_state(int tid);
+ extern int tgt_set_target_state(int tid, char *str);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-03-03 07:55:34 UTC (rev 791)
++++ trunk/usr/tgtif.c	2007-03-03 10:36:10 UTC (rev 792)
+@@ -112,8 +112,10 @@
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+ 	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+ 	ev.p.cmd_rsp.len = cmd-&gt;len;
++	ev.p.cmd_rsp.uaddr = cmd-&gt;uaddr;
++	ev.p.cmd_rsp.sense_len = cmd-&gt;sense_len;
++	ev.p.cmd_rsp.sense_uaddr = (unsigned long) cmd-&gt;sense_buffer;
+ 	ev.p.cmd_rsp.result = result;
+-	ev.p.cmd_rsp.uaddr = cmd-&gt;uaddr;
+ 	ev.p.cmd_rsp.rw = cmd-&gt;rw;
+ 	ev.p.cmd_rsp.tag = cmd-&gt;tag;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000778.html">[Stgt-svn] r791 - in trunk/usr: . ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000780.html">[Stgt-svn] r793 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#779">[ date ]</a>
+              <a href="thread.html#779">[ thread ]</a>
+              <a href="subject.html#779">[ subject ]</a>
+              <a href="author.html#779">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

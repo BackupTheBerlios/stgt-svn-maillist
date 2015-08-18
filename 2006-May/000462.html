@@ -1,0 +1,155 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r475 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r475%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605090119.k491J0uk001004%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000461.html">
+   <LINK REL="Next"  HREF="000463.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r475 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r475%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605090119.k491J0uk001004%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r475 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue May  9 03:19:00 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000461.html">[Stgt-svn] r474 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000463.html">[Stgt-svn] r476 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#462">[ date ]</a>
+              <a href="thread.html#462">[ thread ]</a>
+              <a href="subject.html#462">[ subject ]</a>
+              <a href="author.html#462">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-09 03:18:56 +0200 (Tue, 09 May 2006)
+New Revision: 475
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Immediate write data works.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-08 14:45:32 UTC (rev 474)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-09 01:18:56 UTC (rev 475)
+@@ -947,7 +947,7 @@
+ 
+ 	if (unlikely(conn-&gt;suspend_rx)) {
+ 		debug_tcp(&quot;conn %d Rx suspended!\n&quot;, conn-&gt;id);
+-		return 0;
++		goto nomore;
+ 	}
+ 
+ 	if (tcp_conn-&gt;in_progress == IN_PROGRESS_DATA_RECV &amp;&amp;
+@@ -958,11 +958,8 @@
+ 
+ 		rc = d-&gt;data_recv(conn);
+ 		if (rc) {
+-			if (rc == -EAGAIN) {
+-				rd_desc-&gt;count = tcp_conn-&gt;in.datalen -
+-						tcp_conn-&gt;in.ctask-&gt;data_count;
++			if (rc == -EAGAIN)
+ 				goto again;
+-			}
+ 			iscsi_conn_failure(conn, rc);
+ 			return 0;
+ 		}
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-08 14:45:32 UTC (rev 474)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-09 01:18:56 UTC (rev 475)
+@@ -143,7 +143,7 @@
+ 	enum dma_data_direction dir = (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) ?
+ 		DMA_TO_DEVICE : DMA_FROM_DEVICE;
+ 
+-	scmd = scsi_host_get_command(shost, dir, GFP_KERNEL);
++	scmd = scsi_host_get_command(shost, dir, GFP_ATOMIC);
+ 	BUG_ON(!scmd);
+ 	ctask-&gt;sc = scmd;
+ 	memcpy(scmd-&gt;data_cmnd, hdr-&gt;cdb, MAX_COMMAND_SIZE);
+@@ -164,22 +164,18 @@
+ 	}
+ 
+ 	scsi_tgt_queue_command(scmd, (struct scsi_lun *) hdr-&gt;lun, hdr-&gt;itt);
+-	dprintk(&quot;%p %x\n&quot;, scmd, scmd-&gt;data_cmnd[0]);
+ }
+ 
+ static void istgt_scsi_cmd_exec(struct iscsi_cmd_task *ctask)
+ {
+-	struct scsi_cmnd *scmd = ctask-&gt;sc;
+-
+ 	if (ctask-&gt;data_count) {
+ 		if (!ctask-&gt;unsol_count)
+ 			;
+ /* 			send_r2t(ctask); */
+ 	} else {
+-/* 		set_cmd_waitio(cmnd); */
+-		if (scmd) {
+-/* 			BUG_ON(!ctask-&gt;done); */
+-/* 			cmnd-&gt;done(scmd); */
++		if (ctask-&gt;sc) {
++			BUG_ON(!ctask-&gt;sc-&gt;done);
++			ctask-&gt;sc-&gt;done(ctask-&gt;sc);
+ 		} else
+ 			istgt_scsi_tgt_queue_command(ctask);
+ 	}
+@@ -556,7 +552,6 @@
+ 			done(scmd);
+ 			spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+ 			__kfifo_put(conn-&gt;session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
+-			scmd-&gt;sc_data_direction = DMA_TO_DEVICE;
+ 			iscsi_tcp_cleanup_ctask(ctask-&gt;conn, ctask);
+ 			spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
+ 		} else {
+@@ -583,6 +578,7 @@
+ 		struct iscsi_tcp_conn *tcp_conn = ctask-&gt;conn-&gt;dd_data;
+ 		struct sock *sk = tcp_conn-&gt;sock-&gt;sk;
+ 
++		scmd-&gt;done = done;
+ 		/* FIXME: too hacky */
+ 		bh_lock_sock(sk);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000461.html">[Stgt-svn] r474 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000463.html">[Stgt-svn] r476 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#462">[ date ]</a>
+              <a href="thread.html#462">[ thread ]</a>
+              <a href="subject.html#462">[ subject ]</a>
+              <a href="author.html#462">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

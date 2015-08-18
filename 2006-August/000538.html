@@ -1,0 +1,282 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r551 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r551%20-%20trunk/usr&In-Reply-To=%3C200608281251.k7SCpa1r028186%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000537.html">
+   <LINK REL="Next"  HREF="000539.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r551 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r551%20-%20trunk/usr&In-Reply-To=%3C200608281251.k7SCpa1r028186%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r551 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Aug 28 14:51:36 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000537.html">[Stgt-svn] r550 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000539.html">[Stgt-svn] r552 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#538">[ date ]</a>
+              <a href="thread.html#538">[ thread ]</a>
+              <a href="subject.html#538">[ subject ]</a>
+              <a href="author.html#538">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-28 14:50:36 +0200 (Mon, 28 Aug 2006)
+New Revision: 551
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Make mgmt/kern_event_handler static.
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-08-28 09:13:17 UTC (rev 550)
++++ trunk/usr/mgmt.c	2006-08-28 12:50:36 UTC (rev 551)
+@@ -28,6 +28,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;signal.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
+@@ -195,7 +196,7 @@
+ 		eprintf(&quot;can't write, %m\n&quot;);
+ }
+ 
+-void mgmt_event_handler(int accept_fd, void *data)
++static void mgmt_event_handler(int accept_fd, void *data)
+ {
+ 	int fd, err;
+ 	char sbuf[BUFSIZE], rbuf[BUFSIZE];
+@@ -280,7 +281,7 @@
+ 	return;
+ }
+ 
+-int ipc_init(int *ipc_fd)
++int ipc_init(void)
+ {
+ 	int fd, err;
+ 	struct sockaddr_un addr;
+@@ -308,7 +309,10 @@
+ 		goto out;
+ 	}
+ 
+-	*ipc_fd = fd;
++	err = tgt_event_add(fd, POLL_IN, mgmt_event_handler, NULL);
++	if (err)
++		goto out;
++
+ 	return 0;
+ out:
+ 	close(fd);
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-28 09:13:17 UTC (rev 550)
++++ trunk/usr/tgtd.c	2006-08-28 12:50:36 UTC (rev 551)
+@@ -23,16 +23,13 @@
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+ #include &lt;inttypes.h&gt;
+-#include &lt;sys/epoll.h&gt;
+ #include &lt;signal.h&gt;
+-#include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;asm/types.h&gt;
+-#include &lt;sys/signal.h&gt;
+-#include &lt;sys/stat.h&gt;
++#include &lt;sys/epoll.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;tgtd.h&quot;
+@@ -108,8 +105,10 @@
+ 	int err;
+ 
+ 	tev = malloc(sizeof(*tev));
+-	if (!tev)
++	if (!tev) {
++		eprintf(&quot;OOM, %m\n&quot;);
+ 		return -ENOMEM;
++	}
+ 
+ 	tev-&gt;data = data;
+ 	tev-&gt;handler = handler;
+@@ -118,9 +117,10 @@
+ 	ev.events = events;
+ 	ev.data.ptr = tev;
+ 	err = epoll_ctl(ep_fd, EPOLL_CTL_ADD, fd, &amp;ev);
+-	if (err)
++	if (err) {
++		eprintf(&quot;Cannot add fd, %m\n&quot;);
+ 		free(tev);
+-	else
++	} else
+ 		list_add(&amp;tev-&gt;e_list, &amp;tgt_events_list);
+ 
+ 	return err;
+@@ -205,7 +205,7 @@
+ {
+ 	struct sigaction sa_old;
+ 	struct sigaction sa_new;
+-	int err, ch, longindex, fd, nr_lld = 0, maxfds = MAX_FDS, timeout = -1;
++	int err, ch, longindex, nr_lld = 0, maxfds = MAX_FDS, timeout = -1;
+ 	int is_daemon = 1, is_debug = 1;
+ 	char *modes = NULL;
+ 
+@@ -262,17 +262,13 @@
+ 		exit(1);
+ 	}
+ 
+-	err = kreq_init(&amp;fd);
++	err = kreq_init();
+ 	if (err)
+ 		eprintf(&quot;No kernel interface\n&quot;);
+-	else
+-		tgt_event_add(fd, POLL_IN, kern_event_handler, NULL);
+ 
+-	err = ipc_init(&amp;fd);
++	err = ipc_init();
+ 	if (err)
+ 		exit(1);
+-	else
+-		tgt_event_add(fd, POLL_IN, mgmt_event_handler, NULL);
+ 
+ 	event_loop(timeout);
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-28 09:13:17 UTC (rev 550)
++++ trunk/usr/tgtd.h	2006-08-28 12:50:36 UTC (rev 551)
+@@ -35,11 +35,9 @@
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
+-extern int kreq_init(int *fd);
+-extern void kern_event_handler(int, void *data);
++extern int kreq_init(void);
+ 
+-extern int ipc_init(int *fd);
+-extern void mgmt_event_handler(int accept_fd, void *data);
++extern int ipc_init(void);
+ 
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-28 09:13:17 UTC (rev 550)
++++ trunk/usr/tgtif.c	2006-08-28 12:50:36 UTC (rev 551)
+@@ -24,14 +24,15 @@
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+ #include &lt;inttypes.h&gt;
++#include &lt;signal.h&gt;
+ #include &lt;stdint.h&gt;
+-#include &lt;string.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;asm/types.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/stat.h&gt;
++
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+ #include &quot;list.h&quot;
+@@ -105,7 +106,7 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-void kern_event_handler(int fd, void *data)
++static void kern_event_handler(int fd, void *data)
+ {
+ 	struct tgt_event *ev;
+ 
+@@ -181,19 +182,19 @@
+ 	return -errno;
+ }
+ 
+-int kreq_init(int *ki_fd)
++int kreq_init(void)
+ {
+-	int err, fd, size = TGT_RING_SIZE;
++	int err, size = TGT_RING_SIZE;
+ 	char *buf;
+ 
+-	err = tgt_miscdev_init(CHRDEV_PATH, &amp;fd);
++	err = tgt_miscdev_init(CHRDEV_PATH, &amp;chrfd);
+ 	if (err)
+ 		return err;
+ 
+-	buf = mmap(NULL, size * 2, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++	buf = mmap(NULL, size * 2, PROT_READ | PROT_WRITE, MAP_SHARED, chrfd, 0);
+ 	if (buf == MAP_FAILED) {
+ 		eprintf(&quot;fail to mmap, %m\n&quot;);
+-		close(fd);
++		close(chrfd);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -201,7 +202,8 @@
+ 	kuring.buf = buf;
+ 	ukring.buf = buf + size;
+ 
+-	*ki_fd = chrfd = fd;
+-
+-	return 0;
++	err = tgt_event_add(chrfd, POLL_IN, kern_event_handler, NULL);
++	if (err)
++		close(chrfd);
++	return err;
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000537.html">[Stgt-svn] r550 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000539.html">[Stgt-svn] r552 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#538">[ date ]</a>
+              <a href="thread.html#538">[ thread ]</a>
+              <a href="subject.html#538">[ subject ]</a>
+              <a href="author.html#538">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

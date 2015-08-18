@@ -1,0 +1,90 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r279 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r279%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602070659.k176x3sS031080%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000265.html">
+   <LINK REL="Next"  HREF="000267.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r279 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r279%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200602070659.k176x3sS031080%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r279 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb  7 07:59:03 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000265.html">[Stgt-svn] r278 - in branches/use-scsi-ml: . kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000267.html">[Stgt-svn] r280 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#266">[ date ]</a>
+              <a href="thread.html#266">[ thread ]</a>
+              <a href="subject.html#266">[ subject ]</a>
+              <a href="author.html#266">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-07 07:58:59 +0100 (Tue, 07 Feb 2006)
+New Revision: 279
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+Fix a bug not to free scsi_tgt_cmd.
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-07 06:43:36 UTC (rev 278)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-02-07 06:58:59 UTC (rev 279)
+@@ -66,11 +66,13 @@
+ static void scsi_tgt_cmd_destroy(void *data)
+ {
+ 	struct scsi_cmnd *cmd = data;
++	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+ 
+ 	dprintk(&quot;cmd %p\n&quot;, cmd);
+ 
+-	scsi_unmap_user_pages(cmd-&gt;request-&gt;end_io_data);
++	scsi_unmap_user_pages(tcmd);
+ 	scsi_tgt_uspace_send_status(cmd, GFP_KERNEL);
++	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+ 	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000265.html">[Stgt-svn] r278 - in branches/use-scsi-ml: . kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000267.html">[Stgt-svn] r280 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#266">[ date ]</a>
+              <a href="thread.html#266">[ thread ]</a>
+              <a href="subject.html#266">[ subject ]</a>
+              <a href="author.html#266">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

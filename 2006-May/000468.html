@@ -1,0 +1,175 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r481 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r481%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605221613.k4MGDmZn019335%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000467.html">
+   <LINK REL="Next"  HREF="000469.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r481 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r481%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605221613.k4MGDmZn019335%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r481 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Mon May 22 18:13:48 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000467.html">[Stgt-svn] r480 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000469.html">[Stgt-svn] r482 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#468">[ date ]</a>
+              <a href="thread.html#468">[ thread ]</a>
+              <a href="subject.html#468">[ subject ]</a>
+              <a href="author.html#468">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-22 18:13:47 +0200 (Mon, 22 May 2006)
+New Revision: 481
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp.h
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Rename iscsi_conn_set_param and kill some debug code.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-22 16:10:38 UTC (rev 480)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.c	2006-05-22 16:13:47 UTC (rev 481)
+@@ -48,7 +48,7 @@
+ MODULE_DESCRIPTION(&quot;iSCSI/TCP data-path&quot;);
+ MODULE_LICENSE(&quot;GPL&quot;);
+ MODULE_VERSION(&quot;0:4.445&quot;);
+-#define DEBUG_TCP
++/* #define DEBUG_TCP */
+ #define DEBUG_ASSERT
+ 
+ #ifdef DEBUG_TCP
+@@ -1989,9 +1989,6 @@
+ 	struct socket *sock;
+ 	int err;
+ 
+-	printk(&quot;%s(%d) %llu %d\n&quot;, __FUNCTION__, __LINE__,
+-	       (unsigned long long) transport_eph, is_leading);
+-
+ 	/* lookup for existing socket */
+ 	sock = sockfd_lookup((int)transport_eph, &amp;err);
+ 	if (!sock) {
+@@ -2003,9 +2000,6 @@
+ 	if (err)
+ 		return err;
+ 
+-	printk(&quot;%s(%d) %llu %d %d\n&quot;, __FUNCTION__, __LINE__,
+-	       (unsigned long long) transport_eph, is_leading, conn-&gt;stop_stage);
+-
+ 	if (conn-&gt;stop_stage != STOP_CONN_SUSPEND) {
+ 		/* bind iSCSI connection and socket */
+ 		tcp_conn-&gt;sock = sock;
+@@ -2031,8 +2025,6 @@
+ 		tcp_conn-&gt;in_progress = IN_PROGRESS_WAIT_HEADER;
+ 	}
+ 
+-	printk(&quot;%s(%d) %llu %d\n&quot;, __FUNCTION__, __LINE__,
+-	       (unsigned long long) transport_eph, is_leading);
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(iscsi_tcp_conn_bind);
+@@ -2164,8 +2156,8 @@
+ 	}
+ }
+ 
+-int iscsi_tcp_conn_set_param(struct iscsi_cls_conn *cls_conn, enum iscsi_param param,
+-			     uint32_t value)
++int iscsi_conn_set_param(struct iscsi_cls_conn *cls_conn, enum iscsi_param param,
++			 uint32_t value)
+ {
+ 	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
+ 	struct iscsi_session *session = conn-&gt;session;
+@@ -2303,7 +2295,7 @@
+ 
+ 	return 0;
+ }
+-EXPORT_SYMBOL_GPL(iscsi_tcp_conn_set_param);
++EXPORT_SYMBOL_GPL(iscsi_conn_set_param);
+ 
+ static int
+ iscsi_session_get_param(struct iscsi_cls_session *cls_session,
+@@ -2551,7 +2543,7 @@
+ 	.create_conn		= iscsi_tcp_initiator_conn_create,
+ 	.bind_conn		= iscsi_tcp_conn_bind,
+ 	.destroy_conn		= iscsi_tcp_conn_destroy,
+-	.set_param		= iscsi_tcp_conn_set_param,
++	.set_param		= iscsi_conn_set_param,
+ 	.get_conn_param		= iscsi_conn_get_param,
+ 	.get_conn_str_param	= iscsi_conn_get_str_param,
+ 	.get_session_param	= iscsi_session_get_param,
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp.h	2006-05-22 16:10:38 UTC (rev 480)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp.h	2006-05-22 16:13:47 UTC (rev 481)
+@@ -198,8 +198,8 @@
+ extern int iscsi_tcp_conn_bind(struct iscsi_cls_session *cls_session,
+ 			       struct iscsi_cls_conn *cls_conn,
+ 			       uint64_t transport_eph, int is_leading);
+-extern int iscsi_tcp_conn_set_param(struct iscsi_cls_conn *cls_conn,
+-				    enum iscsi_param param, uint32_t value);
++extern int iscsi_conn_set_param(struct iscsi_cls_conn *cls_conn,
++				enum iscsi_param param, uint32_t value);
+ extern void iscsi_tcp_terminate_conn(struct iscsi_conn *conn);
+ 
+ extern int iscsi_tcp_ctask_xmit(struct iscsi_conn *conn,
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-22 16:10:38 UTC (rev 480)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-22 16:13:47 UTC (rev 481)
+@@ -735,7 +735,7 @@
+ 	.destroy_conn		= iscsi_tcp_conn_destroy,
+ 	.bind_conn		= iscsi_tcp_conn_bind,
+ 	.start_conn		= iscsi_conn_start,
+-	.set_param		= iscsi_tcp_conn_set_param,
++	.set_param		= iscsi_conn_set_param,
+ 	.terminate_conn		= iscsi_tcp_terminate_conn,
+ 	.xmit_cmd_task		= iscsi_tcp_tgt_ctask_xmit,
+ };
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000467.html">[Stgt-svn] r480 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000469.html">[Stgt-svn] r482 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#468">[ date ]</a>
+              <a href="thread.html#468">[ thread ]</a>
+              <a href="subject.html#468">[ subject ]</a>
+              <a href="author.html#468">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,439 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r809 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r809%20-%20trunk/usr&In-Reply-To=%3C200703050041.l250fYKm028090%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000795.html">
+   <LINK REL="Next"  HREF="000797.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r809 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r809%20-%20trunk/usr&In-Reply-To=%3C200703050041.l250fYKm028090%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r809 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Mar  5 01:41:34 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000795.html">[Stgt-svn] r808 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000797.html">[Stgt-svn] r810 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#796">[ date ]</a>
+              <a href="thread.html#796">[ thread ]</a>
+              <a href="subject.html#796">[ subject ]</a>
+              <a href="author.html#796">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-05 01:41:32 +0100 (Mon, 05 Mar 2007)
+New Revision: 809
+
+Added:
+   trunk/usr/osd.c
+   trunk/usr/osd.h
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/mmc.c
+   trunk/usr/scsi.h
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+Log:
+Add command parser for OSD commands.
+
+Signed-off-by: Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/Makefile	2007-03-05 00:41:32 UTC (rev 809)
+@@ -46,7 +46,7 @@
+ CFLAGS += -Wall -g -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
+ 
+ PROGRAMS += tgtd tgtadm
+-TGTD_OBJS += tgtd.o mgmt.o target.o spc.o sbc.o mmc.o spt.o scsi.o log.o \
++TGTD_OBJS += tgtd.o mgmt.o target.o spc.o sbc.o mmc.o osd.o spt.o scsi.o log.o \
+ 	driver.o util.o work.o
+ 
+ all: $(PROGRAMS)
+
+Modified: trunk/usr/mmc.c
+===================================================================
+--- trunk/usr/mmc.c	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/mmc.c	2007-03-05 00:41:32 UTC (rev 809)
+@@ -58,7 +58,7 @@
+ 		memcpy(data + 8, VENDOR_ID,
+ 		       min_t(size_t, strlen(VENDOR_ID), 8));
+ 		memcpy(data + 16, PRODUCT_ID,
+-			min_t(size_t, strlen(PRODUCT_ID), 16));
++		       min_t(size_t, strlen(PRODUCT_ID), 16));
+ 		memcpy(data + 32, PRODUCT_REV,
+ 			min_t(size_t, strlen(PRODUCT_REV), 4));
+ 		len = data[4] + 5;
+
+Added: trunk/usr/osd.c
+===================================================================
+--- trunk/usr/osd.c	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/osd.c	2007-03-05 00:41:32 UTC (rev 809)
+@@ -0,0 +1,229 @@
++/*
++ * SCSI object storage device command processing
++ *
++ * Copyright (C) 2006 Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
++ *
++ * Copyright (C) 2007 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2007 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * Released under the terms of the GNU GPL v2.0.
++ */
++
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;target.h&quot;
++#include &quot;driver.h&quot;
++#include &quot;scsi.h&quot;
++#include &quot;spc.h&quot;
++#include &quot;osd.h&quot;
++
++#define PRODUCT_ID	&quot;OSD&quot;
++#define PRODUCT_REV	&quot;0&quot;
++
++static int osd_inquiry(int host_no, struct scsi_cmd *cmd)
++{
++	uint8_t *data, *scb = cmd-&gt;scb;
++	int len, ret = SAM_STAT_CHECK_CONDITION;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
++
++	/* EVPD means need a page code */
++	if ((scb[1] &amp; 0x3) == 0 &amp;&amp; scb[2] != 0)
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	memset(data, 0, pagesize);
++
++	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
++
++	data[0] = TYPE_OSD;
++	if (!cmd-&gt;dev)
++		data[0] = TYPE_NO_LUN;
++
++	if ((scb[1] &amp; 0x1) == 0) {
++		data[2] = 5;  /* modern version */
++		data[3] = 0x02;  /* modern response format */
++		data[7] = 0x02;  /* support command queueing */
++		memset(data + 8, 0x20, 28);
++		memcpy(data + 8,
++		       VENDOR_ID, min_t(size_t, strlen(VENDOR_ID), 8));
++		memcpy(data + 16,
++		       PRODUCT_ID, min_t(size_t, strlen(PRODUCT_ID), 16));
++		memcpy(data + 32,
++		       PRODUCT_REV, min_t(size_t, strlen(PRODUCT_REV), 4));
++		len = 36;
++		if (cmd-&gt;dev) {
++			data[58] = 0x03;
++			data[59] = 0x40;  /* osd */
++			data[60] = 0x09;
++			data[61] = 0x60;  /* iscsi */
++			data[62] = 0x03;
++			data[63] = 0x00;  /* spc3 */
++			len = 64;
++		}
++		data[4] = len - 5;  /* additional length */
++		ret = SAM_STAT_GOOD;
++	} else {
++		if (!cmd-&gt;dev)
++			goto sense;
++
++		data[1] = scb[2];
++		if (scb[2] == 0x0) {
++			/* supported VPD pages */
++			data[3] = 3;
++			data[4] = 0x0;
++			data[5] = 0x80;
++			data[6] = 0x83;
++			len = 7;
++			ret = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x80) {
++			/* unit serial number &quot;    &quot; */
++			data[3] = 4;
++			memset(data + 4, 0x20, 4);
++			len = 8;
++			ret = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x83) {
++			/* device identification */
++			data[3] = SCSI_ID_LEN + 4;
++			data[4] = 0x1;
++			data[5] = 0x1;
++			data[7] = SCSI_ID_LEN;
++			if (cmd-&gt;dev)
++				memcpy(data + 8, cmd-&gt;dev-&gt;scsi_id, SCSI_ID_LEN);
++			len = SCSI_ID_LEN + 8;
++			ret = SAM_STAT_GOOD;
++		}
++	}
++
++	if (ret != SAM_STAT_GOOD)
++		goto sense;
++
++	cmd-&gt;len = min_t(int, len, scb[4]);
++
++	return SAM_STAT_GOOD;
++sense:
++	sense_data_build(cmd, key, asc, 0);
++	cmd-&gt;len = 0;
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++static int osd_varlen_cdb(int host_no, struct scsi_cmd *cmd)
++{
++	int ret = SAM_STAT_GOOD;
++	uint16_t action;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x25;
++	unsigned long uaddr;
++	bkio_submit_t *submit = cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit;
++
++	dprintf(&quot;cdb[0] %x datalen %u\n&quot;, cmd-&gt;scb[0], cmd-&gt;len);
++	if (cmd-&gt;scb[7] != 200 - 8) {
++		eprintf(&quot;request size %d wrong, should be 200\n&quot;,
++			cmd-&gt;scb[7] + 8);
++		goto sense;
++	}
++
++	action = (cmd-&gt;scb[8] &lt;&lt; 8) | cmd-&gt;scb[9];
++
++	switch (action) {
++	case OSD_APPEND:
++	case OSD_CREATE:
++	case OSD_CREATE_AND_WRITE:
++	case OSD_CREATE_COLLECTION:
++	case OSD_CREATE_PARTITION:
++	case OSD_FLUSH:
++	case OSD_FLUSH_COLLECTION:
++	case OSD_FLUSH_OSD:
++	case OSD_FLUSH_PARTITION:
++	case OSD_FORMAT_OSD:
++	case OSD_GET_ATTRIBUTES:
++	case OSD_GET_MEMBER_ATTRIBUTES:
++	case OSD_LIST:
++	case OSD_LIST_COLLECTION:
++	case OSD_PERFORM_SCSI_COMMAND:
++	case OSD_PERFORM_TASK_MGMT_FUNC:
++	case OSD_QUERY:
++	case OSD_READ:
++	case OSD_REMOVE:
++	case OSD_REMOVE_COLLECTION:
++	case OSD_REMOVE_MEMBER_OBJECTS:
++	case OSD_REMOVE_PARTITION:
++	case OSD_SET_ATTRIBUTES:
++	case OSD_SET_KEY:
++	case OSD_SET_MASTER_KEY:
++	case OSD_SET_MEMBER_ATTRIBUTES:
++	case OSD_WRITE:
++		ret = submit(cmd-&gt;dev, cmd-&gt;scb, cmd-&gt;rw, cmd-&gt;len, &amp;uaddr,
++			     cmd-&gt;offset, &amp;cmd-&gt;async, (void *)cmd);
++		if (ret)
++			goto sense;
++		break;
++	default:
++		eprintf(&quot;unknown service action 0x%04x\n&quot;, action);
++		goto sense;
++	}
++
++	return SAM_STAT_GOOD;
++sense:
++	sense_data_build(cmd, key, asc, 0);
++	cmd-&gt;len = 0;
++	return SAM_STAT_CHECK_CONDITION;
++}
++
++struct device_type_template osd_template = {
++	.name	= &quot;osd&quot;,
++	.ops	= {
++		[0x00 ... 0x0f] = {spc_illegal_op},
++
++		/* 0x10 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{osd_inquiry,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++
++		[0x20 ... 0x6f] = {spc_illegal_op},
++
++		/* 0x70 */
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{spc_illegal_op,},
++		{osd_varlen_cdb,},
++
++		[0x80 ... 0xff] = {spc_illegal_op},
++	}
++};
+
+Added: trunk/usr/osd.h
+===================================================================
+--- trunk/usr/osd.h	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/osd.h	2007-03-05 00:41:32 UTC (rev 809)
+@@ -0,0 +1,33 @@
++#ifndef __OSD_H
++#define __OSD_H
++
++/* varlen cdb service actions for OSD-2 (before SNIA changes 17 jan 07) */
++#define OSD_APPEND			0x8807
++#define OSD_CREATE			0x8802
++#define OSD_CREATE_AND_WRITE		0x8812
++#define OSD_CREATE_COLLECTION		0x8815
++#define OSD_CREATE_PARTITION		0x880b
++#define OSD_FLUSH			0x8808
++#define OSD_FLUSH_COLLECTION		0x881a
++#define OSD_FLUSH_OSD			0x881c
++#define OSD_FLUSH_PARTITION		0x881b
++#define OSD_FORMAT_OSD			0x8801
++#define OSD_GET_ATTRIBUTES		0x880e
++#define OSD_GET_MEMBER_ATTRIBUTES	0x8822
++#define OSD_LIST			0x8803
++#define OSD_LIST_COLLECTION		0x8817
++#define OSD_PERFORM_SCSI_COMMAND	0x8f7e
++#define OSD_PERFORM_TASK_MGMT_FUNC	0x8f7f
++#define OSD_QUERY			0x8820
++#define OSD_READ			0x8805
++#define OSD_REMOVE			0x880a
++#define OSD_REMOVE_COLLECTION		0x8816
++#define OSD_REMOVE_MEMBER_OBJECTS	0x8821
++#define OSD_REMOVE_PARTITION		0x880c
++#define OSD_SET_ATTRIBUTES		0x880f
++#define OSD_SET_KEY			0x8818
++#define OSD_SET_MASTER_KEY		0x8819
++#define OSD_SET_MEMBER_ATTRIBUTES	0x8823
++#define OSD_WRITE			0x8806
++
++#endif
+
+Modified: trunk/usr/scsi.h
+===================================================================
+--- trunk/usr/scsi.h	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/scsi.h	2007-03-05 00:41:32 UTC (rev 809)
+@@ -69,6 +69,7 @@
+ #define MODE_SENSE_10         0x5a
+ #define PERSISTENT_RESERVE_IN 0x5e
+ #define PERSISTENT_RESERVE_OUT 0x5f
++#define VARLEN_CDB            0x7f
+ #define REPORT_LUNS           0xa0
+ #define MOVE_MEDIUM           0xa5
+ #define EXCHANGE_MEDIUM       0xa6
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/target.c	2007-03-05 00:41:32 UTC (rev 809)
+@@ -36,7 +36,8 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-extern struct device_type_template sbc_template, mmc_template, spt_template;
++extern struct device_type_template sbc_template, mmc_template, osd_template,
++	spt_template;
+ 
+ static LIST_HEAD(target_list);
+ 
+@@ -1188,6 +1189,9 @@
+ 	case TYPE_ROM:
+ 		target-&gt;dev_type_template = &amp;mmc_template;
+ 		break;
++	case TYPE_OSD:
++		target-&gt;dev_type_template = &amp;osd_template;
++		break;
+ 	case TYPE_SPT:
+ 		target-&gt;dev_type_template = &amp;spt_template;
+ 		break;
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2007-03-04 10:34:21 UTC (rev 808)
++++ trunk/usr/tgtadm.c	2007-03-05 00:41:32 UTC (rev 809)
+@@ -299,10 +299,9 @@
+ 		exit(EINVAL);
+ 	} else if (!strcmp(str, &quot;cd&quot;))
+ 		return TYPE_ROM;
+-	else if (!strcmp(str, &quot;osd&quot;)) {
+-		eprintf(&quot;osd isn't supported yet\n&quot;);
+-		exit(EINVAL);
+-	} else if (!strcmp(str, &quot;pt&quot;))
++	else if (!strcmp(str, &quot;osd&quot;))
++		return TYPE_OSD;
++	else if (!strcmp(str, &quot;pt&quot;))
+ 		return TYPE_SPT;
+ 	else {
+ 		eprintf(&quot;unknown target type: %s\n&quot;, str);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000795.html">[Stgt-svn] r808 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000797.html">[Stgt-svn] r810 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#796">[ date ]</a>
+              <a href="thread.html#796">[ thread ]</a>
+              <a href="subject.html#796">[ subject ]</a>
+              <a href="author.html#796">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

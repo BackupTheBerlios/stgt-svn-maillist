@@ -1,0 +1,202 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r356 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r356%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030734.k237Yhvx005787%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000342.html">
+   <LINK REL="Next"  HREF="000344.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r356 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r356%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603030734.k237Yhvx005787%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r356 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 08:34:43 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000342.html">[Stgt-svn] r355 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000344.html">[Stgt-svn] r357 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#343">[ date ]</a>
+              <a href="thread.html#343">[ thread ]</a>
+              <a href="subject.html#343">[ subject ]</a>
+              <a href="author.html#343">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 08:34:34 +0100 (Fri, 03 Mar 2006)
+New Revision: 356
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgt_sysfs.c
+   branches/use-scsi-ml/usr/tgt_sysfs.h
+Log:
+Remove all file and dir stuff in target.c
+
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-03 05:32:34 UTC (rev 355)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 07:34:34 UTC (rev 356)
+@@ -32,7 +32,6 @@
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/socket.h&gt;
+-#include &lt;sys/stat.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
+ #include &lt;linux/netlink.h&gt;
+@@ -70,8 +69,6 @@
+ static struct target *tgtt[MAX_NR_TARGET];
+ static struct target *hostt[MAX_NR_HOST];
+ 
+-static mode_t fmode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
+-
+ static struct target *target_get(int tid)
+ {
+ 	if (tid &gt;= MAX_NR_TARGET) {
+@@ -395,8 +392,7 @@
+ 
+ int tgt_target_bind(int tid, int host_no)
+ {
+-	char path[PATH_MAX], buf[64];
+-	int fd, err;
++	int err;
+ 
+ 	if (!tgtt[tid]) {
+ 		eprintf(&quot;target is not found %d\n&quot;, tid);
+@@ -408,14 +404,7 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	snprintf(path, sizeof(path), TGT_TARGET_SYSFSDIR &quot;/target%d/hostno&quot;, tid);
+-	fd = open(path, O_RDWR|O_CREAT|O_EXCL, fmode);
+-	if (fd &lt; 0)
+-		return -EINVAL;
+-
+-	snprintf(buf, sizeof(buf), &quot;%d&quot;, host_no);
+-	err = write(fd, buf, strlen(buf));
+-	close(fd);
++	err = tgt_target_dir_attr_create(tid, &quot;hostno&quot;, &quot;%d\n&quot;, host_no);
+ 	if (err &lt; 0)
+ 		return -EINVAL;
+ 
+
+Modified: branches/use-scsi-ml/usr/tgt_sysfs.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgt_sysfs.c	2006-03-03 05:32:34 UTC (rev 355)
++++ branches/use-scsi-ml/usr/tgt_sysfs.c	2006-03-03 07:34:34 UTC (rev 356)
+@@ -102,26 +102,6 @@
+ 	return err;
+ }
+ 
+-static int tgt_write(int fd, const char *fmt, ...)
+-{
+-	int err;
+-	char buf[PATH_MAX];
+-	va_list ap;
+-
+-	va_start(ap, fmt);
+-	err = tgt_set_string(buf, sizeof(buf), fmt, ap);
+-	if (err)
+-		goto out;
+-
+-	err = write(fd, buf, strlen(buf));
+-	if (err &lt; 0)
+-		eprintf(&quot;fail to write %s\n&quot;, buf);
+-out:
+-	close(fd);
+-	va_end(ap);
+-	return err;
+-}
+-
+ int tgt_target_dir_create(int tid)
+ {
+ 	return tgt_dir(CREATE, TGT_TARGET_SYSFSDIR &quot;/target%d&quot;, tid);
+@@ -156,3 +136,35 @@
+ 
+ 	return err;
+ }
++
++int tgt_target_dir_attr_create(int tid, const char *name, const char *fmt, ...)
++{
++	int err, fd = 0;
++	char buf[PATH_MAX];
++	va_list ap;
++
++	va_start(ap, fmt);
++
++	err = tgt_set_string(buf, sizeof(buf), fmt, ap);
++	if (err)
++		goto out;
++
++	fd = tgt_file(CREATE, TGT_TARGET_SYSFSDIR &quot;/target%d/%s&quot;, tid, name);
++	if (fd &lt; 0) {
++		err = -errno;
++		goto out;
++	}
++	err = write(fd, buf, strlen(buf));
++	if (err &lt; 0)
++		eprintf(&quot;fail to write %s\n&quot;, buf);
++out:
++	if (fd &gt; 0)
++		close(fd);
++	va_end(ap);
++	return err;
++}
++
++int tgt_target_dir_attr_delete(int tid, char *name)
++{
++	return tgt_file(DELETE, TGT_TARGET_SYSFSDIR &quot;/target%d/%s&quot;, tid, name);
++}
+
+Modified: branches/use-scsi-ml/usr/tgt_sysfs.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgt_sysfs.h	2006-03-03 05:32:34 UTC (rev 355)
++++ branches/use-scsi-ml/usr/tgt_sysfs.h	2006-03-03 07:34:34 UTC (rev 356)
+@@ -13,4 +13,7 @@
+ extern int tgt_device_dir_create(int tid, uint64_t dev_id);
+ extern int tgt_device_dir_delete(int tid, uint64_t dev_id);
+ 
++extern int tgt_target_dir_attr_create(int tid, const char *name, const char *fmt, ...);
++extern int tgt_target_dir_attr_delete(int tid, char *name);
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000342.html">[Stgt-svn] r355 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000344.html">[Stgt-svn] r357 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#343">[ date ]</a>
+              <a href="thread.html#343">[ thread ]</a>
+              <a href="subject.html#343">[ subject ]</a>
+              <a href="author.html#343">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

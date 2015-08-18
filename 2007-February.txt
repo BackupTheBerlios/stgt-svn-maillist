@@ -1,0 +1,2353 @@
+From tomo at mail.berlios.de  Fri Feb  9 13:32:21 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 9 Feb 2007 13:32:21 +0100
+Subject: [Stgt-svn] r774 - trunk/patches
+Message-ID: <200702091232.l19CWLiI018717@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-09 13:32:21 +0100 (Fri, 09 Feb 2007)
+New Revision: 774
+
+Added:
+   trunk/patches/aioepoll-2.6.20.diff
+Removed:
+   trunk/patches/aioepoll-2.6.20-rc2.diff
+Log:
+Update aioepoll patch for 2.6.20.
+
+Deleted: trunk/patches/aioepoll-2.6.20-rc2.diff
+===================================================================
+--- trunk/patches/aioepoll-2.6.20-rc2.diff	2007-01-29 15:20:27 UTC (rev 773)
++++ trunk/patches/aioepoll-2.6.20-rc2.diff	2007-02-09 12:32:21 UTC (rev 774)
+@@ -1,242 +0,0 @@
+-diff --git a/fs/aio.c b/fs/aio.c
+-index 5f577a6..b546104 100644
+---- a/fs/aio.c
+-+++ b/fs/aio.c
+-@@ -30,6 +30,7 @@ #include <linux/aio.h>
+- #include <linux/highmem.h>
+- #include <linux/workqueue.h>
+- #include <linux/security.h>
+-+#include <linux/eventpoll.h>
+- 
+- #include <asm/kmap_types.h>
+- #include <asm/uaccess.h>
+-@@ -802,6 +803,8 @@ static void aio_queue_work(struct kioctx
+- 		timeout = 1;
+- 	else
+- 		timeout = HZ/10;
+-+
+-+	timeout = 1;
+- 	queue_delayed_work(aio_wq, &ctx->wq, timeout);
+- }
+- 
+-@@ -1487,6 +1490,9 @@ static ssize_t aio_setup_iocb(struct kio
+- 		if (file->f_op->aio_fsync)
+- 			kiocb->ki_retry = aio_fsync;
+- 		break;
+-+	case IOCB_CMD_EPOLL_WAIT:
+-+		kiocb->ki_retry = eventpoll_aio_wait;
+-+		break;
+- 	default:
+- 		dprintk("EINVAL: io_submit: no operation provided\n");
+- 		ret = -EINVAL;
+-diff --git a/fs/eventpoll.c b/fs/eventpoll.c
+-index 3ae644e..6b78ada 100644
+---- a/fs/eventpoll.c
+-+++ b/fs/eventpoll.c
+-@@ -35,6 +35,7 @@ #include <linux/eventpoll.h>
+- #include <linux/mount.h>
+- #include <linux/bitops.h>
+- #include <linux/mutex.h>
+-+#include <linux/aio.h>
+- #include <asm/uaccess.h>
+- #include <asm/system.h>
+- #include <asm/io.h>
+-@@ -642,6 +643,150 @@ eexit_1:
+- 	return error;
+- }
+- 
+-+static void eventpoll_aio_timer(unsigned long data)
+-+{
+-+	struct kiocb *iocb = (struct kiocb *)data;
+-+	struct timer_list *timer = (struct timer_list *)iocb->private;
+-+	struct file *file = iocb->ki_filp;
+-+	struct eventpoll *ep = (struct eventpoll *)file->private_data;
+-+	unsigned long flags;
+-+
+-+	(void)del_timer(timer);
+-+	write_lock_irqsave(&ep->lock, flags);
+-+	__wake_up_locked(&ep->wq, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE);
+-+	write_unlock_irqrestore(&ep->lock, flags);
+-+}
+-+
+-+static int aio_epoll_cancel(struct kiocb *iocb, struct io_event *event)
+-+{
+-+	struct file *file = iocb->ki_filp;
+-+	struct eventpoll *ep = (struct eventpoll *)file->private_data;
+-+	int ret = -1;
+-+	struct list_head *list;
+-+	int seen = 0;
+-+
+-+	write_lock_irq(&ep->lock);
+-+
+-+	if (iocb->private)
+-+		del_timer((struct timer_list *)iocb->private);
+-+	/*
+-+	 *  We need to know whether the event was removed from the wait
+-+	 *  queue in order to return the proper status to the cancellation
+-+	 *  code.
+-+	 */
+-+	list = &ep->wq.task_list;
+-+
+-+	do {
+-+		struct list_head *next;
+-+		if (list == &iocb->ki_wait.task_list)
+-+			seen++;
+-+		next = list->next;
+-+		if (next->prev != list) {
+-+			seen += 2;
+-+			break;
+-+		}
+-+		list = next;
+-+	} while (list != &ep->wq.task_list);
+-+
+-+	if (seen == 1) {
+-+		__remove_wait_queue(&ep->wq, &iocb->ki_wait);
+-+		ret = 0;
+-+	}
+-+	write_unlock_irq(&ep->lock);
+-+
+-+	if (ret == 0) {
+-+		/* successfully cancelled request */
+-+		kfree(iocb->private);
+-+		iocb->private = NULL;
+-+		/* drop the i/o reference */
+-+		aio_put_req(iocb);
+-+	} else
+-+		ret = -EAGAIN;
+-+
+-+	event->res = event->res2 = 0;
+-+	/* drop the cancel reference */
+-+	aio_put_req(iocb);
+-+
+-+	return ret;
+-+}
+-+
+-+/*
+-+ * iocb->ki_nbytes -- number of events
+-+ * iocb->ki_pos    -- relative timeout in milliseconds
+-+ * iocb->private   -- NULL first go;  after that, it's set to the the
+-+ *                    absolute timeout in jiffies.
+-+ */
+-+ssize_t eventpoll_aio_wait(struct kiocb *iocb)
+-+{
+-+	struct file *file = iocb->ki_filp;
+-+	ssize_t ret = -EINVAL;
+-+	int relative_ms;
+-+	unsigned long expires;
+-+	unsigned long now;
+-+	struct timer_list *timer;
+-+
+-+	if (!is_file_epoll(file) || iocb->ki_nbytes > EP_MAX_EVENTS ||
+-+	    iocb->ki_nbytes <= 0)
+-+		return -EINVAL;
+-+
+-+	if (!iocb->private) {
+-+		/*
+-+		 *  Note that we unconditionally allocate a timer, but we
+-+		 *  only use it if a timeout was specified.  Otherwise, it
+-+		 *  is just a holder for the "infinite" value.
+-+		 */
+-+		timer = kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+-+		if (!timer)
+-+			return -ENOMEM;
+-+
+-+		if ((long)iocb->ki_pos < 0 || iocb->ki_pos >= EP_MAX_MSTIMEO)
+-+			expires = MAX_SCHEDULE_TIMEOUT;
+-+		else
+-+			expires = jiffies + msecs_to_jiffies(iocb->ki_pos);
+-+
+-+		init_timer(timer);
+-+		timer->function = eventpoll_aio_timer;
+-+		timer->data = (unsigned long)iocb;
+-+		timer->expires = expires;
+-+	} else {
+-+		timer = (struct timer_list *)iocb->private;
+-+		expires = timer->expires;
+-+	}
+-+
+-+	now = jiffies;
+-+	if (timer->expires == MAX_SCHEDULE_TIMEOUT)
+-+		relative_ms = EP_MAX_MSTIMEO;
+-+	else if (time_before(now, expires))
+-+		relative_ms = jiffies_to_msecs(expires - now);
+-+	else
+-+		relative_ms = 0;
+-+
+-+	iocb->ki_cancel = aio_epoll_cancel;
+-+	ret = ep_poll(file->private_data,
+-+		      (struct epoll_event __user *)iocb->ki_buf,
+-+		      iocb->ki_nbytes, relative_ms);
+-+
+-+	/*
+-+	 *  If a timeout was specified, ep_poll returned retry, and we have
+-+	 *  not yet registered a timer, go ahead and register one.
+-+	 */
+-+	if (ret == -EIOCBRETRY && !iocb->private) {
+-+		iocb->private = timer;
+-+		add_timer(timer);
+-+	}
+-+
+-+	/*
+-+	 *  Did we get any events?
+-+	 */
+-+	if (ret >= 0) {
+-+		iocb->ki_cancel = NULL;
+-+		(void)del_timer(timer);
+-+		kfree(timer);
+-+		iocb->private = NULL;
+-+	}
+-+
+-+	return ret;
+-+}
+- 
+- /*
+-  * Implement the event wait interface for the eventpoll file. It is the kernel
+-@@ -1564,6 +1709,12 @@ retry:
+- 
+- 	res = 0;
+- 	if (list_empty(&ep->rdllist)) {
+-+		if (in_aio() && jtimeout) {
+-+			__add_wait_queue(&ep->wq, current->io_wait);
+-+			res = -EIOCBRETRY;
+-+			write_unlock_irqrestore(&ep->lock, flags);
+-+			goto out;
+-+		}
+- 		/*
+- 		 * We don't have any available event to return to the caller.
+- 		 * We need to sleep here, and we will be wake up by
+-@@ -1608,7 +1759,7 @@ retry:
+- 	if (!res && eavail &&
+- 	    !(res = ep_events_transfer(ep, events, maxevents)) && jtimeout)
+- 		goto retry;
+--
+-+out:
+- 	return res;
+- }
+- 
+-diff --git a/include/linux/aio_abi.h b/include/linux/aio_abi.h
+-index e3ca0a4..292c811 100644
+---- a/include/linux/aio_abi.h
+-+++ b/include/linux/aio_abi.h
+-@@ -43,6 +43,7 @@ enum {
+- 	IOCB_CMD_NOOP = 6,
+- 	IOCB_CMD_PREADV = 7,
+- 	IOCB_CMD_PWRITEV = 8,
+-+  	IOCB_CMD_EPOLL_WAIT = 9,
+- };
+- 
+- /* read() from /dev/aio returns these structures. */
+-diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
+-index 84cfa8b..ed04500 100644
+---- a/include/linux/eventpoll.h
+-+++ b/include/linux/eventpoll.h
+-@@ -62,6 +62,9 @@ static inline void eventpoll_init_file(s
+- /* Used to release the epoll bits inside the "struct file" */
+- void eventpoll_release_file(struct file *file);
+- 
+-+/* Used to provide epoll_wait() to sys_io_submit() */
+-+ssize_t eventpoll_aio_wait(struct kiocb *iocb);
+-+
+- /*
+-  * This is called from inside fs/file_table.c:__fput() to unlink files
+-  * from the eventpoll interface. We need to have this facility to cleanup
+
+Added: trunk/patches/aioepoll-2.6.20.diff
+===================================================================
+--- trunk/patches/aioepoll-2.6.20.diff	2007-01-29 15:20:27 UTC (rev 773)
++++ trunk/patches/aioepoll-2.6.20.diff	2007-02-09 12:32:21 UTC (rev 774)
+@@ -0,0 +1,374 @@
++diff --git a/fs/aio.c b/fs/aio.c
++index 55991e4..ee4b679 100644
++--- a/fs/aio.c
+++++ b/fs/aio.c
++@@ -30,6 +30,7 @@ #include <linux/aio.h>
++ #include <linux/highmem.h>
++ #include <linux/workqueue.h>
++ #include <linux/security.h>
+++#include <linux/eventpoll.h>
++ 
++ #include <asm/kmap_types.h>
++ #include <asm/uaccess.h>
++@@ -193,6 +194,8 @@ #define put_aio_ring_event(event, km) do
++ 	kunmap_atomic((void *)((unsigned long)__event & PAGE_MASK), km); \
++ } while(0)
++ 
+++static struct lock_class_key ioctx_wait_queue_head_lock_key;
+++
++ /* ioctx_alloc
++  *	Allocates and initializes an ioctx.  Returns an ERR_PTR if it failed.
++  */
++@@ -224,6 +227,8 @@ static struct kioctx *ioctx_alloc(unsign
++ 	spin_lock_init(&ctx->ctx_lock);
++ 	spin_lock_init(&ctx->ring_info.ring_lock);
++ 	init_waitqueue_head(&ctx->wait);
+++	/* Teach lockdep to recognize this lock as a different class */
+++	lockdep_set_class(&ctx->wait.lock, &ioctx_wait_queue_head_lock_key);
++ 
++ 	INIT_LIST_HEAD(&ctx->active_reqs);
++ 	INIT_LIST_HEAD(&ctx->run_list);
++@@ -1399,6 +1404,42 @@ static ssize_t aio_setup_single_vector(s
++ 	return 0;
++ }
++ 
+++/* Uses iocb->ki_private */
+++void aio_free_iocb_timer(struct kiocb *iocb)
+++{
+++	struct timer_list *timer = (struct timer_list *)iocb->private;
+++
+++	if (timer) {
+++		del_timer(timer);
+++		kfree(timer);
+++		iocb->private = NULL;
+++	}
+++}
+++
+++/* Uses iocb->private */
+++int aio_setup_iocb_timer(struct kiocb *iocb, unsigned long expires,
+++	void (*function)(unsigned long))
+++{
+++	struct timer_list *timer;
+++
+++	if (iocb->private)
+++		return -EEXIST;
+++
+++	timer = kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+++	if (!timer)
+++		return -ENOMEM;
+++
+++	init_timer(timer);
+++	timer->function = function;
+++	timer->data = (unsigned long)iocb;
+++	timer->expires = expires;
+++
+++	iocb->private = timer;
+++	iocb->ki_dtor = aio_free_iocb_timer;
+++	return 0;
+++}
+++
+++
++ /*
++  * aio_setup_iocb:
++  *	Performs the initial checks and aio retry method
++@@ -1484,6 +1525,19 @@ static ssize_t aio_setup_iocb(struct kio
++ 		if (file->f_op->aio_fsync)
++ 			kiocb->ki_retry = aio_fsync;
++ 		break;
+++	case IOCB_CMD_EPOLL_WAIT:
+++		/*
+++	 	 *  Note that we unconditionally allocate a timer, but we
+++	 	 *  only use it if a timeout was specified.  Otherwise, it
+++	 	 *  is just a holder for the "infinite" value.
+++	 	 */
+++		ret = aio_setup_iocb_timer(kiocb, ep_relative_ms_to_jiffies(
+++					kiocb->ki_pos), eventpoll_aio_timer);
+++		if (unlikely(ret))
+++			break;
+++		kiocb->ki_retry = eventpoll_aio_wait;
+++		kiocb->ki_cancel = eventpoll_aio_cancel;
+++		break;
++ 	default:
++ 		dprintk("EINVAL: io_submit: no operation provided\n");
++ 		ret = -EINVAL;
++diff --git a/fs/eventpoll.c b/fs/eventpoll.c
++index 3ae644e..66ea9f1 100644
++--- a/fs/eventpoll.c
+++++ b/fs/eventpoll.c
++@@ -35,6 +35,7 @@ #include <linux/eventpoll.h>
++ #include <linux/mount.h>
++ #include <linux/bitops.h>
++ #include <linux/mutex.h>
+++#include <linux/aio.h>
++ #include <asm/uaccess.h>
++ #include <asm/system.h>
++ #include <asm/io.h>
++@@ -642,6 +643,75 @@ eexit_1:
++ 	return error;
++ }
++ 
+++/*
+++ * Called when the eventpoll timer expires or a cancellation
+++ * occurs for an aio_epoll_wait. It is enough for this function to
+++ * trigger a wakeup on the eventpoll waitqueue. The aio_wake_function()
+++ * callback will pull out the wait queue entry and kick the iocb so that
+++ * the rest gets taken care of in aio_run_iocb->aio_epoll_wait which
+++ * can recognize the cancelled state or timeout expiration and do
+++ * the right thing.
+++ */
+++void eventpoll_aio_timer(unsigned long data)
+++{
+++	struct kiocb *iocb = (struct kiocb *)data;
+++	struct timer_list *timer = iocb_timer(iocb);
+++	struct file *file = iocb->ki_filp;
+++	struct eventpoll *ep = (struct eventpoll *)file->private_data;
+++	unsigned long flags;
+++
+++	if (timer)
+++		del_timer(timer);
+++	write_lock_irqsave(&ep->lock, flags);
+++	/* because ep->lock also protects ep->wq */
+++	__wake_up_locked(&ep->wq, TASK_UNINTERRUPTIBLE | TASK_INTERRUPTIBLE);
+++	write_unlock_irqrestore(&ep->lock, flags);
+++}
+++
+++
+++int eventpoll_aio_cancel(struct kiocb *iocb, struct io_event *event)
+++{
+++	/* to wakeup the iocb, so actual cancellation happens aio_run_iocb */
+++	eventpoll_aio_timer((unsigned long)iocb);
+++
+++	event->res = event->res2 = 0;
+++	/* drop the cancel reference */
+++	aio_put_req(iocb);
+++
+++	return 0;
+++}
+++
+++/*
+++ * iocb->ki_nbytes -- number of events
+++ * iocb->ki_pos    -- relative timeout in milliseconds
+++ * iocb->private   -- timer with absolute timeout in jiffies
+++ */
+++ssize_t eventpoll_aio_wait(struct kiocb *iocb)
+++{
+++	struct file *file = iocb->ki_filp;
+++	ssize_t ret = -EINVAL;
+++	unsigned long expires;
+++	struct timer_list *timer = iocb_timer(iocb);
+++
+++	if (!is_file_epoll(file) || iocb->ki_nbytes > EP_MAX_EVENTS ||
+++	    iocb->ki_nbytes <= 0)
+++		return -EINVAL;
+++
+++	expires = timer->expires;
+++	ret = ep_poll(file->private_data,
+++		      (struct epoll_event __user *)iocb->ki_buf,
+++		      iocb->ki_nbytes, ep_jiffies_to_relative_ms(expires));
+++
+++	/*
+++	 *  If a timeout was specified, ep_poll returned retry, and we have
+++	 *  not yet registered a timer, go ahead and register one.
+++	 */
+++	if (ret == -EIOCBRETRY) {
+++		mod_timer(timer, expires);
+++	}
+++
+++	return ret;
+++}
++ 
++ /*
++  * Implement the event wait interface for the eventpoll file. It is the kernel
++@@ -824,6 +894,7 @@ eexit_1:
++ 	return error;
++ }
++ 
+++static struct lock_class_key eventpoll_wait_queue_head_lock_key;
++ 
++ static int ep_alloc(struct eventpoll **pep)
++ {
++@@ -835,6 +906,9 @@ static int ep_alloc(struct eventpoll **p
++ 	rwlock_init(&ep->lock);
++ 	init_rwsem(&ep->sem);
++ 	init_waitqueue_head(&ep->wq);
+++	/* Teach lockdep to recognize this lock as a different class */
+++	lockdep_set_class(&ep->wq.lock, &eventpoll_wait_queue_head_lock_key);
+++
++ 	init_waitqueue_head(&ep->poll_wait);
++ 	INIT_LIST_HEAD(&ep->rdllist);
++ 	ep->rbr = RB_ROOT;
++@@ -1549,7 +1623,7 @@ static int ep_poll(struct eventpoll *ep,
++ 	int res, eavail;
++ 	unsigned long flags;
++ 	long jtimeout;
++-	wait_queue_t wait;
+++	wait_queue_t *wait = current->io_wait;
++ 
++ 	/*
++ 	 * Calculate the timeout by checking for the "infinite" value ( -1 )
++@@ -1569,16 +1643,13 @@ retry:
++ 		 * We need to sleep here, and we will be wake up by
++ 		 * ep_poll_callback() when events will become available.
++ 		 */
++-		init_waitqueue_entry(&wait, current);
++-		__add_wait_queue(&ep->wq, &wait);
++-
++ 		for (;;) {
++ 			/*
++ 			 * We don't want to sleep if the ep_poll_callback() sends us
++ 			 * a wakeup in between. That's why we set the task state
++ 			 * to TASK_INTERRUPTIBLE before doing the checks.
++ 			 */
++-			set_current_state(TASK_INTERRUPTIBLE);
+++			prepare_to_wait(&ep->wq, wait, TASK_INTERRUPTIBLE);
++ 			if (!list_empty(&ep->rdllist) || !jtimeout)
++ 				break;
++ 			if (signal_pending(current)) {
++@@ -1587,12 +1658,16 @@ retry:
++ 			}
++ 
++ 			write_unlock_irqrestore(&ep->lock, flags);
++-			jtimeout = schedule_timeout(jtimeout);
+++			if ((jtimeout = schedule_timeout_wait(jtimeout, wait))
+++				< 0) {
+++				if ((res = jtimeout) == -EIOCBRETRY)
+++					goto out;
+++			}
+++			if (res < 0)
+++				break;
++ 			write_lock_irqsave(&ep->lock, flags);
++ 		}
++-		__remove_wait_queue(&ep->wq, &wait);
++-
++-		set_current_state(TASK_RUNNING);
+++		finish_wait(&ep->wq, wait);
++ 	}
++ 
++ 	/* Is it worth to try to dig for events ? */
++@@ -1608,7 +1683,7 @@ retry:
++ 	if (!res && eavail &&
++ 	    !(res = ep_events_transfer(ep, events, maxevents)) && jtimeout)
++ 		goto retry;
++-
+++out:
++ 	return res;
++ }
++ 
++diff --git a/include/linux/aio.h b/include/linux/aio.h
++index a30ef13..6130ab0 100644
++--- a/include/linux/aio.h
+++++ b/include/linux/aio.h
++@@ -238,6 +238,7 @@ do {									\
++ } while (0)
++ 
++ #define io_wait_to_kiocb(wait) container_of(wait, struct kiocb, ki_wait)
+++#define iocb_timer(iocb)	((struct timer_list *)((iocb)->private))
++ 
++ #include <linux/aio_abi.h>
++ 
++diff --git a/include/linux/aio_abi.h b/include/linux/aio_abi.h
++index e3ca0a4..ff0ebdd 100644
++--- a/include/linux/aio_abi.h
+++++ b/include/linux/aio_abi.h
++@@ -43,6 +43,7 @@ enum {
++ 	IOCB_CMD_NOOP = 6,
++ 	IOCB_CMD_PREADV = 7,
++ 	IOCB_CMD_PWRITEV = 8,
+++	IOCB_CMD_EPOLL_WAIT = 9,
++ };
++ 
++ /* read() from /dev/aio returns these structures. */
++diff --git a/include/linux/eventpoll.h b/include/linux/eventpoll.h
++index 84cfa8b..203ff5f 100644
++--- a/include/linux/eventpoll.h
+++++ b/include/linux/eventpoll.h
++@@ -48,6 +48,33 @@ #ifdef __KERNEL__
++ /* Forward declarations to avoid compiler errors */
++ struct file;
++ 
+++/* Maximum msec timeout value storeable in a long int */
+++#define EP_MAX_MSTIMEO min(1000ULL * MAX_SCHEDULE_TIMEOUT / HZ, (LONG_MAX - 999ULL) / HZ)
+++
+++static inline int ep_jiffies_to_relative_ms(unsigned long expires)
+++{
+++	int relative_ms = 0;
+++	unsigned long now = jiffies;
+++
+++	if (expires == MAX_SCHEDULE_TIMEOUT)
+++		relative_ms = EP_MAX_MSTIMEO;
+++	else if (time_before(now, expires))
+++		relative_ms = jiffies_to_msecs(expires - now);
+++
+++	return relative_ms;
+++}
+++
+++static inline unsigned long ep_relative_ms_to_jiffies(int relative_ms)
+++{
+++	unsigned long expires;
+++
+++	if (relative_ms < 0 || relative_ms >= EP_MAX_MSTIMEO)
+++		expires = MAX_SCHEDULE_TIMEOUT;
+++	else
+++		expires = jiffies + msecs_to_jiffies(relative_ms);
+++	return expires;
+++}
+++
++ 
++ #ifdef CONFIG_EPOLL
++ 
++@@ -90,6 +117,10 @@ static inline void eventpoll_release(str
++ 	eventpoll_release_file(file);
++ }
++ 
+++extern void eventpoll_aio_timer(unsigned long data);
+++extern int eventpoll_aio_cancel(struct kiocb *iocb, struct io_event *event);
+++extern ssize_t eventpoll_aio_wait(struct kiocb *iocb);
+++
++ #else
++ 
++ static inline void eventpoll_init_file(struct file *file) {}
++diff --git a/include/linux/sched.h b/include/linux/sched.h
++index 4463735..cfbe552 100644
++--- a/include/linux/sched.h
+++++ b/include/linux/sched.h
++@@ -246,6 +246,8 @@ extern int in_sched_functions(unsigned l
++ 
++ #define	MAX_SCHEDULE_TIMEOUT	LONG_MAX
++ extern signed long FASTCALL(schedule_timeout(signed long timeout));
+++extern signed long FASTCALL(schedule_timeout_wait(signed long timeout,
+++				wait_queue_t *wait));
++ extern signed long schedule_timeout_interruptible(signed long timeout);
++ extern signed long schedule_timeout_uninterruptible(signed long timeout);
++ asmlinkage void schedule(void);
++diff --git a/kernel/timer.c b/kernel/timer.c
++index c2a8ccf..02f879e 100644
++--- a/kernel/timer.c
+++++ b/kernel/timer.c
++@@ -1368,6 +1368,27 @@ fastcall signed long __sched schedule_ti
++ EXPORT_SYMBOL(schedule_timeout);
++ 
++ /*
+++ * Same as schedule_timeout, except that it checks the wait queue context
+++ * passed in, and in case of an asynchronous waiter it does not sleep,
+++ * but returns -EIOCBRETRY to allow the operation to be retried later when
+++ * notified, unless it has been cancelled in which case it returns -EINTR
+++ */
+++fastcall signed long __sched schedule_timeout_wait(signed long timeout,
+++	wait_queue_t *wait)
+++{
+++	struct kiocb *iocb;
+++	if (is_sync_wait(wait))
+++		return schedule_timeout(timeout);
+++
+++	iocb = io_wait_to_kiocb(wait);
+++	if (kiocbIsCancelled(iocb))
+++		return -EINTR;
+++
+++	return -EIOCBRETRY;
+++}
+++
+++
+++/*
++  * We can use __set_current_state() here because schedule_timeout() calls
++  * schedule() unconditionally.
++  */
+
+
+
+From tomo at mail.berlios.de  Fri Feb  9 13:36:31 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 9 Feb 2007 13:36:31 +0100
+Subject: [Stgt-svn] r775 - trunk
+Message-ID: <200702091236.l19CaVv5019134@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-09 13:36:30 +0100 (Fri, 09 Feb 2007)
+New Revision: 775
+
+Modified:
+   trunk/README
+Log:
+Update README for 2.6.20.
+
+
+Modified: trunk/README
+===================================================================
+--- trunk/README	2007-02-09 12:32:21 UTC (rev 774)
++++ trunk/README	2007-02-09 12:36:30 UTC (rev 775)
+@@ -19,15 +19,14 @@
+ 
+ Preparation
+ -------------
+-First, get kernel sources from 2.6.20-rc1.
++First, get kernel version 2.6.20.
+ 
+-Second, apply aioepoll-2.6.20-rc1.diff in the patches directory.
++Second, apply aioepoll-2.6.20.diff in the patches directory.
+ 
+ Third, rebuild the kernel and reboot with the new kernel. Note you
+ need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS kernel options
+ in order to use the IBM VIO target driver, 
+ 
+-
+ Now you are ready to build target drivers. If you like to use the
+ iSCSI target driver:
+ 
+@@ -42,6 +41,3 @@
+ Now you can run tgt. Target drivers have their own ways for
+ configuration. So find an appropriate documentation in the doc
+ directory.
+-
+-
+-FUJITA Tomonori and Mike Christie
+
+
+
+From tomo at mail.berlios.de  Sat Feb 10 05:31:18 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sat, 10 Feb 2007 05:31:18 +0100
+Subject: [Stgt-svn] r776 - trunk/usr
+Message-ID: <200702100431.l1A4VI2E001266@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-10 05:31:17 +0100 (Sat, 10 Feb 2007)
+New Revision: 776
+
+Modified:
+   trunk/usr/bd_mmap.c
+   trunk/usr/scsi.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtif.c
+   trunk/usr/util.h
+Log:
+Fix PAGE_SIZE mess (or stop using PAGE_SIZE).
+
+getpagesize manpage says:
+
+a user program should not find PAGE_SIZE at compile time from a header
+file.
+
+Now we can remove stupid TGT_RING_PAGES, TGT_EVENT_PER_PAGE,
+TGT_MAX_EVENTS in scsi_tgt_if.h
+
+
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/bd_mmap.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -44,6 +44,8 @@
+ 	close(dev->fd);
+ }
+ 
++#define pgcnt(size, offset)	((((size) + ((offset) & (pagesize - 1))) + (pagesize - 1)) >> pageshift)
++
+ static int bd_mmap_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+ 			      uint32_t datalen, unsigned long *uaddr,
+ 			      uint64_t offset, int *async, void *key)
+@@ -55,11 +57,11 @@
+ 	if (*uaddr)
+ 		*uaddr = *uaddr + offset;
+ 	else {
+-		p = mmap64(NULL, pgcnt(datalen, offset) << PAGE_SHIFT,
++		p = mmap64(NULL, pgcnt(datalen, offset) << pageshift,
+ 			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   offset & ~((1ULL << PAGE_SHIFT) - 1));
++			   offset & ~((1ULL << pageshift) - 1));
+ 
+-		*uaddr = (unsigned long) p + (offset & ~PAGE_MASK);
++		*uaddr = (unsigned long) p + (offset & (pagesize - 1));
+ 		if (p == MAP_FAILED) {
+ 			err = -EINVAL;
+ 			eprintf("%lx %u %" PRIu64 "\n", *uaddr, datalen, offset);
+@@ -78,8 +80,8 @@
+ 	dprintf("%d %d %" PRIx64 " %d\n", do_munmap, do_free, uaddr, len);
+ 
+ 	if (do_munmap) {
+-		len = pgcnt(len, (uaddr & ~PAGE_MASK)) << PAGE_SHIFT;
+-		uaddr &= PAGE_MASK;
++		len = pgcnt(len, (uaddr & (pagesize - 1))) << pageshift;
++		uaddr &= ~(pagesize - 1);
+ 		err = munmap((void *) (unsigned long) uaddr, len);
+ 		if (err)
+ 			eprintf("%" PRIx64 " %d\n", uaddr, len);
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/scsi.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -491,8 +491,8 @@
+ 
+ 	*async = *offset = 0;
+ 	if (scsi_cmd_rw(scb, rw)) {
+-		data = valloc(PAGE_SIZE);
+-		memset(data, 0, PAGE_SIZE);
++		data = valloc(pagesize);
++		memset(data, 0, pagesize);
+ 	}
+ 
+ 	if (!dev) {
+@@ -504,8 +504,8 @@
+ 		default:
+ 			*offset = 0;
+ 			if (!data) {
+-				data = valloc(PAGE_SIZE);
+-				memset(data, 0, PAGE_SIZE);
++				data = valloc(pagesize);
++				memset(data, 0, pagesize);
+ 			}
+ 			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+@@ -583,7 +583,7 @@
+ 			*rw = READ;
+ 			*offset = 0;
+ 			if (!data)
+-				data = valloc(PAGE_SIZE);
++				data = valloc(pagesize);
+ 			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+ 		}
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/tgtd.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -49,6 +49,7 @@
+ };
+ 
+ io_context_t ctx;
++unsigned long pagesize, pageshift, pagemask;
+ 
+ static int ep_fd;
+ static char program_name[] = "tgtd";
+@@ -281,6 +282,11 @@
+ 	sigaction(SIGPIPE, &sa_new, &sa_old );
+ 	sigaction(SIGTERM, &sa_new, &sa_old );
+ 
++	pagesize = sysconf(_SC_PAGESIZE);
++	for (pageshift = 0;; pageshift++)
++		if (1UL << pageshift == pagesize)
++			break;
++
+ 	while ((ch = getopt_long(argc, argv, short_options, long_options,
+ 				 &longindex)) >= 0) {
+ 		switch (ch) {
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/tgtif.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -50,18 +50,20 @@
+ static struct uring kuring, ukring;
+ static int chrfd;
+ 
++static unsigned long tgt_ring_pages, tgt_max_events, tgt_event_per_page;
++
+ static inline void ring_index_inc(struct uring *ring)
+ {
+-	ring->idx = (ring->idx == TGT_MAX_EVENTS - 1) ? 0 : ring->idx + 1;
++	ring->idx = (ring->idx == tgt_max_events - 1) ? 0 : ring->idx + 1;
+ }
+ 
+ static inline struct tgt_event *head_ring_hdr(struct uring *ring)
+ {
+ 	uint32_t pidx, off, pos;
+ 
+-	pidx = ring->idx / TGT_EVENT_PER_PAGE;
+-	off = ring->idx % TGT_EVENT_PER_PAGE;
+-	pos = pidx * PAGE_SIZE + off * sizeof(struct tgt_event);
++	pidx = ring->idx / tgt_event_per_page;
++	off = ring->idx % tgt_event_per_page;
++	pos = pidx * pagesize + off * sizeof(struct tgt_event);
+ 
+ 	return (struct tgt_event *) (ring->buf + pos);
+ }
+@@ -210,6 +212,11 @@
+ 		return -EINVAL;
+ 	}
+ 
++	tgt_ring_pages = (pagesize > size) ? 1 : size >> pageshift;
++
++	tgt_event_per_page = pagesize / sizeof(struct tgt_event);
++	tgt_max_events = tgt_event_per_page * tgt_ring_pages;
++
+ 	kuring.idx = ukring.idx = 0;
+ 	kuring.buf = buf;
+ 	ukring.buf = buf + size;
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/util.h	2007-02-10 04:31:17 UTC (rev 776)
+@@ -2,19 +2,10 @@
+ #define __UTIL_H__
+ 
+ #include <byteswap.h>
+-#include <sys/user.h>
+ 
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ #define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))
+ 
+-#ifndef PAGE_SHIFT
+-#define	PAGE_SHIFT	12
+-#define	PAGE_SIZE	(1UL << PAGE_SHIFT)
+-#define	PAGE_MASK	(~(PAGE_SIZE-1))
+-#endif
+-
+-#define pgcnt(size, offset)	((((size) + ((offset) & ~PAGE_MASK)) + PAGE_SIZE - 1) >> PAGE_SHIFT)
+-
+ #if __BYTE_ORDER == __LITTLE_ENDIAN
+ #define __cpu_to_be16(x) bswap_16(x)
+ #define __cpu_to_be32(x) bswap_32(x)
+@@ -92,4 +83,6 @@
+ 	rest -= len;							\
+ } while (0)
+ 
++extern unsigned long pagesize, pageshift;
++
+ #endif
+
+
+
+From tomo at mail.berlios.de  Sat Feb 10 08:08:06 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sat, 10 Feb 2007 08:08:06 +0100
+Subject: [Stgt-svn] r777 - trunk/usr
+Message-ID: <200702100708.l1A7862d019946@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-10 08:08:06 +0100 (Sat, 10 Feb 2007)
+New Revision: 777
+
+Modified:
+   trunk/usr/tgtif.c
+Log:
+Fix bugs in TGT_RING_SIZE < PAGE_SIZE case.
+
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-10 04:31:17 UTC (rev 776)
++++ trunk/usr/tgtif.c	2007-02-10 07:08:06 UTC (rev 777)
+@@ -205,6 +205,9 @@
+ 	if (err)
+ 		return err;
+ 
++	if (size < pagesize)
++		size = pagesize;
++
+ 	buf = mmap(NULL, size * 2, PROT_READ | PROT_WRITE, MAP_SHARED, chrfd, 0);
+ 	if (buf == MAP_FAILED) {
+ 		eprintf("fail to mmap, %m\n");
+@@ -212,8 +215,7 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	tgt_ring_pages = (pagesize > size) ? 1 : size >> pageshift;
+-
++	tgt_ring_pages = size >> pageshift;
+ 	tgt_event_per_page = pagesize / sizeof(struct tgt_event);
+ 	tgt_max_events = tgt_event_per_page * tgt_ring_pages;
+ 
+
+
+
+From tomo at mail.berlios.de  Fri Feb 23 17:07:30 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 23 Feb 2007 17:07:30 +0100
+Subject: [Stgt-svn] r778 - trunk/usr
+Message-ID: <200702231607.l1NG7UEM019958@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-23 17:07:29 +0100 (Fri, 23 Feb 2007)
+New Revision: 778
+
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/bd_aio.c
+   trunk/usr/tgtd.c
+Log:
+Some target drivers (like iSCSI) need an interface to wait for both
+synchronous and asynchronous descriptors. But upstream kernels don't
+support something like BSD's kqueue though some candidates are under
+development (e.g. kevent). We use a I/O helper thread to avoid this
+issue now (stolen from RedHat Xen blktap code). This workaround will
+be removed some time.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/Makefile	2007-02-23 16:07:29 UTC (rev 778)
+@@ -37,7 +37,7 @@
+ TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o \
+ 	chap.o transport.o iscsi_tcp.o)
+ TGTD_OBJS += bd_aio.o
+-LIBS += -lcrypto
++LIBS += -lcrypto -lpthread
+ BD_AIO=1
+ endif
+ 
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/bd_aio.c	2007-02-23 16:07:29 UTC (rev 778)
+@@ -27,6 +27,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <libaio.h>
++#include <pthread.h>
+ 
+ #include <linux/fs.h>
+ #include <sys/epoll.h>
+@@ -37,34 +38,135 @@
+ 
+ /*
+  * We need an interface to wait for both synchronous and asynchronous
+- * descriptors (something like BSD's kqueue). Now we use a kernel
+- * patch to return an fd associated with the AIO context because Xen
+- * blktap uses it (so we avoid introducing another patch). However,
+- * I'm not sure the patch will go into mainline. Another approach,
+- * IO_CMD_EPOLL_WAIT, looks more promising. kqueue is promising too.
++ * descriptors (something like BSD's kqueue). But upstream kernels
++ * don't provide it though some candidates are under development. So
++ * we use a hacky trick with pthread (stolen from RedHat Xen blktap
++ * code).
+  */
+ 
+ /* FIXME */
+-#define MAX_AIO_REQS 1024
+-#define O_DIRECT 040000 /* who defines this?*/
++#define MAX_AIO_REQS 2048
+ 
+ struct bd_aio_info {
++	io_context_t ctx;
++
+ 	/* TODO: batch requests */
+-	struct iocb iocb[MAX_AIO_REQS];
++/* 	struct iocb iocb[MAX_AIO_REQS]; */
+ 	struct io_event events[MAX_AIO_REQS];
++
++	pthread_t aio_thread;
++
++	int command_fd[2];
++	int done_fd[2];
+ };
+ 
+-extern io_context_t ctx;
++static void *bs_aio_endio_thread(void *arg)
++{
++	struct bd_aio_info *info = arg;
++	int command, ret, nr;
+ 
+-static int bd_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++retry:
++	ret = read(info->command_fd[0], &command, sizeof(command));
++	if (ret < 0) {
++		eprintf("AIO pthread will be dead.\n");
++		goto out;
++	}
++
++	ret = io_getevents(info->ctx, 1, MAX_AIO_REQS, info->events, NULL);
++	nr = ret;
++	if (nr) {
++		ret = write(info->done_fd[1], &nr, sizeof(nr));
++		if (ret < 0) {
++			eprintf("can't notify tgtd, %m\n");
++			goto out;
++		}
++	}
++	goto retry;
++out:
++	/* TODO: this lu is going to be removed. */
++	pthread_exit(&ret);
++}
++
++static void bs_aio_handler(int fd, int events, void *data)
+ {
++	struct bd_aio_info *info = data;
++	int i, nr_events, ret;
++
++	ret = read(info->done_fd[0], &nr_events, sizeof(nr_events));
++	if (ret < 0) {
++		eprintf("wrong wakeup\n");
++		return;
++	}
++
++	/* FIXME: need to handle failure */
++	for (i = 0; i < nr_events; i++) {
++		struct io_event *ep = &info->events[i];
++		target_cmd_io_done(ep->data, 0);
++	}
++
++	write(info->command_fd[1], &nr_events, sizeof(nr_events));
++}
++
++static int
++bd_aio_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++{
++	int ret;
++	struct bd_aio_info *info =
++		(struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
+ 	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
++	if (*fd < 0)
++		return *fd;
+ 
+-	return *fd >= 0 ? 0 : *fd;
++	ret = io_queue_init(MAX_AIO_REQS, &info->ctx);
++	if (ret) {
++		eprintf("fail to create aio_queue, %m\n");
++		goto close_dev_fd;
++	}
++
++	ret = pipe(info->command_fd);
++	if (ret)
++		goto close_ctx;
++
++	ret = pipe(info->done_fd);
++	if (ret)
++		goto close_command_fd;
++
++	ret = tgt_event_add(info->done_fd[0], EPOLLIN, bs_aio_handler, info);
++	if (ret)
++		goto close_done_fd;
++
++	ret = pthread_create(&info->aio_thread, NULL, bs_aio_endio_thread,
++			     info);
++	if (ret)
++		goto event_del;
++
++	write(info->command_fd[1], &ret, sizeof(ret));
++
++	return 0;
++event_del:
++	tgt_event_del(info->done_fd[0]);
++close_done_fd:
++	close(info->done_fd[0]);
++	close(info->done_fd[1]);
++close_command_fd:
++	close(info->command_fd[0]);
++	close(info->command_fd[1]);
++close_ctx:
++	io_destroy(info->ctx);
++close_dev_fd:
++	close(*fd);
++	return -1;
+ }
+ 
+ static void bd_aio_close(struct tgt_device *dev)
+ {
++	struct bd_aio_info *info;
++
++	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
++	/* FIXME: we should kill pthread */
++	io_destroy(info->ctx);
+ 	close(dev->fd);
+ }
+ 
+@@ -72,16 +174,19 @@
+ 			     uint32_t datalen, unsigned long *uaddr,
+ 			     uint64_t offset, int *async, void *key)
+ {
++	struct bd_aio_info *info;
+ 	struct iocb iocb, *io;
+ 	int err;
+ 
++	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
++
+ 	*async = 1;
+ 
+ 	io = &iocb;
+ 	memset(io, 0, sizeof(*io));
+ 
+-	dprintf("%d %d %u %lx %" PRIx64 " %p %p\n", dev->fd, rw, datalen, *uaddr, offset,
+-		io, key);
++	dprintf("%d %d %u %lx %" PRIx64 " %p %p\n", dev->fd, rw, datalen,
++		*uaddr, offset, io, key);
+ 
+ 	if (rw == READ)
+ 		io_prep_pread(io, dev->fd, (void *) *uaddr, datalen, offset);
+@@ -89,7 +194,7 @@
+ 		io_prep_pwrite(io, dev->fd, (void *) *uaddr, datalen, offset);
+ 
+ 	io->data = key;
+-	err = io_submit(ctx, 1, &io);
++	err = io_submit(info->ctx, 1, &io);
+ 
+ 	return 0;
+ }
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2007-02-10 07:08:06 UTC (rev 777)
++++ trunk/usr/tgtd.c	2007-02-23 16:07:29 UTC (rev 778)
+@@ -48,7 +48,6 @@
+ 	struct list_head e_list;
+ };
+ 
+-io_context_t ctx;
+ unsigned long pagesize, pageshift, pagemask;
+ 
+ static int ep_fd;
+@@ -182,44 +181,14 @@
+ 	return epoll_ctl(ep_fd, EPOLL_CTL_MOD, fd, &ev);
+ }
+ 
+-#define IOCB_CMD_EPOLL_WAIT 9
+-
+-static void io_prep_epoll_wait(struct iocb *iocb, int epfd,
+-			       struct epoll_event *events, int maxevents,
+-			       int timeout)
+-{
+-	memset(iocb, 0, sizeof(*iocb));
+-	iocb->aio_fildes = epfd;
+-	iocb->aio_lio_opcode = IOCB_CMD_EPOLL_WAIT;
+-	iocb->aio_reqprio = 0;
+-
+-	iocb->u.c.nbytes = maxevents;
+-	iocb->u.c.offset = timeout;
+-	iocb->u.c.buf = events;
+-}
+-
+ static void event_loop(void)
+ {
+-	int nevent, i, err;
++	int nevent, i;
+ 	struct epoll_event events[1024];
+ 	struct tgt_event *tev;
+-	struct iocb iocbs[1], *iocb;
+-	struct io_event aioevents[2048];
+-	struct timespec timeout = {1, 0};
+ 
+-	err = io_queue_init(2048, &ctx);
+-	if (err) {
+-		eprintf("%m\n");
+-		return;
+-	}
+-
+-	iocb = iocbs;
+-	io_prep_epoll_wait(iocb, ep_fd, events, ARRAY_SIZE(events), -1);
+-	err = io_submit(ctx, 1, &iocb);
+-
+ retry:
+-	nevent = io_getevents(ctx, 1, ARRAY_SIZE(aioevents), aioevents, &timeout);
+-
++	nevent = epoll_wait(ep_fd, events, ARRAY_SIZE(events), -1);
+ 	if (nevent < 0) {
+ 		if (errno != EINTR) {
+ 			eprintf("%m\n");
+@@ -227,18 +196,8 @@
+ 		}
+ 	} else if (nevent) {
+ 		for (i = 0; i < nevent; i++) {
+-			if (iocb == aioevents[i].obj) {
+-				int j;
+-				for (j = 0; j < aioevents[i].res; j++) {
+-					tev = (struct tgt_event *) events[j].data.ptr;
+-					tev->handler(tev->fd, events[j].events, tev->data);
+-				}
+-
+-				err = io_submit(ctx, 1, &iocb);
+-			} else {
+-				/* FIXME */
+-				target_cmd_io_done(aioevents[i].data, 0);
+-			}
++			tev = (struct tgt_event *) events[i].data.ptr;
++			tev->handler(tev->fd, events[i].events, tev->data);
+ 		}
+ 	} else
+ 		schedule();
+
+
+
+From tomo at mail.berlios.de  Fri Feb 23 17:09:08 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 23 Feb 2007 17:09:08 +0100
+Subject: [Stgt-svn] r779 - trunk
+Message-ID: <200702231609.l1NG980Z020054@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-23 17:09:08 +0100 (Fri, 23 Feb 2007)
+New Revision: 779
+
+Removed:
+   trunk/patches/
+Log:
+Remove EPOLL_WAIT patch!
+
+
+
+
+From tomo at mail.berlios.de  Fri Feb 23 17:12:07 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Fri, 23 Feb 2007 17:12:07 +0100
+Subject: [Stgt-svn] r780 - trunk
+Message-ID: <200702231612.l1NGC7Z8020273@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-23 17:12:06 +0100 (Fri, 23 Feb 2007)
+New Revision: 780
+
+Modified:
+   trunk/README
+Log:
+Remove EPOLL_WAIT patch description in README.
+
+
+Modified: trunk/README
+===================================================================
+--- trunk/README	2007-02-23 16:09:08 UTC (rev 779)
++++ trunk/README	2007-02-23 16:12:06 UTC (rev 780)
+@@ -19,14 +19,10 @@
+ 
+ Preparation
+ -------------
+-First, get kernel version 2.6.20.
++Get kernel version 2.6.20, rebuild the kernel, and reboot with the new
++kernel. Note you need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS
++kernel options in order to use the IBM VIO target driver,
+ 
+-Second, apply aioepoll-2.6.20.diff in the patches directory.
+-
+-Third, rebuild the kernel and reboot with the new kernel. Note you
+-need to enable SCSI_TGT, SCSI_SRP, and SCSI_IBMVSCSIS kernel options
+-in order to use the IBM VIO target driver, 
+-
+ Now you are ready to build target drivers. If you like to use the
+ iSCSI target driver:
+ 
+
+
+
+From tomo at mail.berlios.de  Sat Feb 24 04:18:10 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sat, 24 Feb 2007 04:18:10 +0100
+Subject: [Stgt-svn] r781 - trunk/doc
+Message-ID: <200702240318.l1O3IAEw032112@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-24 04:18:09 +0100 (Sat, 24 Feb 2007)
+New Revision: 781
+
+Modified:
+   trunk/doc/TODO
+Log:
+Update TODO.
+
+Modified: trunk/doc/TODO
+===================================================================
+--- trunk/doc/TODO	2007-02-23 16:12:06 UTC (rev 780)
++++ trunk/doc/TODO	2007-02-24 03:18:09 UTC (rev 781)
+@@ -10,15 +10,6 @@
+ sg v4 is necessary for the user-space target drivers' passthrough.
+ 
+ 
+-- AIO event notification
+-
+-The user-space target drivers (only iSCSI now, possibly SRP later on)
+-need the event notification to handle both synchronous and
+-asynchronous file descriptors. We use the aio epoll patch (that would
+-be merged into mainline at 2.6.21), but it's not effective. We need
+-something like kevent.
+-
+-
+ - backing-storage disk images
+ 
+ bd_mmap/aio support only raw images. They should support fancy disk
+@@ -55,3 +46,15 @@
+ 
+ Virtual cdrom support isn't difficult but I'm not sure people really
+ need it.
++
++
++- AIO event notification
++
++The user-space target drivers (only iSCSI now, possibly SRP later on)
++need an event notification inferface to handle both synchronous and
++asynchronous file descriptors. Now we use a workaround to use a I/O
++helper thread (runs synchrnously to enable tgtd daemon run
++asynchrnously). This workaround will be removed when upstream kernels
++have a unified event notification interface (there are some candidates
++under development). It should improve the tgt AIO performance too.
++
+
+
+
+From tomo at mail.berlios.de  Sat Feb 24 14:22:22 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sat, 24 Feb 2007 14:22:22 +0100
+Subject: [Stgt-svn] r782 - trunk/usr
+Message-ID: <200702241322.l1ODMMSj018539@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-24 14:22:22 +0100 (Sat, 24 Feb 2007)
+New Revision: 782
+
+Modified:
+   trunk/usr/target.c
+   trunk/usr/target.h
+Log:
+Rename struct cmd to scsi_cmd
+
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-02-24 03:18:09 UTC (rev 781)
++++ trunk/usr/target.c	2007-02-24 13:22:22 UTC (rev 782)
+@@ -124,9 +124,9 @@
+ 	return NULL;
+ }
+ 
+-static struct cmd *cmd_lookup(struct target *target, uint64_t tag)
++static struct scsi_cmd *cmd_lookup(struct target *target, uint64_t tag)
+ {
+-	struct cmd *cmd;
++	struct scsi_cmd *cmd;
+ 	struct list_head *list = &target->cmd_hash_list[hashfn(tag)];
+ 	list_for_each_entry(cmd, list, c_hlist) {
+ 		if (cmd->tag == tag)
+@@ -135,13 +135,13 @@
+ 	return NULL;
+ }
+ 
+-static void cmd_hlist_insert(struct target *target, struct cmd *cmd)
++static void cmd_hlist_insert(struct target *target, struct scsi_cmd *cmd)
+ {
+ 	struct list_head *list = &target->cmd_hash_list[hashfn(cmd->tag)];
+ 	list_add(&cmd->c_hlist, list);
+ }
+ 
+-static void cmd_hlist_remove(struct cmd *cmd)
++static void cmd_hlist_remove(struct scsi_cmd *cmd)
+ {
+ 	list_del(&cmd->c_hlist);
+ }
+@@ -346,7 +346,7 @@
+ 	return err;
+ }
+ 
+-static int cmd_enabled(struct tgt_cmd_queue *q, struct cmd *cmd)
++static int cmd_enabled(struct tgt_cmd_queue *q, struct scsi_cmd *cmd)
+ {
+ 	int enabled = 0;
+ 
+@@ -377,7 +377,7 @@
+ 	return enabled;
+ }
+ 
+-static void cmd_post_perform(struct tgt_cmd_queue *q, struct cmd *cmd,
++static void cmd_post_perform(struct tgt_cmd_queue *q, struct scsi_cmd *cmd,
+ 			     unsigned long uaddr, int len, uint8_t mmapped)
+ {
+ 	cmd->uaddr = uaddr;
+@@ -401,7 +401,7 @@
+ 	struct target *target;
+ 	struct tgt_cmd_queue *q;
+ 	struct it_nexus *nexus;
+-	struct cmd *cmd;
++	struct scsi_cmd *cmd;
+ 	int result, enabled = 0, async, len = 0;
+ 	uint64_t offset, dev_id;
+ 	uint8_t mmapped = 0;
+@@ -492,7 +492,7 @@
+ 
+ void target_cmd_io_done(void *key, int result)
+ {
+-	struct cmd *cmd = (struct cmd *) key;
++	struct scsi_cmd *cmd = (struct scsi_cmd *) key;
+ 
+ 	/* TODO: sense in case of error. */
+ 	tgt_drivers[cmd->c_target->lid]->cmd_end_notify(cmd->cmd_nexus_id,
+@@ -504,7 +504,7 @@
+ 
+ static void post_cmd_done(struct tgt_cmd_queue *q)
+ {
+-	struct cmd *cmd, *tmp;
++	struct scsi_cmd *cmd, *tmp;
+ 	int enabled, result, async, len = 0;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	uint64_t offset;
+@@ -544,7 +544,7 @@
+ 	}
+ }
+ 
+-static void __cmd_done(struct target *target, struct cmd *cmd)
++static void __cmd_done(struct target *target, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_cmd_queue *q;
+ 	int err, do_munmap;
+@@ -588,7 +588,7 @@
+ void target_cmd_done(uint64_t nid, uint64_t tag)
+ {
+ 	struct target *target;
+-	struct cmd *cmd;
++	struct scsi_cmd *cmd;
+ 	struct mgmt_req *mreq;
+ 
+ 	target = target_lookup(NID2TID(nid));
+@@ -616,7 +616,7 @@
+ }
+ 
+ static int abort_cmd(struct target* target, struct mgmt_req *mreq,
+-		     struct cmd *cmd)
++		     struct scsi_cmd *cmd)
+ {
+ 	int err = 0;
+ 
+@@ -641,7 +641,7 @@
+ static int abort_task_set(struct mgmt_req *mreq, struct target* target,
+ 			  uint64_t nexus_id, uint64_t tag, uint8_t *lun, int all)
+ {
+-	struct cmd *cmd, *tmp;
++	struct scsi_cmd *cmd, *tmp;
+ 	int i, err, count = 0;
+ 
+ 	eprintf("found %" PRIx64 " %d\n", tag, all);
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-02-24 03:18:09 UTC (rev 781)
++++ trunk/usr/target.h	2007-02-24 13:22:22 UTC (rev 782)
+@@ -73,7 +73,7 @@
+ 	char *info;
+ };
+ 
+-struct cmd {
++struct scsi_cmd {
+ 	struct target *c_target;
+ 	/* linked target->cmd_hash_list */
+ 	struct list_head c_hlist;
+@@ -128,15 +128,15 @@
+ QUEUE_FNS(DELETED, deleted)
+ 
+ #define CMD_FNS(bit, name)						\
+-static inline void set_cmd_##name(struct cmd *c)			\
++static inline void set_cmd_##name(struct scsi_cmd *c)			\
+ {									\
+ 	(c)->state |= (1UL << TGT_CMD_##bit);				\
+ }									\
+-static inline void clear_cmd_##name(struct cmd *c)			\
++static inline void clear_cmd_##name(struct scsi_cmd *c)			\
+ {									\
+ 	(c)->state &= ~(1UL << TGT_CMD_##bit);				\
+ }									\
+-static inline int cmd_##name(const struct cmd *c)			\
++static inline int cmd_##name(const struct scsi_cmd *c)			\
+ {									\
+ 	return ((c)->state & (1UL << TGT_CMD_##bit));			\
+ }
+
+
+
+From tomo at mail.berlios.de  Sat Feb 24 16:24:11 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sat, 24 Feb 2007 16:24:11 +0100
+Subject: [Stgt-svn] r783 - trunk/usr
+Message-ID: <200702241524.l1OFOBZF025586@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-24 16:24:10 +0100 (Sat, 24 Feb 2007)
+New Revision: 783
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+I tried to separate scsi stuff from target.[hc] because we thought
+about non-scsi protocols too. However, all we care about is SCSI. So
+stop all crazy stuff like passing over 16 arguments to
+scsi_cmd_perform. This is just the first try. There are tons of things
+to clean up.
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/scsi.c	2007-02-24 15:24:10 UTC (rev 783)
+@@ -24,6 +24,7 @@
+ #include "list.h"
+ #include "util.h"
+ #include "tgtd.h"
++#include "target.h"
+ #include "driver.h"
+ #include "scsi.h"
+ 
+@@ -478,14 +479,25 @@
+ 	return fn(p);
+ }
+ 
+-int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu,
+-		     int *len, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+-		     struct tgt_device *dev, struct list_head *dev_list, int *async,
+-		     void *key, bkio_submit_t *submit)
++int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key)
+ {
++	struct target *target = cmd->c_target;
+ 	int result = SAM_STAT_GOOD;
+-	uint8_t *data = NULL, *scb = pdu;
++	int lid = target->lid;
++	uint8_t *rw = &cmd->rw;
++	uint8_t *data = NULL;
++	uint8_t *scb = cmd->scb;
++	uint32_t datalen = cmd->len;
++	int *try_map = &cmd->mmapped;
++	uint64_t *offset = &cmd->offset;
++	uint8_t *lun_buf = cmd->lun;
++	int *len = &cmd->len;
++	int *async = &cmd->async;
++	uint64_t nid = cmd->cmd_nexus_id;
++	unsigned long *uaddr = (unsigned long *)&cmd->uaddr;
++	struct tgt_device *dev = cmd->dev;
++	struct list_head *dev_list = &target->device_list;
++	bkio_submit_t *submit = target->bdt->bd_cmd_submit;
+ 
+ 	dprintf("%x %u\n", scb[0], datalen);
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/target.c	2007-02-24 15:24:10 UTC (rev 783)
+@@ -377,13 +377,8 @@
+ 	return enabled;
+ }
+ 
+-static void cmd_post_perform(struct tgt_cmd_queue *q, struct scsi_cmd *cmd,
+-			     unsigned long uaddr, int len, uint8_t mmapped)
++static void cmd_post_perform(struct tgt_cmd_queue *q, struct scsi_cmd *cmd)
+ {
+-	cmd->uaddr = uaddr;
+-	cmd->len = len;
+-	cmd->mmapped = mmapped;
+-
+ 	q->active_cmd++;
+ 	switch (cmd->attribute) {
+ 	case MSG_ORDERED_TAG:
+@@ -402,9 +397,8 @@
+ 	struct tgt_cmd_queue *q;
+ 	struct it_nexus *nexus;
+ 	struct scsi_cmd *cmd;
+-	int result, enabled = 0, async, len = 0;
+-	uint64_t offset, dev_id;
+-	uint8_t mmapped = 0;
++	int result, enabled = 0;
++	uint64_t dev_id;
+ 
+ 	nexus = it_nexus_lookup(nid);
+ 	if (!nexus) {
+@@ -423,6 +417,11 @@
+ 	cmd->c_target = target;
+ 	cmd->attribute = attribute;
+ 	cmd->tag = tag;
++	cmd->uaddr = uaddr;
++	cmd->len = data_len;
++	memcpy(cmd->scb, scb, sizeof(cmd->scb));
++	memcpy(cmd->lun, lun, sizeof(cmd->lun));
++
+ 	cmd_hlist_insert(target, cmd);
+ 
+ 	dev_id = scsi_get_devid(target->lid, lun);
+@@ -432,11 +431,13 @@
+ 
+ 	/* FIXME */
+ 	if (target->target_iotype == SCSI_TARGET_RAWIO) {
+-		memcpy(cmd->scb, scb, sizeof(cmd->scb));
+ 		dprintf("%u %s\n", scb[0], cmd->dev ? "do sg" : "fake");
+ 
+ 		/* we can't pass through REPORT_LUNS. */
+ 		if (cmd->dev && scb[0] != REPORT_LUNS) {
++			uint64_t offset = 0;
++			int async = 0;
++
+ 			target->bdt->bd_cmd_submit(cmd->dev, cmd->scb, rw,
+ 						   data_len, &uaddr, offset,
+ 						   &async, (void *) cmd);
+@@ -456,34 +457,23 @@
+ 		enabled = cmd_enabled(q, cmd);
+ 
+ 	if (enabled) {
+-		result = scsi_cmd_perform(target->tid, target->lid,
+-					  nexus->host_no, scb,
+-					  &len, data_len,
+-					  &uaddr, &rw, &mmapped, &offset,
+-					  lun, cmd->dev,
+-					  &target->device_list, &async, (void *) cmd,
+-					  target->bdt->bd_cmd_submit);
++		result = scsi_cmd_perform(nexus->host_no, cmd, (void *)cmd);
+ 
+-		cmd_post_perform(q, cmd, uaddr, len, mmapped);
++		cmd_post_perform(q, cmd);
+ 
+-		dprintf("%" PRIx64 " %x %lx %" PRIu64 " %d %d %d\n",
+-			tag, scb[0], uaddr, offset, len, result, async);
++		dprintf("%" PRIx64 " %x %" PRIx64 " %" PRIu64 " %u %d %d\n",
++			tag, scb[0], cmd->uaddr, cmd->offset, cmd->len, result, cmd->async);
+ 
+-		cmd->rw = rw;
+ 		set_cmd_processed(cmd);
+-		if (!async)
+-			tgt_drivers[target->lid]->cmd_end_notify(nid, len, result,
+-								 rw, uaddr, tag);
++		if (!cmd->async)
++			tgt_drivers[target->lid]->cmd_end_notify(nid, cmd->len, result,
++								 cmd->rw, cmd->uaddr, tag);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf("blocked %" PRIx64 " %x %" PRIu64 " %d\n",
+ 			tag, scb[0], cmd->dev ? cmd->dev->lun : UINT64_MAX,
+ 			q->active_cmd);
+ 
+-		memcpy(cmd->scb, scb, sizeof(cmd->scb));
+-		memcpy(cmd->lun, lun, sizeof(cmd->lun));
+-		cmd->len = data_len;
+-		cmd->uaddr = uaddr;
+ 		list_add_tail(&cmd->qlist, &q->queue);
+ 	}
+ out:
+@@ -505,9 +495,7 @@
+ static void post_cmd_done(struct tgt_cmd_queue *q)
+ {
+ 	struct scsi_cmd *cmd, *tmp;
+-	int enabled, result, async, len = 0;
+-	uint8_t rw = 0, mmapped = 0;
+-	uint64_t offset;
++	int enabled, result;
+ 	int (* notify_fn)(uint64_t, int, int, int, uint64_t, uint64_t);
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &q->queue, qlist) {
+@@ -521,22 +509,12 @@
+ 
+ 			list_del(&cmd->qlist);
+ 			dprintf("perform %" PRIx64 " %x\n", cmd->tag, cmd->attribute);
+-			result = scsi_cmd_perform(cmd->c_target->tid,
+-						  cmd->c_target->lid,
+-						  nexus->host_no, cmd->scb,
+-						  &len, cmd->len,
+-						  (unsigned long *) &cmd->uaddr,
+-						  &rw, &mmapped, &offset,
+-						  cmd->lun, cmd->dev,
+-						  &cmd->c_target->device_list,
+-						  &async, (void *) cmd,
+-						  cmd->c_target->bdt->bd_cmd_submit);
+-			cmd->rw = rw;
+-			cmd_post_perform(q, cmd, cmd->uaddr, len, mmapped);
++			result = scsi_cmd_perform(nexus->host_no, cmd, (void *)cmd);
++			cmd_post_perform(q, cmd);
+ 			set_cmd_processed(cmd);
+-			if (!async) {
++			if (!cmd->async) {
+ 				notify_fn = tgt_drivers[cmd->c_target->lid]->cmd_end_notify;
+-				notify_fn(cmd->cmd_nexus_id, len, result, rw,
++				notify_fn(cmd->cmd_nexus_id, cmd->len, result, cmd->rw,
+ 					  cmd->uaddr, cmd->tag);
+ 			}
+ 		} else
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/target.h	2007-02-24 15:24:10 UTC (rev 783)
+@@ -1,6 +1,7 @@
+ #ifndef __TARGET_H__
+ #define __TARGET_H__
+ 
++#include <limits.h>
+ #define BITS_PER_LONG (ULONG_MAX == 0xFFFFFFFFUL ? 32 : 64)
+ #include <linux/hash.h>
+ 
+@@ -87,11 +88,13 @@
+ 
+ 	uint64_t cmd_nexus_id;
+ 	uint32_t data_len;
++	uint64_t offset;
+ 	uint8_t scb[16];
+ 	uint8_t lun[8];
+ 	int attribute;
+ 	uint64_t tag;
+-	int rw;
++	uint8_t rw;
++	int async;
+ 	struct mgmt_req *mreq;
+ };
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-24 13:22:22 UTC (rev 782)
++++ trunk/usr/tgtd.h	2007-02-24 15:24:10 UTC (rev 783)
+@@ -106,13 +106,10 @@
+ 
+ extern void target_cmd_io_done(void *key, int result);
+ 
+-extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
+-extern int scsi_cmd_perform(uint64_t nid, int lid, int host_no, uint8_t *pdu, int *len,
+-			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+-			    struct tgt_device *dev, struct list_head *dev_list,
+-			    int *async, void *key, bkio_submit_t *submit);
++struct scsi_cmd;
+ 
++extern uint64_t scsi_get_devid(int lid, uint8_t *pdu);
++extern int scsi_cmd_perform(int host_no, struct scsi_cmd *cmd, void *key);
+ extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq);
+ 
+
+
+
+From tomo at mail.berlios.de  Sun Feb 25 15:39:54 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sun, 25 Feb 2007 15:39:54 +0100
+Subject: [Stgt-svn] r784 - trunk/usr
+Message-ID: <200702251439.l1PEdsnK027111@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-25 15:39:50 +0100 (Sun, 25 Feb 2007)
+New Revision: 784
+
+Modified:
+   trunk/usr/bd_aio.c
+Log:
+Add pthread_cancel and pthread_join in bd_aio_close()
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2007-02-24 15:24:10 UTC (rev 783)
++++ trunk/usr/bd_aio.c	2007-02-25 14:39:50 UTC (rev 784)
+@@ -68,23 +68,29 @@
+ retry:
+ 	ret = read(info->command_fd[0], &command, sizeof(command));
+ 	if (ret < 0) {
+-		eprintf("AIO pthread will be dead.\n");
++		eprintf("AIO pthread will be dead, %m\n");
++		if (errno == EAGAIN || errno == EINTR)
++			goto retry;
++
+ 		goto out;
+ 	}
+ 
+ 	ret = io_getevents(info->ctx, 1, MAX_AIO_REQS, info->events, NULL);
+ 	nr = ret;
+-	if (nr) {
++	if (nr > 0) {
++	rewrite:
+ 		ret = write(info->done_fd[1], &nr, sizeof(nr));
+ 		if (ret < 0) {
+ 			eprintf("can't notify tgtd, %m\n");
+-			goto out;
++		if (errno == EAGAIN || errno == EINTR)
++			goto rewrite;
++
++		goto out;
+ 		}
+ 	}
+ 	goto retry;
+ out:
+-	/* TODO: this lu is going to be removed. */
+-	pthread_exit(&ret);
++	return NULL;
+ }
+ 
+ static void bs_aio_handler(int fd, int events, void *data)
+@@ -165,7 +171,8 @@
+ 
+ 	info = (struct bd_aio_info *) ((char *)dev + sizeof(*dev));
+ 
+-	/* FIXME: we should kill pthread */
++	pthread_cancel(info->aio_thread);
++	pthread_join(info->aio_thread, NULL);
+ 	io_destroy(info->ctx);
+ 	close(dev->fd);
+ }
+
+
+
+From tomo at mail.berlios.de  Sun Feb 25 17:39:20 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sun, 25 Feb 2007 17:39:20 +0100
+Subject: [Stgt-svn] r785 - trunk/usr
+Message-ID: <200702251639.l1PGdKvV008393@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-25 17:39:19 +0100 (Sun, 25 Feb 2007)
+New Revision: 785
+
+Modified:
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Move scsi_cmd structure from target.h to tgt.h to export it to
+llds. We really need to clean up header files. Some are exported for
+llds and some not.
+
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-02-25 14:39:50 UTC (rev 784)
++++ trunk/usr/target.h	2007-02-25 16:39:19 UTC (rev 785)
+@@ -74,30 +74,6 @@
+ 	char *info;
+ };
+ 
+-struct scsi_cmd {
+-	struct target *c_target;
+-	/* linked target->cmd_hash_list */
+-	struct list_head c_hlist;
+-	struct list_head qlist;
+-
+-	uint64_t uaddr;
+-	uint32_t len;
+-	int mmapped;
+-	struct tgt_device *dev;
+-	unsigned long state;
+-
+-	uint64_t cmd_nexus_id;
+-	uint32_t data_len;
+-	uint64_t offset;
+-	uint8_t scb[16];
+-	uint8_t lun[8];
+-	int attribute;
+-	uint64_t tag;
+-	uint8_t rw;
+-	int async;
+-	struct mgmt_req *mreq;
+-};
+-
+ enum {
+ 	TGT_QUEUE_BLOCKED,
+ 	TGT_QUEUE_DELETED,
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-25 14:39:50 UTC (rev 784)
++++ trunk/usr/tgtd.h	2007-02-25 16:39:19 UTC (rev 785)
+@@ -61,6 +61,33 @@
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
++struct scsi_cmd {
++	struct target *c_target;
++	/* linked target->cmd_hash_list */
++	struct list_head c_hlist;
++	struct list_head qlist;
++
++	uint64_t uaddr;
++	uint32_t len;
++	int mmapped;
++	struct tgt_device *dev;
++	unsigned long state;
++
++	uint64_t cmd_nexus_id;
++	uint32_t data_len;
++	uint64_t offset;
++	uint8_t scb[16];
++	uint8_t lun[8];
++	int attribute;
++	uint64_t tag;
++	uint8_t rw;
++	int async;
++	struct mgmt_req *mreq;
++
++#define SCSI_SENSE_BUFFERSIZE	96
++	unsigned char sense_buffer[SCSI_SENSE_BUFFERSIZE];
++};
++
+ #ifdef USE_KERNEL
+ extern int kreq_init(void);
+ #else
+
+
+
+From tomo at mail.berlios.de  Sun Feb 25 18:01:11 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Sun, 25 Feb 2007 18:01:11 +0100
+Subject: [Stgt-svn] r786 - in trunk/usr: . iscsi
+Message-ID: <200702251701.l1PH1BWl010460@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-25 18:01:03 +0100 (Sun, 25 Feb 2007)
+New Revision: 786
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+cmd_end_notify uses scsi_cmd structure directly. TODO: kill most of members in iscsi_task. We can do something like struct inode does.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/driver.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -17,8 +17,7 @@
+ 				uint8_t *, int *);
+ 	int (*scsi_inquiry)(struct tgt_device *, int, uint8_t *, uint8_t *,
+ 			    uint8_t *, int *);
+-	int (*cmd_end_notify)(uint64_t nid, int len, int result, int rw, uint64_t addr,
+-			      uint64_t tag);
++	int (*cmd_end_notify)(uint64_t nid, int result, struct scsi_cmd *);
+ 	int (*mgmt_end_notify)(uint64_t nid, uint64_t mid, int result);
+ 
+ 	struct backedio_template *default_bdt;
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/iscsi/iscsi.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -6,8 +6,7 @@
+ extern int iscsi_target_update(int, char *);
+ extern int iscsi_mgmt_account(uint32_t op, int tid, uint32_t uid, char *param,
+ 			      char *buf, int len);
+-extern int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw,
+-			       uint64_t addr, uint64_t tag);
++extern int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd);
+ extern int iscsi_tm_done(uint64_t nid, uint64_t mid, int result);
+ 
+ struct tgt_driver iscsi = {
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/iscsi/iscsid.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -874,27 +874,26 @@
+ 	iscsi_free_task(task);
+ }
+ 
+-int iscsi_scsi_cmd_done(uint64_t nid, int len, int result, int rw, uint64_t addr,
+-			uint64_t tag)
++int iscsi_scsi_cmd_done(uint64_t nid, int result, struct scsi_cmd *cmd)
+ {
+ 	struct iscsi_session *session;
+ 	struct iscsi_task *task;
+ 
+ 	dprintf("%" PRIu64 " %d %d %d %" PRIx64 " %" PRIx64 "\n", nid,
+-		len, result, rw, addr, tag);
++		cmd->len, result, cmd->rw, cmd->uaddr, cmd->tag);
+ 	session = session_lookup(nid);
+ 	if (!session)
+ 		return -EINVAL;
+ 
+ 	list_for_each_entry(task, &session->cmd_list, c_hlist) {
+-		if (task->tag == tag)
++		if (task->tag == cmd->tag)
+ 			goto found;
+ 	}
+-	eprintf("Cannot find a task %" PRIx64 "\n", tag);
++	eprintf("Cannot find a task %" PRIx64 "\n", cmd->tag);
+ 	return -EINVAL;
+ 
+ found:
+-	dprintf("found a task %" PRIx64 "\n", tag);
++	dprintf("found a task %" PRIx64 "\n", cmd->tag);
+ 
+ 	/*
+ 	 * Since the connection is closed we just free the task.
+@@ -907,10 +906,10 @@
+ 		return 0;
+ 	}
+ 
+-	task->addr = addr;
++	task->addr = cmd->uaddr;
+ 	task->result = result;
+-	task->len = len;
+-	task->rw = rw;
++	task->len = cmd->len;
++	task->rw = cmd->rw;
+ 
+ 	list_add_tail(&task->c_list, &task->conn->tx_clist);
+ 	tgt_event_modify(task->conn->fd, EPOLLIN | EPOLLOUT);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/target.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -466,8 +466,7 @@
+ 
+ 		set_cmd_processed(cmd);
+ 		if (!cmd->async)
+-			tgt_drivers[target->lid]->cmd_end_notify(nid, cmd->len, result,
+-								 cmd->rw, cmd->uaddr, tag);
++			tgt_drivers[target->lid]->cmd_end_notify(nid, result, cmd);
+ 	} else {
+ 		set_cmd_queued(cmd);
+ 		dprintf("blocked %" PRIx64 " %x %" PRIu64 " %d\n",
+@@ -486,9 +485,7 @@
+ 
+ 	/* TODO: sense in case of error. */
+ 	tgt_drivers[cmd->c_target->lid]->cmd_end_notify(cmd->cmd_nexus_id,
+-							cmd->len, result,
+-							cmd->rw, cmd->uaddr,
+-							cmd->tag);
++							result, cmd);
+ 	return;
+ }
+ 
+@@ -496,7 +493,6 @@
+ {
+ 	struct scsi_cmd *cmd, *tmp;
+ 	int enabled, result;
+-	int (* notify_fn)(uint64_t, int, int, int, uint64_t, uint64_t);
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &q->queue, qlist) {
+ 		enabled = cmd_enabled(q, cmd);
+@@ -513,9 +509,8 @@
+ 			cmd_post_perform(q, cmd);
+ 			set_cmd_processed(cmd);
+ 			if (!cmd->async) {
+-				notify_fn = tgt_drivers[cmd->c_target->lid]->cmd_end_notify;
+-				notify_fn(cmd->cmd_nexus_id, cmd->len, result, cmd->rw,
+-					  cmd->uaddr, cmd->tag);
++				tgt_drivers[cmd->c_target->lid]->cmd_end_notify(
++					cmd->cmd_nexus_id, result, cmd);
+ 			}
+ 		} else
+ 			break;
+@@ -610,8 +605,8 @@
+ 		err = -EBUSY;
+ 	} else {
+ 		__cmd_done(target, cmd);
+-		tgt_drivers[cmd->c_target->lid]->cmd_end_notify(cmd->cmd_nexus_id, 0,
+-								TASK_ABORTED, 0, 0, cmd->tag);
++		tgt_drivers[cmd->c_target->lid]->cmd_end_notify(cmd->cmd_nexus_id,
++								TASK_ABORTED, cmd);
+ 	}
+ 	return err;
+ }
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/tgtd.h	2007-02-25 17:01:03 UTC (rev 786)
+@@ -102,8 +102,8 @@
+ #endif
+ 
+ extern int kspace_send_tsk_mgmt_res(uint64_t nid, uint64_t mid, int result);
+-extern int kspace_send_cmd_res(uint64_t nid, int len, int result,
+-			       int rw, uint64_t addr, uint64_t tag);
++extern int kspace_send_cmd_res(uint64_t nid, int result, struct scsi_cmd *);
++
+ extern int ipc_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, char *args);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-25 16:39:19 UTC (rev 785)
++++ trunk/usr/tgtif.c	2007-02-25 17:01:03 UTC (rev 786)
+@@ -100,8 +100,7 @@
+ 	return kreq_send(&ev);
+ }
+ 
+-int kspace_send_cmd_res(uint64_t nid, int len, int result,
+-			int rw, uint64_t addr, uint64_t tag)
++int kspace_send_cmd_res(uint64_t nid, int result, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_event ev;
+ 
+@@ -109,11 +108,11 @@
+ 
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+ 	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+-	ev.p.cmd_rsp.len = len;
++	ev.p.cmd_rsp.len = cmd->len;
+ 	ev.p.cmd_rsp.result = result;
+-	ev.p.cmd_rsp.uaddr = addr;
+-	ev.p.cmd_rsp.rw = rw;
+-	ev.p.cmd_rsp.tag = tag;
++	ev.p.cmd_rsp.uaddr = cmd->uaddr;
++	ev.p.cmd_rsp.rw = cmd->rw;
++	ev.p.cmd_rsp.tag = cmd->tag;
+ 
+ 	return kreq_send(&ev);
+ }
+
+
+
+From tomo at mail.berlios.de  Mon Feb 26 07:48:14 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Mon, 26 Feb 2007 07:48:14 +0100
+Subject: [Stgt-svn] r787 - trunk/usr
+Message-ID: <200702260648.l1Q6mEwu016311@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-26 07:48:13 +0100 (Mon, 26 Feb 2007)
+New Revision: 787
+
+Modified:
+   trunk/usr/bd_sg.c
+Log:
+Fix sg compile problem.
+
+
+Modified: trunk/usr/bd_sg.c
+===================================================================
+--- trunk/usr/bd_sg.c	2007-02-25 17:01:03 UTC (rev 786)
++++ trunk/usr/bd_sg.c	2007-02-26 06:48:13 UTC (rev 787)
+@@ -51,7 +51,7 @@
+ 		return;
+ 
+ 	for (i = 0; i < err / sizeof(hdrs[0]); i++) {
+-		struct cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
++		struct scsi_cmd *cmd = (void *) (unsigned long) hdrs[i].usr_ptr;
+ 		if (hdrs[i].din_resid)
+ 			cmd->len = hdrs[i].din_resid;
+ 		target_cmd_io_done(cmd, 0);
+
+
+
+From tomo at mail.berlios.de  Tue Feb 27 08:59:38 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Tue, 27 Feb 2007 08:59:38 +0100
+Subject: [Stgt-svn] r788 - trunk/usr/iscsi
+Message-ID: <200702270759.l1R7xc9B020361@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-27 08:59:37 +0100 (Tue, 27 Feb 2007)
+New Revision: 788
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+Log:
+Add sense code to iscsi driver.
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-02-26 06:48:13 UTC (rev 787)
++++ trunk/usr/iscsi/iscsid.c	2007-02-27 07:59:37 UTC (rev 788)
+@@ -756,6 +756,41 @@
+ 	return 0;
+ }
+ 
++struct iscsi_sense_data {
++	uint16_t length;
++	uint8_t  data[0];
++} __packed;
++
++static int iscsi_sense_rsp_build(struct iscsi_task *task)
++{
++	struct iscsi_connection *conn = task->conn;
++	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &conn->rsp.bhs;
++	struct iscsi_sense_data *sense;
++	uint16_t sense_len = task->len;
++
++	memset(rsp, 0, sizeof(*rsp));
++	rsp->opcode = ISCSI_OP_SCSI_CMD_RSP;
++	rsp->itt = task->tag;
++	rsp->flags = ISCSI_FLAG_CMD_FINAL;
++	rsp->response = ISCSI_STATUS_CMD_COMPLETED;
++	rsp->cmd_status = SAM_STAT_CHECK_CONDITION;
++
++	sense = (void *) (unsigned long) task->addr;
++
++	/* FIXME: we assume that sense_buffer is large enough
++	 * (sense_len + 2 bytes). It's true now, but... */
++
++	memmove(sense->data, sense, sense_len);
++	sense->length = cpu_to_be16(sense_len);
++
++	conn->rsp.datasize = sense_len + sizeof(*sense);
++	hton24(rsp->dlength, sense_len + sizeof(*sense));
++	conn->rsp.data = (void *) (unsigned long) task->addr;
++	task->offset += sense_len + sizeof(*sense);
++
++	return 0;
++}
++
+ static int iscsi_data_rsp_build(struct iscsi_task *task)
+ {
+ 	struct iscsi_connection *conn = task->conn;
+@@ -1347,10 +1382,17 @@
+ 	if (task->r2t_count)
+ 		err = iscsi_r2t_build(task);
+ 	else {
++		/* Needs to clean up this mess. */
++
+ 		if (req->flags & ISCSI_FLAG_CMD_WRITE)
+-			err = iscsi_cmd_rsp_build(task);
++			if (task->result)
++				err = iscsi_sense_rsp_build(task);
++			else
++				err = iscsi_cmd_rsp_build(task);
+ 		else {
+-			if (task->len)
++			if (task->result)
++				err = iscsi_sense_rsp_build(task);
++			else if (task->len)
+ 				err = iscsi_data_rsp_build(task);
+ 			else
+ 				err = iscsi_cmd_rsp_build(task);
+
+
+
+From tomo at mail.berlios.de  Wed Feb 28 02:20:57 2007
+From: tomo at mail.berlios.de (tomo at BerliOS)
+Date: Wed, 28 Feb 2007 02:20:57 +0100
+Subject: [Stgt-svn] r789 - trunk/usr
+Message-ID: <200702280120.l1S1KvH8007786@sheep.berlios.de>
+
+Author: tomo
+Date: 2007-02-28 02:20:49 +0100 (Wed, 28 Feb 2007)
+New Revision: 789
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/tgtif.c
+Log:
+Fix 32/64 bit bugs that I introduced at r786.
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-27 07:59:37 UTC (rev 788)
++++ trunk/usr/scsi.c	2007-02-28 01:20:49 UTC (rev 789)
+@@ -494,7 +494,7 @@
+ 	int *len = &cmd->len;
+ 	int *async = &cmd->async;
+ 	uint64_t nid = cmd->cmd_nexus_id;
+-	unsigned long *uaddr = (unsigned long *)&cmd->uaddr;
++	unsigned long uaddr = cmd->uaddr;
+ 	struct tgt_device *dev = cmd->dev;
+ 	struct list_head *dev_list = &target->device_list;
+ 	bkio_submit_t *submit = target->bdt->bd_cmd_submit;
+@@ -587,10 +587,11 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = submit(dev, scb, *rw, datalen, uaddr, *offset, async, key);
++		result = submit(dev, scb, *rw, datalen, &uaddr, *offset, async, key);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
++			cmd->uaddr = uaddr;
+ 		} else {
+ 			*rw = READ;
+ 			*offset = 0;
+@@ -622,7 +623,7 @@
+ 
+ out:
+ 	if (data)
+-		*uaddr = (unsigned long) data;
++		cmd->uaddr = (unsigned long) data;
+ 
+ 	return result;
+ }
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-27 07:59:37 UTC (rev 788)
++++ trunk/usr/tgtif.c	2007-02-28 01:20:49 UTC (rev 789)
+@@ -106,6 +106,9 @@
+ 
+ 	memset(&ev, 0, sizeof(ev));
+ 
++	dprintf("%p %u %d %" PRIx64 " %u %" PRIu64 "\n", cmd,
++		cmd->len, result, cmd->uaddr, cmd->rw, cmd->tag);
++
+ 	ev.hdr.type = TGT_UEVENT_CMD_RSP;
+ 	ev.p.cmd_rsp.host_no = it_nexus_to_host_no(nid);
+ 	ev.p.cmd_rsp.len = cmd->len;
+
+
+

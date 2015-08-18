@@ -1,0 +1,136 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r600 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r600%20-%20trunk/usr&In-Reply-To=%3C200610310440.k9V4eGwU001812%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000586.html">
+   <LINK REL="Next"  HREF="000588.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r600 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r600%20-%20trunk/usr&In-Reply-To=%3C200610310440.k9V4eGwU001812%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r600 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Tue Oct 31 05:40:16 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000586.html">[Stgt-svn] r599 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000588.html">[Stgt-svn] r601 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#587">[ date ]</a>
+              <a href="thread.html#587">[ thread ]</a>
+              <a href="subject.html#587">[ subject ]</a>
+              <a href="author.html#587">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-10-31 05:40:15 +0100 (Tue, 31 Oct 2006)
+New Revision: 600
+
+Modified:
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+Log:
+Fix REPORT_LUNS bugs
+
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-10-25 12:48:40 UTC (rev 599)
++++ trunk/usr/scsi.c	2006-10-31 04:40:15 UTC (rev 600)
+@@ -267,7 +267,7 @@
+ {
+ 	struct tgt_device *dev;
+ 	uint64_t lun, *data = (uint64_t *) p;
+-	int idx, alen, oalen, nr_luns, rbuflen = 4096;
++	int idx, alen, oalen, nr_luns, rbuflen = 4096, overflow;
+ 	int result = SAM_STAT_GOOD;
+ 
+ 	memset(data, 0, rbuflen);
+@@ -287,18 +287,22 @@
+ 	idx = 1;
+ 	nr_luns = 0;
+ 
++	overflow = 0;
+ 	list_for_each_entry(dev, dev_list, d_list) {
++		nr_luns++;
++
++		if (overflow)
++			continue;
++
+ 		lun = dev-&gt;lun;
+-
+ 		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16);
+ 		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32);
+ 		if (!(alen -= 8))
+-			break;
++			overflow = 1;
+ 		if (!(rbuflen -= 8)) {
+ 			fprintf(stderr, &quot;FIXME: too many luns\n&quot;);
+ 			exit(-1);
+ 		}
+-		nr_luns++;
+ 	}
+ 
+ 	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+@@ -502,6 +506,7 @@
+ 		result = inquiry(lid, dev, host_no, lun_buf, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
++		*len = datalen;
+ 		result = report_luns(lid, dev_list, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-10-25 12:48:40 UTC (rev 599)
++++ trunk/usr/target.c	2006-10-31 04:40:15 UTC (rev 600)
+@@ -295,8 +295,8 @@
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+-		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d %d\n&quot;,
+-			tag, scb[0], uaddr, offset, result, async);
++		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d %d %d\n&quot;,
++			tag, scb[0], uaddr, offset, len, result, async);
+ 
+ 		cmd-&gt;rw = rw;
+ 		set_cmd_processed(cmd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000586.html">[Stgt-svn] r599 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000588.html">[Stgt-svn] r601 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#587">[ date ]</a>
+              <a href="thread.html#587">[ thread ]</a>
+              <a href="subject.html#587">[ subject ]</a>
+              <a href="author.html#587">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

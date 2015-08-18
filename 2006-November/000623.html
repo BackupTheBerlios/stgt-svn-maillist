@@ -1,0 +1,181 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r636%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200611110502.kAB52DOK023796%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000622.html">
+   <LINK REL="Next"  HREF="000624.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r636%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200611110502.kAB52DOK023796%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Nov 11 06:02:13 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000622.html">[Stgt-svn] r635 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000624.html">[Stgt-svn] r637 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#623">[ date ]</a>
+              <a href="thread.html#623">[ thread ]</a>
+              <a href="subject.html#623">[ subject ]</a>
+              <a href="author.html#623">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-11 06:02:13 +0100 (Sat, 11 Nov 2006)
+New Revision: 636
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/tgtd.c
+Log:
+Add kernel interface check.
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-11 04:56:21 UTC (rev 635)
++++ trunk/usr/driver.h	2006-11-11 05:02:13 UTC (rev 636)
+@@ -2,6 +2,7 @@
+ 
+ struct tgt_driver {
+ 	const char *name;
++	int use_kernel;
+ 
+ 	int (*init) (void);
+ 
+@@ -19,9 +20,6 @@
+ 			      uint64_t tag);
+ 	int (*mgmt_end_notify)(int host_no, uint64_t mid, int result);
+ 
+-	int enable;
+-	int pfd_index;
+-
+ 	struct backedio_template *bdt;
+ };
+ 
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-11-11 04:56:21 UTC (rev 635)
++++ trunk/usr/ibmvio/ibmvio.h	2006-11-11 05:02:13 UTC (rev 636)
+@@ -7,6 +7,7 @@
+ 
+ struct tgt_driver ibmvio = {
+ 	.name			= &quot;ibmvio&quot;,
++	.use_kernel		= 1,
+ 	.scsi_get_lun		= scsi_lun_to_int,
+ 	.scsi_report_luns	= scsi_report_luns,
+ 	.scsi_inquiry		= scsi_inquiry,
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-11 04:56:21 UTC (rev 635)
++++ trunk/usr/iscsi/iscsi.h	2006-11-11 05:02:13 UTC (rev 636)
+@@ -9,6 +9,7 @@
+ 
+ struct tgt_driver iscsi = {
+ 	.name			= &quot;iscsi&quot;,
++	.use_kernel		= 0,
+ 	.init			= iscsi_init,
+ 	.target_create		= iscsi_target_create,
+ 	.target_destroy		= iscsi_target_destroy,
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-11-11 04:56:21 UTC (rev 635)
++++ trunk/usr/tgtd.c	2006-11-11 05:02:13 UTC (rev 636)
+@@ -234,7 +234,7 @@
+ 		goto retry;
+ }
+ 
+-static int lld_init(void)
++static int lld_init(int *use_kernel)
+ {
+ 	int i, err, nr;
+ 
+@@ -243,7 +243,8 @@
+ 			err = tgt_drivers[i]-&gt;init();
+ 			if (err)
+ 				continue;
+-			tgt_drivers[i]-&gt;enable = 1;
++			if (tgt_drivers[i]-&gt;use_kernel)
++				*use_kernel++;
+ 			nr++;
+ 		}
+ 	}
+@@ -257,6 +258,7 @@
+ 	struct sigaction sa_new;
+ 	int err, ch, longindex, nr_lld = 0, maxfds = MAX_FDS;
+ 	int is_daemon = 1, is_debug = 0;
++	int use_kernel = 0;
+ 
+ 	/* do not allow ctrl-c for now... */
+ 	sa_new.sa_handler = signal_catch;
+@@ -293,8 +295,7 @@
+ 		exit(1);
+ 	}
+ 
+-
+-	nr_lld = lld_init();
++	nr_lld = lld_init(&amp;use_kernel);
+ 	if (!nr_lld) {
+ 		fprintf(stderr, &quot;No available low level driver!\n&quot;);
+ 		exit(1);
+@@ -309,9 +310,13 @@
+ 	if (err)
+ 		exit(1);
+ 
+-	err = kreq_init();
+-	if (err)
+-		eprintf(&quot;No kernel interface\n&quot;);
++	if (use_kernel) {
++		err = kreq_init();
++		if (err) {
++			eprintf(&quot;No kernel interface\n&quot;);
++			exit(1);
++		}
++	}
+ 
+ 	err = ipc_init();
+ 	if (err)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000622.html">[Stgt-svn] r635 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000624.html">[Stgt-svn] r637 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#623">[ date ]</a>
+              <a href="thread.html#623">[ thread ]</a>
+              <a href="subject.html#623">[ subject ]</a>
+              <a href="author.html#623">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

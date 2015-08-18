@@ -1,0 +1,149 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r785 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r785%20-%20trunk/usr&In-Reply-To=%3C200702251639.l1PGdKvV008393%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000771.html">
+   <LINK REL="Next"  HREF="000773.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r785 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r785%20-%20trunk/usr&In-Reply-To=%3C200702251639.l1PGdKvV008393%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r785 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Feb 25 17:39:20 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000771.html">[Stgt-svn] r784 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000773.html">[Stgt-svn] r786 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#772">[ date ]</a>
+              <a href="thread.html#772">[ thread ]</a>
+              <a href="subject.html#772">[ subject ]</a>
+              <a href="author.html#772">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-25 17:39:19 +0100 (Sun, 25 Feb 2007)
+New Revision: 785
+
+Modified:
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Move scsi_cmd structure from target.h to tgt.h to export it to
+llds. We really need to clean up header files. Some are exported for
+llds and some not.
+
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2007-02-25 14:39:50 UTC (rev 784)
++++ trunk/usr/target.h	2007-02-25 16:39:19 UTC (rev 785)
+@@ -74,30 +74,6 @@
+ 	char *info;
+ };
+ 
+-struct scsi_cmd {
+-	struct target *c_target;
+-	/* linked target-&gt;cmd_hash_list */
+-	struct list_head c_hlist;
+-	struct list_head qlist;
+-
+-	uint64_t uaddr;
+-	uint32_t len;
+-	int mmapped;
+-	struct tgt_device *dev;
+-	unsigned long state;
+-
+-	uint64_t cmd_nexus_id;
+-	uint32_t data_len;
+-	uint64_t offset;
+-	uint8_t scb[16];
+-	uint8_t lun[8];
+-	int attribute;
+-	uint64_t tag;
+-	uint8_t rw;
+-	int async;
+-	struct mgmt_req *mreq;
+-};
+-
+ enum {
+ 	TGT_QUEUE_BLOCKED,
+ 	TGT_QUEUE_DELETED,
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-02-25 14:39:50 UTC (rev 784)
++++ trunk/usr/tgtd.h	2007-02-25 16:39:19 UTC (rev 785)
+@@ -61,6 +61,33 @@
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
++struct scsi_cmd {
++	struct target *c_target;
++	/* linked target-&gt;cmd_hash_list */
++	struct list_head c_hlist;
++	struct list_head qlist;
++
++	uint64_t uaddr;
++	uint32_t len;
++	int mmapped;
++	struct tgt_device *dev;
++	unsigned long state;
++
++	uint64_t cmd_nexus_id;
++	uint32_t data_len;
++	uint64_t offset;
++	uint8_t scb[16];
++	uint8_t lun[8];
++	int attribute;
++	uint64_t tag;
++	uint8_t rw;
++	int async;
++	struct mgmt_req *mreq;
++
++#define SCSI_SENSE_BUFFERSIZE	96
++	unsigned char sense_buffer[SCSI_SENSE_BUFFERSIZE];
++};
++
+ #ifdef USE_KERNEL
+ extern int kreq_init(void);
+ #else
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000771.html">[Stgt-svn] r784 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000773.html">[Stgt-svn] r786 - in trunk/usr: . iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#772">[ date ]</a>
+              <a href="thread.html#772">[ thread ]</a>
+              <a href="subject.html#772">[ subject ]</a>
+              <a href="author.html#772">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

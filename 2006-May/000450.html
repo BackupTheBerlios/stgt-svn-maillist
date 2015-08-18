@@ -1,0 +1,128 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r463%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061547.k46FlYYK029028%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000449.html">
+   <LINK REL="Next"  HREF="000451.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r463%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605061547.k46FlYYK029028%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r463 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat May  6 17:47:34 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000449.html">[Stgt-svn] r462 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000451.html">[Stgt-svn] r464 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#450">[ date ]</a>
+              <a href="thread.html#450">[ thread ]</a>
+              <a href="subject.html#450">[ subject ]</a>
+              <a href="author.html#450">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-06 17:47:33 +0200 (Sat, 06 May 2006)
+New Revision: 463
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+Log:
+Fix responses without data.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 15:20:39 UTC (rev 462)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 15:47:33 UTC (rev 463)
+@@ -536,12 +536,18 @@
+ 		__kfifo_put(conn-&gt;xmitqueue, (void*)&amp;ctask, sizeof(void*));
+ 		scsi_queue_work(shost, &amp;conn-&gt;xmitwork);
+ 	} else {
+-		done(scmd);
+-		spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+-		__kfifo_put(conn-&gt;session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
+-		scmd-&gt;sc_data_direction = DMA_TO_DEVICE;
+-		iscsi_tcp_cleanup_ctask(ctask-&gt;conn, ctask);
+-		spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
++		if (scmd-&gt;request_bufflen) {
++			done(scmd);
++			spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
++			__kfifo_put(conn-&gt;session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
++			scmd-&gt;sc_data_direction = DMA_TO_DEVICE;
++			iscsi_tcp_cleanup_ctask(ctask-&gt;conn, ctask);
++			spin_unlock_bh(&amp;conn-&gt;session-&gt;lock);
++		} else {
++			scmd-&gt;done = done;
++			__kfifo_put(ctask-&gt;conn-&gt;xmitqueue, (void*)&amp;ctask, sizeof(void*));
++			scsi_queue_work(shost, &amp;ctask-&gt;conn-&gt;xmitwork);
++		}
+ 	}
+ 	return 0;
+ }
+@@ -629,7 +635,7 @@
+ 			hdr-&gt;statsn = cpu_to_be32(ctask-&gt;conn-&gt;exp_statsn++);
+ 			hdr-&gt;exp_cmdsn = cpu_to_be32(session-&gt;exp_cmdsn);
+ 			hdr-&gt;max_cmdsn =
+-				cpu_to_be32(session-&gt;exp_cmdsn + session-&gt;max_cmdsn / 2);
++				cpu_to_be32(session-&gt;exp_cmdsn + session-&gt;cmds_max / 2);
+ 			hdr-&gt;datasn = cpu_to_be32(ctask-&gt;datasn++);
+ 
+ 			/* FIXME: multiple data rsp (conn-&gt;max_xmit_dlength) */
+@@ -652,7 +658,7 @@
+ 			hdr-&gt;statsn = cpu_to_be32(ctask-&gt;conn-&gt;exp_statsn++);
+ 			hdr-&gt;exp_cmdsn = cpu_to_be32(session-&gt;exp_cmdsn);
+ 			hdr-&gt;max_cmdsn =
+-				cpu_to_be32(session-&gt;exp_cmdsn + session-&gt;max_cmdsn / 2);
++				cpu_to_be32(session-&gt;exp_cmdsn + session-&gt;cmds_max / 2);
+ 		}
+ 		break;
+ 	}
+@@ -738,7 +744,7 @@
+ 
+ 	sc-&gt;done(sc);
+ 
+-	if (sc-&gt;sc_data_direction == DMA_TO_DEVICE) {
++	if (sc-&gt;sc_data_direction == DMA_TO_DEVICE || !sc-&gt;request_bufflen) {
+ 		spin_lock_bh(&amp;conn-&gt;session-&gt;lock);
+ 		__kfifo_put(conn-&gt;session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
+ 		/* fool iscsi_tcp_cleanup_ctask */
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000449.html">[Stgt-svn] r462 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000451.html">[Stgt-svn] r464 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#450">[ date ]</a>
+              <a href="thread.html#450">[ thread ]</a>
+              <a href="subject.html#450">[ subject ]</a>
+              <a href="author.html#450">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

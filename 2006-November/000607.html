@@ -1,0 +1,229 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r620 - in trunk: . doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r620%20-%20in%20trunk%3A%20.%20doc&In-Reply-To=%3C200611081026.kA8AQfOe013048%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000606.html">
+   <LINK REL="Next"  HREF="000608.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r620 - in trunk: . doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r620%20-%20in%20trunk%3A%20.%20doc&In-Reply-To=%3C200611081026.kA8AQfOe013048%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r620 - in trunk: . doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov  8 11:26:41 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000606.html">[Stgt-svn] r619 - trunk/patch
+</A></li>
+        <LI>Next message: <A HREF="000608.html">[Stgt-svn] r621 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#607">[ date ]</a>
+              <a href="thread.html#607">[ thread ]</a>
+              <a href="subject.html#607">[ subject ]</a>
+              <a href="author.html#607">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-08 11:26:40 +0100 (Wed, 08 Nov 2006)
+New Revision: 620
+
+Modified:
+   trunk/README
+   trunk/doc/README.iscsi
+Log:
+Update main and iSCSI documents
+
+
+Modified: trunk/README
+===================================================================
+--- trunk/README	2006-11-08 09:21:28 UTC (rev 619)
++++ trunk/README	2006-11-08 10:26:40 UTC (rev 620)
+@@ -1,83 +1,48 @@
+ Introduction
+ -------------
+-Note that linux target framework (tgt) is under active
+-development. Don't play with important data.
++Linux target framework (tgt) aims to simplify various SCSI target
++driver (iSCSI, Fibre Channel, SRP, etc) creation and maintenance.
+ 
+-Currently, tgt supports only one low level driver, IBM VIO server
+-(ibmvstgt).
++Tgt consists of kernel modules, user-space daemon, and user-space
++tools. Some target drivers uses all of them and some use only
++user-space daemon and tools (i.e. they completely runs in user space).
+ 
++Currently, tgt supports three target drivers:
+ 
+-Starting
+--------------
+-The software consists of kernel modules and user-space tools (daemon,
+-management tool, dynamic libraries).
++- IBM VIO server (ibmvstgt)
++- iSCSI
++- Xen vscsifront/back
+ 
+-First, get kernel sources from James's scsi-rc-fixes-2.6 git tree:
++Note that tgt is under active development. Don't play with important
++data.
+ 
+-master.kernel.org:/pub/scm/linux/kernel/git/jejb/scsi-target-2.6.git
+ 
+-Second, if you use ibmvstgt, apply scsi-target-2.6-tree.diff in the
+-patchset directory. If not, you can skip this.
+-
+-Third, rebuild the kernel, and reboot with the new kernel.
+-
+-The compilation of the kernel modules require the path to above kernel
+-source:
+-
+-host:~/use-scsi-ml$ make KERNELSRC=&lt;kernel-src&gt;
+-
+-Make sure that everything is built successfully. Now you can load the
+-kernel modules by typing the followings.
+-
+-host:~/use-scsi-ml$ su
+-host:~/use-scsi-ml# ./initd start
+-
+-See /var/log/kern.log (your Linux distributions may use the different
+-log file name) to make sure that the kernel modules are loaded
+-properly. You should see messages like the followings:
+-
+-Feb 27 19:37:52 lilac kernel: IBM eServer i/pSeries Virtual SCSI Target Driver
+-Feb 27 19:37:52 lilac kernel: vio_register_driver: driver ibmvscsi registering
+-Feb 27 19:37:52 lilac kernel: scsi1 : ibmvstgt
+-
+-You need the scsi host number (it is 1 in this example) in the next
+-stage (configuration).
+-
+-
+-Configuration
++Preparation
+ -------------
++First, get kernel sources from linux-2.6-target git tree:
+ 
+-Everyting is configured via the tgtadm management tool. Currenlty, tgt
+-does not support persistent configurations. You can use a makeshift
+-script, 'ibmv' to do the necessary job.
++master.kernel.org:/pub/scm/linux/kernel/git/tomo/linux-2.6-target.git
+ 
+-Note that the ibmv script exports /dev/sdb1 to initiators as LUN 0 by
+-defaults. You MUST change the device path if your /dev/sdb1 stores
+-important data or your box does not have /dev/sdb1.
++Second, apply epoll-git.diff in the patchset directory.
+ 
+-host:~/use-scsi-ml# ./ibmv 1
++Third, rebuild the kernel and reboot with the new kernel. Note if you
++plan to use the IBM VIO target driver, please enable SCSI_TGT,
++SCSI_SRP, and SCSI_IBMVSCSIS kernel options.
+ 
+-You need to specify the scsi host number as the first argument.
++Now you are ready to build target drivers. If you like to use the
++iSCSI target driver:
+ 
+-Please see /var/log/daemon.log (your Linux distributions may use the
+-different log file name again) to make sure that everything is
+-fine. You should see something like the followings:
++host:~/tgt$ make KERNELSRC=&lt;kernel-src&gt; ISCSI=1
+ 
+-Feb 27 22:36:40 lilac tgtd: dl_init(71) istgt library is not loaded.
+-Feb 27 22:36:40 lilac tgtd: dl_init(71) ibmvstgt library is not loaded.
+-Feb 27 22:37:08 lilac tgtd: tgt_target_create(572) Succeed to create a new target 1
+-Feb 27 22:37:08 lilac tgtd: tgt_target_bind(517) Succeed to bind the target 1 to the scsi host 1
+-Feb 27 22:37:08 lilac tgtd: tgt_device_create(238) Succeed to add a logical unit 0 to the target 1
++Or if you like to use the IBM VIO target driver:
+ 
++host:~/tgt$ make KERNELSRC=&lt;kernel-src&gt; IBMVIO=1
+ 
+-Now you are ready. Boot up VIO clients.
++Make sure that everything is built successfully.
+ 
+-Note that the tgt kernel modules enable the debug option by
+-defaults. We are not ready for improving performance.
++Now you can run tgt. Target drivers have their own ways for
++configuration. So find an appropriate documentation in the doc
++directory.
+ 
+ 
+-Stopping
+--------------
+-Simply execute:
+-
+-host:~/use-scsi-ml# ./initd stop
++FUJITA Tomonori and Mike Christie
+
+Modified: trunk/doc/README.iscsi
+===================================================================
+--- trunk/doc/README.iscsi	2006-11-08 09:21:28 UTC (rev 619)
++++ trunk/doc/README.iscsi	2006-11-08 10:26:40 UTC (rev 620)
+@@ -1,14 +1,3 @@
+-Installation
+--------------
+-This driver runs in user-space, however, you still need tgt header
+-files and kernel modifications. So get the latest code from the
+-linux-2.6-target git tree. Then, apply aiopoll-2.6.18-rc4.diff in the
+-patch directory, rebuild the kernel, and reboot with the new kernel.
+-After the reboot, compile the source code:
+-
+-make KSRC=&lt;kernel-src&gt; ISCSI=1
+-
+-
+ Starting
+ -------------
+ Try the following commands:
+@@ -19,8 +8,7 @@
+ 
+ Configuration
+ -------------
+-Now there is no handy way for the configuration. Everyting is
+-configured via the tgtadm management tool after you run tgt daemon.
++Everyting is configured via the tgtadm management tool after you run tgt daemon.
+ 
+ The following example creates a target with id 1 (the iqn is
+ iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz) and adds a
+@@ -30,7 +18,9 @@
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
+ host:~/tgt# ./usr/tgtadm --lld iscsi --op new --tid 1 --lun 0 --params Path=/dev/hdc1
+ 
++iSCSI parameters are not configurable yet.
+ 
++
+ Status
+ -------------
+ It should work under normal circumstances (good initiator, no network
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000606.html">[Stgt-svn] r619 - trunk/patch
+</A></li>
+	<LI>Next message: <A HREF="000608.html">[Stgt-svn] r621 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#607">[ date ]</a>
+              <a href="thread.html#607">[ thread ]</a>
+              <a href="subject.html#607">[ subject ]</a>
+              <a href="author.html#607">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

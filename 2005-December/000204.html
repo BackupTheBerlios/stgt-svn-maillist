@@ -1,0 +1,674 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r217 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r217%20-%20trunk/kernel&In-Reply-To=%3C200512300434.jBU4Yjaj006320%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000203.html">
+   <LINK REL="Next"  HREF="000205.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r217 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r217%20-%20trunk/kernel&In-Reply-To=%3C200512300434.jBU4Yjaj006320%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r217 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Dec 30 05:34:45 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000203.html">[Stgt-svn] r216 - in trunk/istgt: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000205.html">[Stgt-svn] r218 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#204">[ date ]</a>
+              <a href="thread.html#204">[ thread ]</a>
+              <a href="subject.html#204">[ subject ]</a>
+              <a href="author.html#204">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-30 05:34:42 +0100 (Fri, 30 Dec 2005)
+New Revision: 217
+
+Modified:
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_nl.c
+   trunk/kernel/tgt_target.h
+Log:
+Replace request_queue with a simple queue .
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-29 16:15:41 UTC (rev 216)
++++ trunk/kernel/tgt.c	2005-12-30 04:34:42 UTC (rev 217)
+@@ -14,6 +14,7 @@
+ #include &lt;linux/mempool.h&gt;
+ #include &lt;linux/blkdev.h&gt;
+ #include &lt;linux/file.h&gt;
++#include &lt;linux/hash.h&gt;
+ #include &lt;asm/scatterlist.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+@@ -146,67 +147,42 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_target_template_unregister);
+ 
+-static void tgt_request_fn(struct request_queue *q)
++static void tgt_cmd_uspace_queue(struct tgt_target *target, gfp_t gfp_mask)
+ {
++	unsigned long flags;
+ 	struct tgt_cmd *cmd;
+-	struct request *rq;
++	int err = 0;
+ 
+-	while ((rq = elv_next_request(q)) != NULL) {
+-		/* we need to set state or refcount under this lock! */
+-		cmd = rq-&gt;special;
+-		/*
+-		 * hit queue depth (command completion will run the
+-		 * queue again)
+-		 */
+-		if (blk_queue_tagged(q) &amp;&amp; blk_queue_start_tag(q, rq))
+-			break;
++retry:
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++	if (!list_empty(&amp;target-&gt;uspace_cmd_queue)) {
++		cmd = list_entry(target-&gt;uspace_cmd_queue.next,
++				 struct tgt_cmd, cqueue);
++		list_del(&amp;cmd-&gt;cqueue);
++		spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-		spin_unlock_irq(q-&gt;queue_lock);
+-
+-		dprintk(&quot;cmd %p tag %d\n&quot;, cmd, rq-&gt;tag);
+-
+-		/*
+-		 * TODO: build a vector of commands and then do the
+-	 	 * userspace send call
+-		 */
+-
+-		/* what should we do on failure here ? */
+-		if (tgt_uspace_cmd_send(cmd, GFP_ATOMIC) &lt; 0)
+-			eprintk(&quot;command %d failed\n&quot;, rq-&gt;tag);
+-
+-		spin_lock_irq(q-&gt;queue_lock);
++		err = tgt_uspace_cmd_send(cmd, gfp_mask);
++		if (err &lt; 0) {
++			spin_lock_irqsave(&amp;target-&gt;lock, flags);
++			list_add(&amp;cmd-&gt;cqueue, &amp;target-&gt;uspace_cmd_queue);
++			goto out;
++		}
++		goto retry;
+ 	}
+-}
++out:
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-static void tgt_queue_destroy(struct request_queue *q)
+-{
+-	blk_cleanup_queue(q);
++	if (err &lt; 0)
++		queue_work(target-&gt;twq, &amp;target-&gt;send_work);
+ }
+ 
+-static int tgt_queue_create(struct tgt_protocol *proto, int depth,
+-			    struct request_queue **queue)
++static void tgt_cmd_uspace_queue_worker(void *data)
+ {
+-	struct request_queue *q;
+-	int err = -ENOMEM;
++	struct tgt_target *target = data;
+ 
+-	*queue = q = blk_init_queue(tgt_request_fn, NULL);
+-	if (!q)
+-		return -ENOMEM;
+-
+-	elevator_exit(q-&gt;elevator);
+-	err = elevator_init(q, &quot;noop&quot;);
+-	if (err)
+-		goto out;
+-
+-	/* who should set this limit ? */
+-	err = blk_queue_init_tags(q, depth, NULL);
+-	if (err)
+-		goto out;
+-
+-	return 0;
+-out:
+-	tgt_queue_destroy(q);
+-	return err;
++	down(&amp;target-&gt;uspace_sem);
++	tgt_cmd_uspace_queue(target, GFP_KERNEL);
++	up(&amp;target-&gt;uspace_sem);
+ }
+ 
+ struct tgt_target *target_find(int tid)
+@@ -228,7 +204,7 @@
+ struct tgt_target *tgt_target_create(char *target_type, int queued_cmds)
+ {
+ 	char name[16];
+-	static int target_id;
++	static int i, target_id;
+ 	struct tgt_target *target;
+ 	struct target_type_internal *ti;
+ 
+@@ -246,11 +222,15 @@
+ 	target-&gt;typeid = ti-&gt;typeid;
+ 	target-&gt;tid = target_id++;
+ 	spin_lock_init(&amp;target-&gt;lock);
++	init_MUTEX(&amp;target-&gt;uspace_sem);
+ 
+ 	INIT_LIST_HEAD(&amp;target-&gt;session_list);
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
++	for (i = 0; i &lt; ARRAY_SIZE(target-&gt;cmd_hlist); i++)
++		INIT_LIST_HEAD(&amp;target-&gt;cmd_hlist[i]);
++	INIT_LIST_HEAD(&amp;target-&gt;uspace_cmd_queue);
+ 
+-	target-&gt;queued_cmds = queued_cmds;
++	target-&gt;queued_cmds = queued_cmds ? : TGT_QUEUE_DEPTH;
+ 
+ 	snprintf(name, sizeof(name), &quot;tgtd%d&quot;, target-&gt;tid);
+ 	target-&gt;twq = create_workqueue(name);
+@@ -265,20 +245,16 @@
+ 		if (target-&gt;tt-&gt;target_create(target))
+ 			goto free_priv_tt_data;
+ 
+-	if (tgt_queue_create(target-&gt;proto, queued_cmds ? : TGT_QUEUE_DEPTH,
+-			     &amp;target-&gt;q))
++	if (tgt_sysfs_register_target(target))
+ 		goto tt_destroy;
+ 
+-	if (tgt_sysfs_register_target(target))
+-		goto queue_destroy;
++	INIT_WORK(&amp;target-&gt;send_work, tgt_cmd_uspace_queue_worker, target);
+ 
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+ 	spin_unlock(&amp;all_targets_lock);
+ 	return target;
+ 
+-queue_destroy:
+-	tgt_queue_destroy(target-&gt;q);
+ tt_destroy:
+ 	if (target-&gt;tt-&gt;target_destroy)
+ 		target-&gt;tt-&gt;target_destroy(target);
+@@ -319,7 +295,6 @@
+ 		target-&gt;tt-&gt;target_destroy(target);
+ 
+ 	destroy_workqueue(target-&gt;twq);
+-	tgt_queue_destroy(target-&gt;q);
+ 	target_template_put(target-&gt;tt);
+ 	tgt_sysfs_unregister_target(target);
+ 
+@@ -420,18 +395,6 @@
+ 	return NULL;
+ }
+ 
+-static struct tgt_device *tgt_device_find(struct tgt_target *target, uint64_t dev_id)
+-{
+-	static struct tgt_device *device;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	device = tgt_device_find_nolock(target, dev_id);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-
+-	return device;
+-}
+-
+ struct tgt_device *tgt_device_get(struct tgt_target *target, uint64_t dev_id)
+ {
+ 	static struct tgt_device *device;
+@@ -457,42 +420,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_device_put);
+ 
+-#define min_not_zero(l, r) (l == 0) ? r : ((r == 0) ? l : min(l, r))
+-
+-static int tgt_device_queue_setup(struct tgt_device *device)
+-{
+-	struct io_restrictions *limits = &amp;device-&gt;limits;
+-	struct tgt_target_template *tt = device-&gt;target-&gt;tt;
+-	struct request_queue *q = device-&gt;q;
+-
+-	device-&gt;q = q;
+-
+-	blk_queue_max_sectors(q, min_not_zero(tt-&gt;max_sectors,
+-					limits-&gt;max_sectors));
+-	blk_queue_max_phys_segments(q, min_not_zero(limits-&gt;max_phys_segments,
+-					(unsigned short)TGT_MAX_PHYS_SEGMENTS));
+-	blk_queue_max_hw_segments(q, min_not_zero(tt-&gt;max_hw_segments,
+-					limits-&gt;max_hw_segments));
+-	blk_queue_max_segment_size(q, min_not_zero(tt-&gt;max_segment_size,
+-					limits-&gt;max_segment_size));
+-	blk_queue_segment_boundary(q, min_not_zero(tt-&gt;seg_boundary_mask,
+-					limits-&gt;seg_boundary_mask));
+-	if (!tt-&gt;use_clustering || !device-&gt;use_clustering)
+-		clear_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags);
+-
+-	dprintk(&quot;max_sectors %u\n&quot;, q-&gt;max_sectors);
+-	dprintk(&quot;max_phys_segments %u\n&quot;, q-&gt;max_phys_segments);
+-	dprintk(&quot;max_hw_segments %u\n&quot;, q-&gt;max_hw_segments);
+-	dprintk(&quot;max_segment_size %u\n&quot;, q-&gt;max_segment_size);
+-	dprintk(&quot;seg_boundary_mask %lx\n&quot;, q-&gt;seg_boundary_mask);
+-	if (test_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags))
+-		dprintk(&quot;clustering set\n&quot;);
+-	else
+-		dprintk(&quot;clustering not set\n&quot;);
+-
+-	return 0;
+-}
+-
+ int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+ 		      int fd, unsigned long dflags)
+ {
+@@ -529,24 +456,17 @@
+ 	else if (S_ISBLK(inode-&gt;i_mode))
+ 		inode = inode-&gt;i_bdev-&gt;bd_inode;
+ 
+-	device-&gt;use_clustering = 1;
+ 	device-&gt;size = inode-&gt;i_size;
+ 
+-	if (tgt_queue_create(target-&gt;proto, TGT_QUEUE_DEPTH, &amp;device-&gt;q))
++	if (tgt_sysfs_register_device(device))
+ 		goto put_fd;
+-	tgt_device_queue_setup(device);
+ 
+-	if (tgt_sysfs_register_device(device))
+-		goto queue_destroy;
+-
+ 	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+ 	list_add(&amp;device-&gt;dlist, &amp;target-&gt;device_list);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+ 	return 0;
+ 
+-queue_destroy:
+-	tgt_queue_destroy(device-&gt;q);
+ put_fd:
+ 	fput(device-&gt;file);
+ free_device:
+@@ -565,7 +485,6 @@
+ 	list_del(&amp;device-&gt;dlist);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	tgt_queue_destroy(device-&gt;q);
+ 	fput(device-&gt;file);
+ 
+ 	kfree(device);
+@@ -622,31 +541,83 @@
+ 	kfree(cmd-&gt;pages);
+ }
+ 
++static struct tgt_cmd *__tgt_cmd_hlist_find(struct tgt_target *target,
++					    uint64_t tag)
++{
++	struct tgt_cmd *cmd;
++	struct list_head *head = &amp;target-&gt;cmd_hlist[cmd_hashfn(tag)];
++
++	list_for_each_entry(cmd, head, hash_list) {
++		if (cmd_tag(cmd) == tag)
++			return cmd;
++	}
++	return NULL;
++}
++
++static struct tgt_cmd *tgt_cmd_hlist_find(struct tgt_target *target, uint64_t tag)
++{
++	unsigned long flags;
++	struct tgt_cmd *cmd;
++
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++	cmd = __tgt_cmd_hlist_find(target, tag);
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
++	return cmd;
++}
++
++static int tgt_cmd_hlist_add(struct tgt_cmd *cmd)
++{
++	struct tgt_target *target = cmd-&gt;session-&gt;target;
++	struct list_head *head;
++	unsigned long flags;
++	uint64_t tag = cmd_tag(cmd);
++	int err = 0;
++
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++
++	if (__tgt_cmd_hlist_find(target, tag)) {
++		err = -EINVAL;
++		eprintk(&quot;%p is already on the hash list.\n&quot;, cmd);
++	} else {
++		head = &amp;target-&gt;cmd_hlist[cmd_hashfn(tag)];
++		list_add_tail(&amp;cmd-&gt;hash_list, head);
++	}
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
++
++	return err;
++}
++
++static void tgt_cmd_hlist_del(struct tgt_cmd *cmd)
++{
++	struct tgt_target *target = cmd-&gt;session-&gt;target;
++	unsigned long flags;
++
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++
++	cmd = __tgt_cmd_hlist_find(target, cmd_tag(cmd));
++	if (cmd)
++		list_del(&amp;cmd-&gt;hash_list);
++	else
++		eprintk(&quot;%p is not on the hash list.\n&quot;, cmd);
++
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
++}
++
+ static void __tgt_cmd_destroy(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+-	struct request *rq = cmd-&gt;rq;
+-	struct request_queue *q = rq-&gt;q;
+-	unsigned long flags;
+ 
+-	dprintk(&quot;tag %d\n&quot;, rq-&gt;tag);
++	dprintk(&quot;cmd %p\n&quot;, cmd);
+ 
+ 	tgt_unmap_user_pages(cmd);
+ 	kfree(cmd-&gt;sg);
+ 	tgt_uspace_cmd_done_send(cmd, GFP_KERNEL);
+ 
+-	spin_lock_irqsave(q-&gt;queue_lock, flags);
+-	if (blk_rq_tagged(rq))
+-		blk_queue_end_tag(q, rq);
+-	end_that_request_last(rq);
+-	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+-
++	tgt_cmd_hlist_del(cmd);
+ 	if (cmd-&gt;device)
+ 		tgt_device_put(cmd-&gt;device);
+ 
+ 	mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
+-
+-	blk_run_queue(q);
+ }
+ 
+ static void tgt_cmd_destroy(struct tgt_cmd *cmd)
+@@ -689,26 +660,13 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_transfer_response);
+ 
+-static int tgt_cmd_queue(struct tgt_cmd *cmd, gfp_t gfp_mask)
++static inline void tgt_cmd_queue(struct tgt_target *target, struct tgt_cmd *cmd)
+ {
+-	int write = (cmd-&gt;data_dir == DMA_TO_DEVICE);
+-	struct request_queue *q;
+-	struct request *rq;
++	unsigned long flags;
+ 
+-	if (cmd-&gt;device)
+-		q = cmd-&gt;device-&gt;q;
+-	else
+-		q = cmd-&gt;session-&gt;target-&gt;q;
+-
+-	rq = blk_get_request(q, write, gfp_mask);
+-	if (!rq)
+-		return -ENOMEM;
+-
+-	cmd-&gt;rq = rq;
+-	rq-&gt;special = cmd;
+-	rq-&gt;flags |= REQ_SPECIAL | REQ_SOFTBARRIER | REQ_NOMERGE | REQ_BLOCK_PC;
+-	elv_add_request(q, rq, ELEVATOR_INSERT_BACK, 1);
+-	return 0;
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++	list_add_tail(&amp;cmd-&gt;cqueue, &amp;target-&gt;uspace_cmd_queue);
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ }
+ 
+ struct tgt_cmd *
+@@ -717,6 +675,7 @@
+ 	       uint8_t *dev_buf, int dev_buf_size, int flags)
+ {
+ 	struct tgt_cmd *cmd;
++	struct tgt_target *target = session-&gt;target;
+ 	int err;
+ 
+ 	cmd = mempool_alloc(session-&gt;cmd_pool, GFP_ATOMIC);
+@@ -725,10 +684,10 @@
+ 		return NULL;
+ 	}
+ 	memset(cmd, 0, sizeof(*cmd));
+-	session-&gt;target-&gt;proto-&gt;cmd_create(cmd, cb, data_len, data_dir,
+-					   dev_buf, dev_buf_size, flags);
++	target-&gt;proto-&gt;cmd_create(cmd, cb, data_len, data_dir,
++				  dev_buf, dev_buf_size, flags);
+ 
+-	cmd-&gt;device = tgt_device_get(session-&gt;target, cmd-&gt;dev_id);
++	cmd-&gt;device = tgt_device_get(target, cmd-&gt;dev_id);
+ 	cmd-&gt;session = session;
+ 	cmd-&gt;private = tgt_priv;
+ 	cmd-&gt;done = tgt_cmd_destroy;
+@@ -736,12 +695,21 @@
+ 
+ 	dprintk(&quot;%p %p\n&quot;, session, cmd);
+ 
+-	err = tgt_cmd_queue(cmd, GFP_ATOMIC);
++	err = tgt_cmd_hlist_add(cmd);
+ 	if (err) {
++		if (cmd-&gt;device)
++			tgt_device_put(cmd-&gt;device);
+ 		mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
+ 		return NULL;
+ 	}
+ 
++	tgt_cmd_queue(target, cmd);
++        if (!in_interrupt() &amp;&amp; !down_trylock(&amp;target-&gt;uspace_sem)) {
++		tgt_cmd_uspace_queue(target, GFP_ATOMIC);
++		up(&amp;target-&gt;uspace_sem);
++	} else
++		queue_work(target-&gt;twq, &amp;target-&gt;send_work);
++
+ 	return cmd;
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_create);
+@@ -762,9 +730,7 @@
+ static struct tgt_cmd *find_cmd_by_id(int tid, uint64_t dev_id, uint64_t cid)
+ {
+ 	struct tgt_target *target;
+-	struct tgt_device *device;
+-	struct request_queue *q;
+-	struct request *rq;
++	struct tgt_cmd *cmd;
+ 
+ 	dprintk(&quot;%d %llu %llu\n&quot;, tid, (unsigned long long) dev_id,
+ 		(unsigned long long) cid);
+@@ -775,24 +741,10 @@
+ 		return NULL;
+ 	}
+ 
+-	if (dev_id == TGT_INVALID_DEV_ID)
+-		q = target-&gt;q;
+-	else {
+-		device = tgt_device_find(target, dev_id);
+-		if (!device) {
+-			eprintk(&quot;Could not find device %llu\n&quot;,
+-				(unsigned long long) dev_id);
+-			return NULL;
+-		}
+-		q = device-&gt;q;
+-	}
+-
+-	rq = blk_queue_find_tag(q, cid);
+-	if (rq)
+-		return rq-&gt;special;
+-
+-	eprintk(&quot;Could not find rq for cid %llu\n&quot;, (unsigned long long) cid);
+-	return NULL;
++	cmd = tgt_cmd_hlist_find(target, cid);
++	if (!cmd)
++		eprintk(&quot;Could not find rq for cid %llu\n&quot;, (unsigned long long) cid);
++	return cmd;
+ }
+ 
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_CACHE_MASK)) + PAGE_CACHE_SIZE - 1) &gt;&gt; PAGE_CACHE_SHIFT)
+@@ -879,8 +831,8 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	dprintk(&quot;cmd %p tag %d result %d len %d bufflen %u\n&quot;,
+-		cmd, cmd-&gt;rq-&gt;tag, result, len, cmd-&gt;bufflen);
++	dprintk(&quot;cmd %p tag %llu result %d len %d bufflen %u\n&quot;, cmd,
++		(unsigned long long) cmd_tag(cmd), result, len, cmd-&gt;bufflen);
+ 
+ 	cmd-&gt;uaddr = uaddr;
+ 	cmd-&gt;result = result;
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-12-29 16:15:41 UTC (rev 216)
++++ trunk/kernel/tgt.h	2005-12-30 04:34:42 UTC (rev 217)
+@@ -15,7 +15,6 @@
+ 
+ #include &lt;tgt_types.h&gt;
+ 
+-struct request;
+ struct tgt_device;
+ struct tgt_protocol;
+ struct tgt_session;
+@@ -58,6 +57,9 @@
+ 	struct tgt_device *device;
+ 	struct tgt_protocol *proto;
+ 
++	struct list_head hash_list;
++	struct list_head cqueue;
++
+ 	atomic_t state;
+ 	uint64_t dev_id;
+ 	unsigned long flags;
+@@ -75,7 +77,6 @@
+ 
+ 	unsigned long uaddr;
+ 
+-	struct request *rq;
+ 	/*
+ 	 * target driver private
+ 	 */
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-12-29 16:15:41 UTC (rev 216)
++++ trunk/kernel/tgt_device.h	2005-12-30 04:34:42 UTC (rev 217)
+@@ -13,7 +13,6 @@
+ #include &lt;linux/device.h&gt;
+ #include &lt;linux/list.h&gt;
+ 
+-struct request_queue;
+ struct tgt_device;
+ struct tgt_cmd;
+ 
+@@ -43,15 +42,6 @@
+ 	uint64_t size;
+ 
+ 	unsigned long state;
+-	/*
+-	 * queue for tgt &lt;-&gt; tgt LLD requests
+-	 */
+-	struct request_queue *q;
+-	/*
+-	 * end device io limits (should be set by tgt_device drivers)
+-	 */
+-	struct io_restrictions limits;
+-	unsigned use_clustering;
+ 
+ 	struct tgt_target *target;
+ 	struct list_head dlist;
+
+Modified: trunk/kernel/tgt_nl.c
+===================================================================
+--- trunk/kernel/tgt_nl.c	2005-12-29 16:15:41 UTC (rev 216)
++++ trunk/kernel/tgt_nl.c	2005-12-30 04:34:42 UTC (rev 217)
+@@ -42,7 +42,7 @@
+ 	pdu = (char *) ev-&gt;data;
+ 	ev-&gt;k.cmd_req.tid = cmd-&gt;session-&gt;target-&gt;tid;
+ 	ev-&gt;k.cmd_req.dev_id = cmd-&gt;device ? cmd-&gt;dev_id : TGT_INVALID_DEV_ID;
+-	ev-&gt;k.cmd_req.cid = cmd-&gt;rq-&gt;tag;
++	ev-&gt;k.cmd_req.cid = cmd_tag(cmd);
+ 	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
+ 	ev-&gt;k.cmd_req.fd = cmd-&gt;device ? cmd-&gt;device-&gt;fd : 0;
+ 	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-12-29 16:15:41 UTC (rev 216)
++++ trunk/kernel/tgt_target.h	2005-12-30 04:34:42 UTC (rev 217)
+@@ -88,6 +88,10 @@
+ 	struct class_device_attribute **target_attrs;
+ };
+ 
++#define TGT_CMD_HASH_ORDER		4
++#define	cmd_tag(p)	((uint64_t)(unsigned long) p)
++#define	cmd_hashfn(tag)	hash_long((tag), TGT_CMD_HASH_ORDER)
++
+ enum {
+ 	TGT_CREATED,
+ 	TGT_DESTROYED,
+@@ -102,18 +106,23 @@
+ 
+ 	struct class_device cdev;
+ 
+-	struct request_queue *q;
+ 	int queued_cmds;
+ 	int state;
+ 
+-	/* Protects session_list and device_list and state */
++	/* Protects session_list, device_list, cmd_hlist, and state */
+ 	spinlock_t lock;
+ 
++	/* Serializes commands going to user space */
++	struct semaphore uspace_sem;
+ 	struct list_head tlist;
+ 
+ 	struct list_head device_list;
+ 	struct list_head session_list;
++	struct list_head cmd_hlist[1 &lt;&lt; TGT_CMD_HASH_ORDER];
+ 
++	struct list_head uspace_cmd_queue;
++	struct work_struct send_work;
++
+ 	struct workqueue_struct *twq;
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000203.html">[Stgt-svn] r216 - in trunk/istgt: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000205.html">[Stgt-svn] r218 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#204">[ date ]</a>
+              <a href="thread.html#204">[ thread ]</a>
+              <a href="subject.html#204">[ subject ]</a>
+              <a href="author.html#204">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

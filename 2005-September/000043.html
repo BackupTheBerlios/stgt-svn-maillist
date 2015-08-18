@@ -1,0 +1,227 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r50 - in trunk: include kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r50%20-%20in%20trunk%3A%20include%20kernel&In-Reply-To=%3C200509071726.j87HQa4n001024%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000042.html">
+   <LINK REL="Next"  HREF="000044.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r50 - in trunk: include kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r50%20-%20in%20trunk%3A%20include%20kernel&In-Reply-To=%3C200509071726.j87HQa4n001024%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r50 - in trunk: include kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Sep  7 19:26:36 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000042.html">[Stgt-svn] r49 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000044.html">[Stgt-svn] r51 - in trunk/iscsi: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#43">[ date ]</a>
+              <a href="thread.html#43">[ thread ]</a>
+              <a href="subject.html#43">[ subject ]</a>
+              <a href="author.html#43">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-07 19:26:34 +0200 (Wed, 07 Sep 2005)
+New Revision: 50
+
+Modified:
+   trunk/include/stgt_if.h
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt_sysfs.c
+   trunk/kernel/stgt_target.h
+Log:
+Add callbacks (target_create and target_destroy) to stgt_target_template.
+
+Modified: trunk/include/stgt_if.h
+===================================================================
+--- trunk/include/stgt_if.h	2005-09-07 12:06:53 UTC (rev 49)
++++ trunk/include/stgt_if.h	2005-09-07 17:26:34 UTC (rev 50)
+@@ -11,6 +11,8 @@
+ enum stgt_event_type {
+ 	/* user -&gt; kernel */
+ 	STGT_UEVENT_START,
++	STGT_UEVENT_TARGET_CREATE,
++	STGT_UEVENT_TARGET_DESTROY,
+ 	STGT_UEVENT_DEVICE_CREATE,
+ 	STGT_UEVENT_DEVICE_DESTROY,
+ 	STGT_UEVENT_SCSI_CMND_RES,
+@@ -24,7 +26,14 @@
+ 	/* user-&gt; kernel */
+ 	union {
+ 		struct {
++			char type[32];
++			int nr_cmnds;
++		} c_target;
++		struct {
+ 			int tid;
++		} d_target;
++		struct {
++			int tid;
+ 			uint64_t dev_id;
+ 			uint32_t flags;
+ 			char type[32];
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-07 12:06:53 UTC (rev 49)
++++ trunk/kernel/stgt.c	2005-09-07 17:26:34 UTC (rev 50)
+@@ -245,7 +245,6 @@
+ 	target = kmalloc(sizeof(*target), GFP_KERNEL);
+ 	if (!target)
+ 		return NULL;
+-	dprintk(&quot;%p\n&quot;, target);
+ 	memset(target, 0, sizeof(*target));
+ 
+ 	tti = target_template_get(target_type);
+@@ -269,14 +268,27 @@
+ 	if (!target-&gt;twq)
+ 		goto put_template;
+ 
+-	if (stgt_sysfs_register_target(target))
++	target-&gt;stt_data = kmalloc(sizeof(target-&gt;stt-&gt;priv_data_size), GFP_KERNEL);
++	if (!target-&gt;stt_data)
+ 		goto free_workqueue;
+ 
++	if (target-&gt;stt-&gt;target_create)
++		if (target-&gt;stt-&gt;target_create(target))
++			goto free_priv_stt_data;
++
++	if (stgt_sysfs_register_target(target))
++		goto stt_destroy;
++
+ 	spin_lock(&amp;all_targets_lock);
+ 	list_add(&amp;target-&gt;tlist, &amp;all_targets);
+ 	spin_unlock(&amp;all_targets_lock);
+ 	return target;
+ 
++stt_destroy:
++	if (target-&gt;stt-&gt;target_destroy)
++		target-&gt;stt-&gt;target_destroy(target);
++free_priv_stt_data:
++	kfree(target-&gt;stt_data);
+ free_workqueue:
+ 	destroy_workqueue(target-&gt;twq);
+ put_template:
+@@ -295,6 +307,9 @@
+ 	list_del(&amp;target-&gt;tlist);
+ 	spin_unlock(&amp;all_targets_lock);
+ 
++	if (target-&gt;stt-&gt;target_destroy)
++		target-&gt;stt-&gt;target_destroy(target);
++
+ 	destroy_workqueue(target-&gt;twq);
+ 	target_template_put(target-&gt;stt);
+ 	stgt_sysfs_unregister_target(target);
+@@ -882,6 +897,7 @@
+ 	int err = 0;
+ 	struct stgt_event *ev = NLMSG_DATA(nlh);
+ 	struct stgt_cmnd *cmnd;
++	struct stgt_target *target;
+ 
+ 	daemon_pid  = NETLINK_CREDS(skb)-&gt;pid;
+ 
+@@ -891,6 +907,21 @@
+ 	case STGT_UEVENT_START:
+ 		dprintk(&quot;start %d\n&quot;, daemon_pid);
+ 		break;
++	case STGT_UEVENT_TARGET_CREATE:
++		target = stgt_target_create(ev-&gt;u.c_target.type,
++					    ev-&gt;u.c_target.nr_cmnds);
++		if (target)
++			err = target-&gt;tid;
++		else
++			err = -EINVAL;
++		break;
++	case STGT_UEVENT_TARGET_DESTROY:
++		target = target_find(ev-&gt;u.d_target.tid);
++		if (target)
++			err = stgt_target_destroy(target);
++		else
++			err = -EINVAL;
++		break;
+ 	case STGT_UEVENT_DEVICE_CREATE:
+ 		if (nlh-&gt;nlmsg_len &lt;= NLMSG_SPACE(sizeof(*ev))) {
+ 			err = -EINVAL;
+
+Modified: trunk/kernel/stgt_sysfs.c
+===================================================================
+--- trunk/kernel/stgt_sysfs.c	2005-09-07 12:06:53 UTC (rev 49)
++++ trunk/kernel/stgt_sysfs.c	2005-09-07 17:26:34 UTC (rev 50)
+@@ -33,6 +33,7 @@
+ static void stgt_target_class_release(struct class_device *cdev)
+ {
+ 	struct stgt_target *target = cdev_to_stgt_target(cdev);
++	kfree(target-&gt;stt_data);
+ 	kfree(target);
+ }
+ 
+
+Modified: trunk/kernel/stgt_target.h
+===================================================================
+--- trunk/kernel/stgt_target.h	2005-09-07 12:06:53 UTC (rev 49)
++++ trunk/kernel/stgt_target.h	2005-09-07 17:26:34 UTC (rev 50)
+@@ -12,11 +12,16 @@
+ #include &lt;linux/list.h&gt;
+ 
+ struct tgt_protocol;
++struct stgt_target;
+ 
+ struct stgt_target_template {
+ 	const char *name;
+ 	struct module *module;
++	unsigned priv_data_size;
+ 
++	int (* target_create) (struct stgt_target *);
++	void (* target_destroy) (struct stgt_target *);
++
+ 	/*
+ 	 * name of protocol to use
+ 	 */
+@@ -31,6 +36,7 @@
+ struct stgt_target {
+ 	int tid;
+ 	struct stgt_target_template *stt;
++	void *stt_data;
+ 	struct tgt_protocol *proto;
+ 
+ 	struct class_device cdev;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000042.html">[Stgt-svn] r49 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000044.html">[Stgt-svn] r51 - in trunk/iscsi: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#43">[ date ]</a>
+              <a href="thread.html#43">[ thread ]</a>
+              <a href="subject.html#43">[ subject ]</a>
+              <a href="author.html#43">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

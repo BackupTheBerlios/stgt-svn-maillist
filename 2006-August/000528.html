@@ -1,0 +1,359 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r541 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r541%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200608261002.k7QA2nTL025520%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000527.html">
+   <LINK REL="Next"  HREF="000529.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r541 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r541%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200608261002.k7QA2nTL025520%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r541 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug 26 12:02:49 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000527.html">[Stgt-svn] r540 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000529.html">[Stgt-svn] r542 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#528">[ date ]</a>
+              <a href="thread.html#528">[ thread ]</a>
+              <a href="subject.html#528">[ subject ]</a>
+              <a href="author.html#528">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-26 12:02:40 +0200 (Sat, 26 Aug 2006)
+New Revision: 541
+
+Modified:
+   trunk/usr/iscsi/istgt.c
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtif.c
+   trunk/usr/util.c
+Log:
+Replace strerror with %m
+
+Modified: trunk/usr/iscsi/istgt.c
+===================================================================
+--- trunk/usr/iscsi/istgt.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/iscsi/istgt.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -57,9 +57,9 @@
+ 	if (res != -1) {
+ 		res = fcntl(fd, F_SETFL, res | O_NONBLOCK);
+ 		if (res)
+-			dprintf(&quot;unable to set fd flags (%s)!\n&quot;, strerror(errno));
++			dprintf(&quot;unable to set fd flags, %m\n&quot;);
+ 	} else
+-		dprintf(&quot;unable to get fd flags (%s)!\n&quot;, strerror(errno));
++		dprintf(&quot;unable to get fd flags, %m\n&quot;);
+ }
+ 
+ static void listen_socket_create(struct pollfd *pfds)
+@@ -76,35 +76,35 @@
+ 	hints.ai_flags = AI_PASSIVE;
+ 
+ 	if (getaddrinfo(NULL, servname, &amp;hints, &amp;res0)) {
+-		eprintf(&quot;unable to get address info (%s)!\n&quot;, strerror(errno));
++		eprintf(&quot;unable to get address info, %m\n&quot;);
+ 		exit(1);
+ 	}
+ 
+ 	for (i = 0, res = res0; res &amp;&amp; i &lt; LISTEN_MAX; i++, res = res-&gt;ai_next) {
+ 		sock = socket(res-&gt;ai_family, res-&gt;ai_socktype, res-&gt;ai_protocol);
+ 		if (sock &lt; 0) {
+-			eprintf(&quot;unable to create server socket (%s) %d %d %d!\n&quot;,
+-				  strerror(errno), res-&gt;ai_family,
+-				  res-&gt;ai_socktype, res-&gt;ai_protocol);
++			eprintf(&quot;unable to create socket %d %d %d, %m\n&quot;,
++				res-&gt;ai_family,	res-&gt;ai_socktype,
++				res-&gt;ai_protocol);
+ 			continue;
+ 		}
+ 
+ 		opt = 1;
+ 		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &amp;opt, sizeof(opt)))
+-			dprintf(&quot;unable to set SO_REUSEADDR on server socket (%s)!\n&quot;,
+-				    strerror(errno));
++			dprintf(&quot;unable to set SO_REUSEADDR, %m\n&quot;);
++
+ 		opt = 1;
+ 		if (res-&gt;ai_family == AF_INET6 &amp;&amp;
+ 		    setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &amp;opt, sizeof(opt)))
+ 			continue;
+ 
+ 		if (bind(sock, res-&gt;ai_addr, res-&gt;ai_addrlen)) {
+-			eprintf(&quot;unable to bind server socket (%s)!\n&quot;, strerror(errno));
++			eprintf(&quot;unable to bind server socket, %m\n&quot;);
+ 			continue;
+ 		}
+ 
+ 		if (listen(sock, INCOMING_MAX)) {
+-			eprintf(&quot;unable to listen to server socket (%s)!\n&quot;, strerror(errno));
++			eprintf(&quot;unable to listen to server socket, %m\n&quot;);
+ 			continue;
+ 		}
+ 
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/mgmt.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -155,7 +155,7 @@
+ 	len = sizeof(addr);
+ 	fd = accept(accept_fd, (struct sockaddr *) &amp;addr, &amp;len);
+ 	if (fd &lt; 0)
+-		eprintf(&quot;can't accept a new connection %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't accept a new connection, %m\n&quot;);
+ 	return fd;
+ }
+ 
+@@ -168,7 +168,7 @@
+ 	len = sizeof(cred);
+ 	err = getsockopt(fd, SOL_SOCKET, SO_PEERCRED, (void *) &amp;cred, &amp;len);
+ 	if (err) {
+-		eprintf(&quot;can't get sockopt %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't get sockopt, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -192,7 +192,7 @@
+ 
+ 	err = sendmsg(fd, &amp;msg, MSG_DONTWAIT);
+ 	if (err != res-&gt;len)
+-		eprintf(&quot;can't write %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't write, %m\n&quot;);
+ }
+ 
+ void ipc_event_handle(int accept_fd)
+@@ -233,7 +233,7 @@
+ 		if (errno == EAGAIN)
+ 			goto retry;
+ 
+-		eprintf(&quot;can't read %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't read, %m\n&quot;);
+ 		goto out;
+ 	}
+ 
+@@ -250,7 +250,7 @@
+ 
+ 	err = recvmsg(fd, &amp;msg, MSG_DONTWAIT);
+ 	if (err != req-&gt;len) {
+-		eprintf(&quot;can't read %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't read, %m\n&quot;);
+ 		err = -EIO;
+ 		goto out;
+ 	}
+@@ -287,7 +287,7 @@
+ 
+ 	fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+ 	if (fd &lt; 0) {
+-		eprintf(&quot;can't open a socket %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't open a socket, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -298,13 +298,13 @@
+ 
+ 	err = bind(fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+ 	if (err) {
+-		eprintf(&quot;can't bind a socket %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't bind a socket, %m\n&quot;);
+ 		goto out;
+ 	}
+ 
+ 	err = listen(fd, 32);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;can't listen a socket %s\n&quot;, strerror(errno));
++		eprintf(&quot;can't listen a socket, %m\n&quot;);
+ 		goto out;
+ 	}
+ 
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/target.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -158,13 +158,13 @@
+ 
+ 	dev_fd = open(path, O_RDWR | O_LARGEFILE);
+ 	if (dev_fd &lt; 0) {
+-		eprintf(&quot;Could not open %s %s\n&quot;, path, strerror(errno));
++		eprintf(&quot;Could not open %s, %m\n&quot;, path);
+ 		return dev_fd;
+ 	}
+ 
+ 	err = fstat64(dev_fd, &amp;st);
+ 	if (err &lt; 0) {
+-		printf(&quot;Cannot get stat %d %s\n&quot;, dev_fd, strerror(errno));
++		printf(&quot;Cannot get stat %d, %m\n&quot;, dev_fd);
+ 		goto close_dev_fd;
+ 	}
+ 
+@@ -173,7 +173,7 @@
+ 	else if(S_ISBLK(st.st_mode)) {
+ 		err = ioctl(dev_fd, BLKGETSIZE64, &amp;size);
+ 		if (err &lt; 0) {
+-			eprintf(&quot;Cannot get size %s\n&quot;, strerror(errno));
++			eprintf(&quot;Cannot get size, %m\n&quot;);
+ 			goto close_dev_fd;
+ 		}
+ 	} else {
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/tgtadm.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -129,7 +129,7 @@
+ 
+ 	*fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+ 	if (*fd &lt; 0) {
+-		eprintf(&quot;Cannot create a socket %s\n&quot;, strerror(errno));
++		eprintf(&quot;Cannot create a socket, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -139,7 +139,7 @@
+ 
+ 	err = connect(*fd, (struct sockaddr *) &amp;addr, sizeof(addr));
+ 	if (err &lt; 0) {
+-		eprintf(&quot;Cannot connect to tgtd %s\n&quot;, strerror(errno));
++		eprintf(&quot;Cannot connect to tgtd, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -154,7 +154,7 @@
+ 
+ 	err = read(fd, buf, len);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;Cannot read from tgtd %s\n&quot;, strerror(errno));
++		eprintf(&quot;Cannot read from tgtd, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -176,7 +176,7 @@
+ 		t = min_t(int, sizeof(buf), len);
+ 		err = read(fd, buf, t);
+ 		if (err &lt; 0) {
+-			eprintf(&quot;Cannot read from tgtd %s\n&quot;, strerror(errno));
++			eprintf(&quot;Cannot read from tgtd, %m\n&quot;);
+ 			return -1;
+ 		}
+ 		printf(&quot;%s&quot;, buf);
+@@ -196,7 +196,7 @@
+ 
+ 	err = write(fd, (char *) req, req-&gt;len);
+ 	if (err &lt; 0) {
+-		eprintf(&quot;Cannot send to tgtd %s\n&quot;, strerror(errno));
++		eprintf(&quot;Cannot send to tgtd, %m\n&quot;);
+ 		goto out;
+ 	}
+ 
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/tgtd.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -107,7 +107,7 @@
+ 	nevent = poll(pfd, npfd, timeout);
+ 	if (nevent &lt; 0) {
+ 		if (errno != EINTR) {
+-			eprintf(&quot;%s\n&quot;, strerror(errno));
++			eprintf(&quot;%m\n&quot;);
+ 			exit(1);
+ 		}
+ 		goto retry;
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/tgtif.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -173,7 +173,7 @@
+ 
+ 	*fd = open(path, O_RDWR);
+ 	if (*fd &lt; 0) {
+-		eprintf(&quot;cannot open %s %s\n&quot;, path, strerror(errno));
++		eprintf(&quot;cannot open %s, %m\n&quot;, path);
+ 		goto out;
+ 	}
+ 
+@@ -194,7 +194,7 @@
+ 
+ 	buf = mmap(NULL, size * 2, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+ 	if (buf == MAP_FAILED) {
+-		eprintf(&quot;fail to mmap %s\n&quot;, strerror(errno));
++		eprintf(&quot;fail to mmap, %m\n&quot;);
+ 		close(fd);
+ 		return -EINVAL;
+ 	}
+
+Modified: trunk/usr/util.c
+===================================================================
+--- trunk/usr/util.c	2006-08-26 03:53:16 UTC (rev 540)
++++ trunk/usr/util.c	2006-08-26 10:02:40 UTC (rev 541)
+@@ -17,7 +17,7 @@
+ 
+ 	fp = fopen(&quot;/proc/devices&quot;, &quot;r&quot;);
+ 	if (!fp) {
+-		eprintf(&quot;Cannot open control path to the driver\n&quot;);
++		eprintf(&quot;Cannot open /proc/devices, %m\n&quot;);
+ 		return -1;
+ 	}
+ 
+@@ -44,13 +44,13 @@
+ 	unlink(devpath);
+ 	err = mknod(devpath, (S_IFCHR | 0600), (major &lt;&lt; 8) | minor);
+ 	if (err) {
+-		eprintf(&quot;cannot create %s %s\n&quot;, devpath, strerror(errno));
++		eprintf(&quot;cannot create %s, %m\n&quot;, devpath);
+ 		return -errno;
+ 	}
+ 
+ 	*fd = open(devpath, O_RDWR);
+ 	if (*fd &lt; 0) {
+-		eprintf(&quot;cannot open %s %s\n&quot;, devpath, strerror(errno));
++		eprintf(&quot;cannot open %s, %m\n&quot;, devpath);
+ 		return -errno;
+ 	}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000527.html">[Stgt-svn] r540 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000529.html">[Stgt-svn] r542 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#528">[ date ]</a>
+              <a href="thread.html#528">[ thread ]</a>
+              <a href="subject.html#528">[ subject ]</a>
+              <a href="author.html#528">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

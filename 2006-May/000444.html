@@ -1,0 +1,202 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r457 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-May/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r457%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605060121.k461L9H4015728%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000443.html">
+   <LINK REL="Next"  HREF="000445.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r457 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r457%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200605060121.k461L9H4015728%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r457 - branches/use-scsi-ml/istgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat May  6 03:21:09 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000443.html">[Stgt-svn] r456 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000445.html">[Stgt-svn] r458 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#444">[ date ]</a>
+              <a href="thread.html#444">[ thread ]</a>
+              <a href="subject.html#444">[ subject ]</a>
+              <a href="author.html#444">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-05-06 03:21:03 +0200 (Sat, 06 May 2006)
+New Revision: 457
+
+Modified:
+   branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+   branches/use-scsi-ml/istgt/kernel/libiscsi.h
+Log:
+For easy debug, use kthread instead of bottom half. We'll revert it later on.
+
+
+Modified: branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 00:09:38 UTC (rev 456)
++++ branches/use-scsi-ml/istgt/kernel/iscsi_tcp_tgt.c	2006-05-06 01:21:03 UTC (rev 457)
+@@ -315,7 +315,11 @@
+ 		hdr-&gt;hlength &lt;&lt; 2, tcp_conn-&gt;in.datalen);
+ 
+ 	/* FIXME */
+-	BUG_ON(tcp_conn-&gt;in.datalen);
++	if (tcp_conn-&gt;in.datalen) {
++		iscsi_conn_failure(conn, rc);
++		eprintk(&quot;Cannot handle this now\n&quot;);
++		return 1;
++	}
+ 
+ 	switch (opcode) {
+ 	case ISCSI_OP_NOOP_OUT:
+@@ -323,30 +327,36 @@
+ 	case ISCSI_OP_SCSI_TMFUNC:
+ 	case ISCSI_OP_LOGOUT:
+ 		__kfifo_get(session-&gt;cmdpool.queue, (void*)&amp;ctask, sizeof(void*));
++		BUG_ON(!ctask);
++
+ 		ctask-&gt;conn = conn;
+ 		ctask-&gt;data_count = 0;
++		BUG_ON(!ctask-&gt;hdr);
+ 		memcpy(ctask-&gt;hdr, hdr, sizeof(*hdr));
+ 
+ 		tcp_ctask = ctask-&gt;dd_data;
++		BUG_ON(!tcp_ctask);
++
+ 		tcp_ctask-&gt;sg = NULL;
+ 		tcp_ctask-&gt;sent = 0;
+ 		tcp_ctask-&gt;xmstate = XMSTATE_UNS_INIT;
+ 
+ 		if (!tcp_conn-&gt;in.datalen) {
+-			istgt_ctask_recvlist_add(tcp_conn-&gt;in.ctask);
+-			tcp_conn-&gt;in.ctask = NULL;
+-			schedule_work(&amp;istgt_session-&gt;recvwork);
++/* 			istgt_ctask_recvlist_add(tcp_conn-&gt;in.ctask); */
++			ctask = NULL;
++/* 			schedule_work(&amp;istgt_session-&gt;recvwork); */
+ 		}
+ 
+-		if (opcode == ISCSI_OP_SCSI_CMD)
+-			switch (ctask-&gt;hdr-&gt;cdb[0]) {
+-			case WRITE_6:
+-			case WRITE_10:
+-			case WRITE_16:
+-			case WRITE_VERIFY:
+-				istgt_unsolicited_data(ctask);
+-				set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_rx);
+-			}
++/* 		if (opcode == ISCSI_OP_SCSI_CMD) */
++/* 			switch (ctask-&gt;hdr-&gt;cdb[0]) { */
++/* 			case WRITE_6: */
++/* 			case WRITE_10: */
++/* 			case WRITE_16: */
++/* 			case WRITE_VERIFY: */
++/* 				istgt_unsolicited_data(ctask); */
++/* 				set_bit(ISCSI_SUSPEND_BIT, &amp;conn-&gt;suspend_rx); */
++/* 			} */
++
+ 		break;
+ 	case ISCSI_OP_SCSI_DATA_OUT:
+ 		BUG_ON(1);
+@@ -361,6 +371,7 @@
+ 
+ 	if (ctask)
+ 		tcp_conn-&gt;in.ctask = ctask;
++
+ 	return rc;
+ }
+ 
+@@ -372,9 +383,13 @@
+ 
+ 	/* We need to return -EAGAIN if the buffer is not ready. */
+ 
+-	BUG_ON(1);
++	opcode = tcp_conn-&gt;in.hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
+ 
+-	opcode = tcp_conn-&gt;in.hdr-&gt;opcode &amp; ISCSI_OPCODE_MASK;
++	dprintk(&quot;opcode 0x%x offset %d copy %d datalen %d\n&quot;,
++		opcode, tcp_conn-&gt;in.offset, tcp_conn-&gt;in.copy,
++		tcp_conn-&gt;in.datalen);
++	return 1;
++
+ 	switch (opcode) {
+ 	case ISCSI_OP_SCSI_CMD:
+ 	case ISCSI_OP_SCSI_DATA_OUT:
+@@ -410,6 +425,16 @@
+ istgt_tcp_data_ready(struct sock *sk, int flag)
+ {
+ 	struct iscsi_conn *conn = sk-&gt;sk_user_data;
++
++	schedule_work(&amp;conn-&gt;tcpwork);
++}
++
++static void __istgt_tcp_data_ready(void *data)
++{
++	struct iscsi_cls_conn *cls_conn = data;
++	struct iscsi_conn *conn = cls_conn-&gt;dd_data;
++	struct iscsi_tcp_conn *tcp_conn = conn-&gt;dd_data;
++	struct sock *sk = tcp_conn-&gt;sock-&gt;sk;
+ 	read_descriptor_t rd_desc;
+ 	struct data_ready_desc d;
+ 
+@@ -451,6 +476,8 @@
+ 	sock-&gt;sk-&gt;sk_data_ready = istgt_tcp_data_ready;
+ 	write_unlock_bh(&amp;sock-&gt;sk-&gt;sk_callback_lock);
+ 
++	INIT_WORK(&amp;conn-&gt;tcpwork, __istgt_tcp_data_ready, cls_conn);
++
+ 	return 0;
+ }
+ 
+
+Modified: branches/use-scsi-ml/istgt/kernel/libiscsi.h
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/libiscsi.h	2006-05-06 00:09:38 UTC (rev 456)
++++ branches/use-scsi-ml/istgt/kernel/libiscsi.h	2006-05-06 01:21:03 UTC (rev 457)
+@@ -171,6 +171,7 @@
+ 
+ 	/* custom statistics */
+ 	uint32_t		eh_abort_cnt;
++	struct work_struct	tcpwork;
+ };
+ 
+ struct iscsi_queue {
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000443.html">[Stgt-svn] r456 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000445.html">[Stgt-svn] r458 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#444">[ date ]</a>
+              <a href="thread.html#444">[ thread ]</a>
+              <a href="subject.html#444">[ subject ]</a>
+              <a href="author.html#444">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

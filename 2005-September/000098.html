@@ -1,0 +1,398 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r104 - trunk/iscsi/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r104%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251144.j8PBiLCu032160%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000097.html">
+   <LINK REL="Next"  HREF="000099.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r104 - trunk/iscsi/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r104%20-%20trunk/iscsi/kernel&In-Reply-To=%3C200509251144.j8PBiLCu032160%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r104 - trunk/iscsi/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 13:44:21 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000097.html">[Stgt-svn] r103 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000099.html">[Stgt-svn] r105 - in trunk/iscsi: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#98">[ date ]</a>
+              <a href="thread.html#98">[ thread ]</a>
+              <a href="subject.html#98">[ subject ]</a>
+              <a href="author.html#98">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 13:44:19 +0200 (Sun, 25 Sep 2005)
+New Revision: 104
+
+Modified:
+   trunk/iscsi/kernel/iscsi.c
+   trunk/iscsi/kernel/iscsi_dbg.h
+   trunk/iscsi/kernel/nthread.c
+Log:
+Replace assert with BUG_ON.
+
+Modified: trunk/iscsi/kernel/iscsi.c
+===================================================================
+--- trunk/iscsi/kernel/iscsi.c	2005-09-25 11:02:11 UTC (rev 103)
++++ trunk/iscsi/kernel/iscsi.c	2005-09-25 11:44:19 UTC (rev 104)
+@@ -79,8 +79,8 @@
+ 	cmnd-&gt;sg = NULL;
+ 
+ 	if (req) {
+-		assert(conn-&gt;session);
+-		assert(conn-&gt;session-&gt;ts);
++		BUG_ON(!conn-&gt;session);
++		BUG_ON(!conn-&gt;session-&gt;ts);
+ 	}
+ 
+ 	dprintk(D_GENERIC, &quot;%p:%p\n&quot;, conn, cmnd);
+@@ -127,7 +127,7 @@
+ 		dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+ 
+ 		list_del_init(&amp;cmnd-&gt;list);
+-		assert(conn == cmnd-&gt;conn);
++		BUG_ON(conn != cmnd-&gt;conn);
+ 		list_add_tail(&amp;cmnd-&gt;list, &amp;conn-&gt;write_list);
+ 	}
+ 
+@@ -149,7 +149,7 @@
+ 			cmnd-&gt;hdigest, cmnd-&gt;ddigest,
+ 			list_empty(&amp;cmnd-&gt;pdu_list), list_empty(&amp;cmnd-&gt;hash_list));
+ 
+-		assert(list_empty(&amp;cmnd-&gt;list));
++		BUG_ON(!list_empty(&amp;cmnd-&gt;list));
+ 	}
+ 	list_add(&amp;cmnd-&gt;list, &amp;head);
+ 	iscsi_cmnds_init_write(&amp;head);
+@@ -168,13 +168,13 @@
+ 	dprintk(D_GENERIC, &quot;%p\n&quot;, cmnd);
+ 	pdusize = conn-&gt;session-&gt;param.max_xmit_data_length;
+ 	expsize = cmnd_read_size(cmnd);
+-	assert(cmnd-&gt;tc);
++	BUG_ON(!cmnd-&gt;tc);
+ 	size = min(expsize, cmnd-&gt;tc-&gt;bufflen);
+ 	eprintk(&quot;%u %u\n&quot;, expsize, cmnd-&gt;tc-&gt;bufflen);
+ 	offset = 0;
+ 	sn = 0;
+ 
+-	assert(sg);
++	BUG_ON(!sg);
+ 
+ 	while (1) {
+ 		data_cmnd = iscsi_cmnd_create_rsp_cmnd(cmnd, size &lt;= pdusize);
+@@ -383,7 +383,7 @@
+ /* 	u32 size; */
+ /* 	int i; */
+ 
+-	assert(0);
++	BUG_ON(1);
+ 
+ /* 	eprintk(&quot;%x %x %x %u\n&quot;, cmnd_itt(cmnd), cmnd_opcode(cmnd), */
+ /* 		cmnd_hdr(cmnd)-&gt;cdb[0], cmnd-&gt;pdu.datasize); */
+@@ -418,7 +418,7 @@
+ /* 	struct tio *tio; */
+ /* 	char *addr; */
+ 
+-	assert(0);
++	BUG_ON(1);
+ 
+ /* 	rsp = iscsi_cmnd_create_rsp_cmnd(req, 1); */
+ /* 	rsp_hdr = (struct iscsi_reject_hdr *)&amp;rsp-&gt;pdu.bhs; */
+@@ -745,7 +745,7 @@
+ 		send_scsi_rsp(cmnd);
+ 		break;
+ 	default:
+-		assert(0);
++		BUG_ON(1);
+ 		break;
+ 	}
+ }
+@@ -796,8 +796,8 @@
+ /* 			struct tio *tio; */
+ 			int pg_cnt = get_pgcnt(size, 0);
+ 
+-			assert(pg_cnt &lt; ISCSI_CONN_IOV_MAX);
+-			assert(0);
++			BUG_ON(pg_cnt &gt;= ISCSI_CONN_IOV_MAX);
++			BUG_ON(1);
+ /* 			cmnd-&gt;tio = tio = tio_alloc(pg_cnt); */
+ /* 			tio_set(tio, size, 0); */
+ 
+@@ -818,7 +818,7 @@
+ 				size -= tmp;
+ 			}
+ 		}
+-		assert(!size);
++		BUG_ON(size);
+ 		conn-&gt;read_overflow = size;
+ 		conn-&gt;read_msg.msg_iovlen = i;
+ 	}
+@@ -862,7 +862,7 @@
+ 				    be32_to_cpu(req_hdr-&gt;data_length),
+ 				    data_dir, req_hdr-&gt;lun,
+ 				    sizeof(req_hdr-&gt;lun), NULL);
+-	assert(req-&gt;tc);
++	BUG_ON(!req-&gt;tc);
+ 
+ 	switch (req_hdr-&gt;cdb[0]) {
+ 	case SERVICE_ACTION_IN:
+@@ -931,7 +931,7 @@
+ 
+ 		if (req-&gt;pdu.datasize) {
+ 			if (cmnd_recv_pdu(conn, req-&gt;tc, 0, req-&gt;pdu.datasize) &lt; 0)
+-				assert(0);
++				BUG_ON(1);
+ 		}
+ 		break;
+ 	}
+@@ -1003,17 +1003,16 @@
+ 	struct iscsi_cmnd *scsi_cmnd;
+ 	u32 offset;
+ 
+-	assert(cmnd);
++	BUG_ON(!cmnd);
+ 	scsi_cmnd = cmnd-&gt;req;
+-	assert(scsi_cmnd);
++	BUG_ON(!scsi_cmnd);
+ 
+ 	if (conn-&gt;read_overflow) {
+ 		eprintk(&quot;%x %u\n&quot;, cmnd_itt(cmnd), conn-&gt;read_overflow);
+-/* 		assert(scsi_cmnd-&gt;tio); */
+ 		offset = be32_to_cpu(req-&gt;offset);
+ 		offset += cmnd-&gt;pdu.datasize - conn-&gt;read_overflow;
+ 		if (cmnd_recv_pdu(conn, scsi_cmnd-&gt;tc, offset, conn-&gt;read_overflow) &lt; 0)
+-			assert(0);
++			BUG_ON(1);
+ 		return;
+ 	}
+ 
+@@ -1035,7 +1034,7 @@
+ 		scsi_cmnd-&gt;outstanding_r2t--;
+ 
+ 		if (scsi_cmnd-&gt;r2t_length == 0)
+-			assert(list_empty(&amp;scsi_cmnd-&gt;pdu_list));
++			BUG_ON(!list_empty(&amp;scsi_cmnd-&gt;pdu_list));
+ 
+ 		scsi_cmnd_exec(scsi_cmnd);
+ 	}
+@@ -1199,7 +1198,7 @@
+ /* 			rsp-&gt;tio = req-&gt;tio; */
+ /* 		} */
+ 
+-		assert(get_pgcnt(req-&gt;pdu.datasize, 0) &lt; ISCSI_CONN_IOV_MAX);
++		BUG_ON(get_pgcnt(req-&gt;pdu.datasize, 0) &gt;= ISCSI_CONN_IOV_MAX);
+ 		rsp-&gt;pdu.datasize = req-&gt;pdu.datasize;
+ 		iscsi_cmnd_init_write(rsp);
+ 	} else
+@@ -1274,7 +1273,7 @@
+ 		return;
+ 
+ 	size = (cmnd-&gt;pdu.datasize + 3) &amp; -4;
+-	assert(cmnd-&gt;sg);
++	BUG_ON(!cmnd-&gt;sg);
+ 	__cmnd_send_pdu(conn, cmnd-&gt;sg, 0, size);
+ }
+ 
+@@ -1320,8 +1319,8 @@
+ 	iscsi_cmnd_remove(cmnd);
+ 
+ 	if (is_last) {
+-		assert(!force);
+-		assert(req);
++		BUG_ON(force);
++		BUG_ON(!req);
+ 		cmnd_release(req, 0);
+ 	}
+ 
+@@ -1334,7 +1333,7 @@
+ 	struct iovec *iop;
+ 
+ 	dprintk(D_GENERIC, &quot;%p:%x\n&quot;, cmnd, cmnd_opcode(cmnd));
+-	assert(cmnd);
++	BUG_ON(!cmnd);
+ 	iscsi_cmnd_set_length(&amp;cmnd-&gt;pdu);
+ 
+ 	set_cork(conn-&gt;sock, 1);
+@@ -1368,7 +1367,7 @@
+ 		cmnd_set_sn(cmnd, (rsp-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL) ? 1 : 0);
+ 		offset = rsp-&gt;offset;
+ 		rsp-&gt;offset = cpu_to_be32(offset);
+-		assert(cmnd-&gt;sg);
++		BUG_ON(!cmnd-&gt;sg);
+ 		__cmnd_send_pdu(conn, cmnd-&gt;sg, offset, cmnd-&gt;pdu.datasize);
+ 		break;
+ 	}
+@@ -1415,7 +1414,7 @@
+ 		break;
+ 	default:
+ 		eprintk(&quot;unexpected cmnd op %x\n&quot;, cmnd_opcode(cmnd));
+-		assert(0);
++		BUG_ON(1);
+ 		break;
+ 	}
+ 
+@@ -1483,7 +1482,7 @@
+ 				break;
+ 		}
+ 
+-		assert(list_empty(&amp;cmnd-&gt;list));
++		BUG_ON(!list_empty(&amp;cmnd-&gt;list));
+ 
+ 		list_add_tail(&amp;cmnd-&gt;list, entry);
+ 	}
+
+Modified: trunk/iscsi/kernel/iscsi_dbg.h
+===================================================================
+--- trunk/iscsi/kernel/iscsi_dbg.h	2005-09-25 11:02:11 UTC (rev 103)
++++ trunk/iscsi/kernel/iscsi_dbg.h	2005-09-25 11:44:19 UTC (rev 104)
+@@ -27,15 +27,6 @@
+ 	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, args);	\
+ } while (0)
+ 
+-#define assert(p) do {						\
+-	if (!(p)) {						\
+-		printk(KERN_CRIT &quot;BUG at %s:%d assert(%s)\n&quot;,	\
+-		       __FILE__, __LINE__, #p);			\
+-		dump_stack();					\
+-		BUG();						\
+-	}							\
+-} while (0)
+-
+ #ifdef D_IOV
+ static inline void iscsi_dump_iov(struct msghdr *msg)
+ {
+
+Modified: trunk/iscsi/kernel/nthread.c
+===================================================================
+--- trunk/iscsi/kernel/nthread.c	2005-09-25 11:02:11 UTC (rev 103)
++++ trunk/iscsi/kernel/nthread.c	2005-09-25 11:44:19 UTC (rev 104)
+@@ -44,7 +44,7 @@
+ static void iscsi_conn_read_ahs(struct iscsi_conn *conn, struct iscsi_cmnd *cmnd)
+ {
+ 	cmnd-&gt;pdu.ahs = kmalloc(cmnd-&gt;pdu.ahssize, __GFP_NOFAIL|GFP_KERNEL);
+-	assert(cmnd-&gt;pdu.ahs);
++	BUG_ON(!cmnd-&gt;pdu.ahs);
+ 	iscsi_conn_init_read(conn, cmnd-&gt;pdu.ahs, cmnd-&gt;pdu.ahssize);
+ }
+ 
+@@ -207,7 +207,7 @@
+ 
+ 	switch (conn-&gt;read_state) {
+ 	case RX_INIT_BHS:
+-		assert(!cmnd);
++		BUG_ON(cmnd);
+ 		cmnd = conn-&gt;read_cmnd = create_cmnd(conn);
+ 	case RX_BHS:
+ 		res = do_recv(conn, RX_INIT_AHS);
+@@ -259,7 +259,7 @@
+ 		break;
+ 	default:
+ 		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;read_state, cmnd_opcode(cmnd));
+-		assert(0);
++		BUG_ON(1);
+ 	}
+ 
+ 	if (res &lt;= 0)
+@@ -270,7 +270,7 @@
+ 
+ 	if (conn-&gt;read_size) {
+ 		eprintk(&quot;%d %x %d\n&quot;, res, cmnd_opcode(cmnd), conn-&gt;read_size);
+-		assert(0);
++		BUG_ON(1);
+ 	}
+ 
+ 	cmnd_rx_end(cmnd);
+@@ -503,7 +503,7 @@
+ 
+ 	switch (conn-&gt;write_state) {
+ 	case TX_INIT:
+-		assert(!cmnd);
++		BUG_ON(cmnd);
+ 		cmnd = conn-&gt;write_cmnd = iscsi_get_send_cmnd(conn);
+ 		if (!cmnd)
+ 			return 0;
+@@ -516,7 +516,7 @@
+ 			break;
+ 	case TX_INIT_DDIGEST:
+ 		digest_tx_data(cmnd);
+-		assert(!cmnd-&gt;conn-&gt;write_size);
++		BUG_ON(cmnd-&gt;conn-&gt;write_size);
+ 		cmnd-&gt;conn-&gt;write_size += sizeof(u32);
+ 		conn-&gt;write_state = TX_DDIGEST;
+ 	case TX_DDIGEST:
+@@ -524,7 +524,7 @@
+ 		break;
+ 	default:
+ 		eprintk(&quot;%d %d %x\n&quot;, res, conn-&gt;write_state, cmnd_opcode(cmnd));
+-		assert(0);
++		BUG_ON(1);
+ 	}
+ 
+ 	if (res &lt;= 0)
+@@ -535,7 +535,7 @@
+ 
+ 	if (conn-&gt;write_size) {
+ 		eprintk(&quot;%d %x %u\n&quot;, res, cmnd_opcode(cmnd), conn-&gt;write_size);
+-		assert(!conn-&gt;write_size);
++		BUG_ON(conn-&gt;write_size);
+ 	}
+ 	cmnd_tx_end(cmnd);
+ 	cmnd_release(cmnd, 0);
+@@ -577,8 +577,6 @@
+ 	struct iscsi_session *session = conn-&gt;session;
+ 	struct iscsi_cmnd *cmnd;
+ 
+-	assert(conn);
+-
+ 	conn-&gt;sock-&gt;ops-&gt;shutdown(conn-&gt;sock, 2);
+ 
+ 	write_lock(&amp;conn-&gt;sock-&gt;sk-&gt;sk_callback_lock);
+@@ -604,7 +602,7 @@
+ 		eprintk(&quot;%u\n&quot;, atomic_read(&amp;conn-&gt;nr_cmnds));
+ 		list_for_each_entry(cmnd, &amp;conn-&gt;pdu_list, conn_list)
+ 			eprintk(&quot;%x %x\n&quot;, cmnd_opcode(cmnd), cmnd_itt(cmnd));
+-		assert(0);
++		BUG_ON(1);
+ 	}
+ 
+ 	eprintk(&quot;%d %llu %u\n&quot;, session-&gt;target-&gt;tid, session-&gt;sid, conn-&gt;cid);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000097.html">[Stgt-svn] r103 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000099.html">[Stgt-svn] r105 - in trunk/iscsi: include kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#98">[ date ]</a>
+              <a href="thread.html#98">[ thread ]</a>
+              <a href="subject.html#98">[ subject ]</a>
+              <a href="author.html#98">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

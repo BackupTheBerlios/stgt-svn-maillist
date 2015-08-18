@@ -1,0 +1,1458 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r207 - in branches/uio-mmap: . include istgt/usr kernel usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r207%20-%20in%20branches/uio-mmap%3A%20.%20include%20istgt/usr%20kernel%20usr&In-Reply-To=%3C200512230652.jBN6q47c003975%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000193.html">
+   <LINK REL="Next"  HREF="000195.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r207 - in branches/uio-mmap: . include istgt/usr kernel usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r207%20-%20in%20branches/uio-mmap%3A%20.%20include%20istgt/usr%20kernel%20usr&In-Reply-To=%3C200512230652.jBN6q47c003975%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r207 - in branches/uio-mmap: . include istgt/usr kernel usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Dec 23 07:52:04 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000193.html">[Stgt-svn] r206 - branches
+</A></li>
+        <LI>Next message: <A HREF="000195.html">[Stgt-svn] r208 - branches/uio-mmap
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#194">[ date ]</a>
+              <a href="thread.html#194">[ thread ]</a>
+              <a href="subject.html#194">[ subject ]</a>
+              <a href="author.html#194">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-23 07:51:07 +0100 (Fri, 23 Dec 2005)
+New Revision: 207
+
+Modified:
+   branches/uio-mmap/include/tgt_if.h
+   branches/uio-mmap/initd
+   branches/uio-mmap/istgt/usr/istgt.c
+   branches/uio-mmap/kernel/Makefile
+   branches/uio-mmap/kernel/tgt.c
+   branches/uio-mmap/kernel/tgt.h
+   branches/uio-mmap/kernel/tgt_device.h
+   branches/uio-mmap/kernel/tgt_nl.c
+   branches/uio-mmap/kernel/tgt_priv.h
+   branches/uio-mmap/kernel/tgt_protocol.h
+   branches/uio-mmap/kernel/tgt_scsi.c
+   branches/uio-mmap/kernel/tgt_sysfs.c
+   branches/uio-mmap/kernel/tgt_vsd.c
+   branches/uio-mmap/usr/dl.c
+   branches/uio-mmap/usr/dl.h
+   branches/uio-mmap/usr/netlink.c
+   branches/uio-mmap/usr/scsi.c
+Log:
+execute READ/WRITE commands in user space using mmap.
+
+Modified: branches/uio-mmap/include/tgt_if.h
+===================================================================
+--- branches/uio-mmap/include/tgt_if.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/include/tgt_if.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -22,7 +22,8 @@
+ 	TGT_KEVENT_RESPONSE,
+ 	TGT_KEVENT_CMD_REQ,
+ 	TGT_KEVENT_TARGET_PASSTHRU,
+-	TGT_KEVENT_TASK_MGMT
++	TGT_KEVENT_TASK_MGMT,
++	TGT_KEVENT_CMD_DONE,
+ };
+ 
+ #define	TGT_INVALID_DEV_ID	~0ULL
+@@ -58,6 +59,14 @@
+ 			uint64_t cid;
+ 			uint32_t len;
+ 			int result;
++			/*
++			 * this is screwed for setups with 64 bit kernel
++			 * and 32 bit userspace
++			 */
++			unsigned long uaddr;
++			uint64_t offset;
++			uint8_t rw;
++			uint8_t try_map;
+ 		} cmd_res;
+ 		struct {
+ 			uint64_t rid;
+@@ -80,6 +89,8 @@
+ 			uint64_t dev_id;
+ 			uint64_t cid;
+ 			int typeid;
++			int fd;
++			uint32_t data_len;
+ 		} cmd_req;
+ 		struct {
+ 			int tid;
+@@ -95,6 +106,12 @@
+ 			uint64_t dev_id;
+ 			uint64_t tag;
+ 		} task_mgmt;
++		struct {
++			int tid;
++			int typeid;
++			unsigned long uaddr;
++			uint32_t len;
++		} cmd_done;
+ 	} k;
+ 
+ 	/*
+
+Modified: branches/uio-mmap/initd
+===================================================================
+--- branches/uio-mmap/initd	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/initd	2005-12-23 06:51:07 UTC (rev 207)
+@@ -15,8 +15,6 @@
+ {
+ 	insmod ${PWD}/kernel/tgt_core.ko
+ 	insmod ${PWD}/kernel/tgt_scsi.ko
+-	insmod ${PWD}/kernel/tgt_vsd.ko
+-#	insmod ${PWD}/kernel/tgt_sd.ko
+ 
+ 	if [ $TARGET = &quot;istgt&quot; ] ; then
+ 		modprobe -q crc32c
+@@ -25,7 +23,7 @@
+ 		insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
+ 	fi
+ 
+-	${PWD}/usr/tgtd
++	${PWD}/usr/tgtd -d 0
+ }
+ 	
+ stop_server()
+
+Modified: branches/uio-mmap/istgt/usr/istgt.c
+===================================================================
+--- branches/uio-mmap/istgt/usr/istgt.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/istgt/usr/istgt.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -174,8 +174,6 @@
+ 	struct pollfd *pfd;
+ 	int i, res, opt;
+ 
+-	eprintf(&quot;%d\n&quot;, nr);
+-
+ 	for (i = 0; i &lt; LISTEN_MAX; i++) {
+ 		if (pfds[POLL_LISTEN + i].revents)
+ 			accept_connection(pfds, pfds[POLL_LISTEN + i].fd);
+
+Modified: branches/uio-mmap/kernel/Makefile
+===================================================================
+--- branches/uio-mmap/kernel/Makefile	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/Makefile	2005-12-23 06:51:07 UTC (rev 207)
+@@ -8,8 +8,7 @@
+ obj-m		+= tgt_core.o
+ tgt_core-objs	:= tgt.o tgt_nl.o tgt_sysfs.o tgt_protocol.o
+ 
+-obj-m		+= tgt_vsd.o tgt_scsi.o
+-#obj-m		+= tgt_vsd.o tgt_scsi.o tgt_sd.o
++obj-m		+= tgt_scsi.o
+ else
+ 
+ ifeq ($(KERNELSRC),)
+
+Modified: branches/uio-mmap/kernel/tgt.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -26,6 +26,8 @@
+ 
+ MODULE_LICENSE(&quot;GPL&quot;);
+ 
++struct task_struct *tgtd_tsk;
++
+ static spinlock_t all_targets_lock;
+ static LIST_HEAD(all_targets);
+ 
+@@ -148,24 +150,13 @@
+ {
+ 	struct tgt_cmd *cmd;
+ 	struct request *rq;
+-	int err;
+ 
+ 	while ((rq = elv_next_request(q)) != NULL) {
+ 		/* we need to set state or refcount under this lock! */
+ 		cmd = rq-&gt;special;
+-
+ 		/*
+-		 * the iosched nicely ordered these, should we try to keep the
+-		 * ordering or for most cases will it not make a difference
+-		 * since the lower levels will iosched again (not for
+-		 * passthrough though). Maybe we should use a tgt_device
+-		 * flag to indicate what is best for the real device.
+-		 */
+-		if (atomic_read(&amp;cmd-&gt;state) != TGT_CMD_READY)
+-			break;
+-		/*
+ 		 * hit queue depth (command completion will run the
+-		 * queue again
++		 * queue again)
+ 		 */
+ 		if (blk_queue_tagged(q) &amp;&amp; blk_queue_start_tag(q, rq))
+ 			break;
+@@ -174,23 +165,14 @@
+ 
+ 		dprintk(&quot;cmd %p tag %d\n&quot;, cmd, rq-&gt;tag);
+ 
+-		if (!cmd-&gt;device) {
+-			struct tgt_target *target = cmd-&gt;session-&gt;target;
++		/*
++		 * TODO: build a vector of commands and then do the
++	 	 * userspace send call
++		 */
+ 
+-			INIT_WORK(&amp;cmd-&gt;work, target-&gt;proto-&gt;uspace_cmd_execute,
+-				  cmd);
+-			queue_work(target-&gt;twq, &amp;cmd-&gt;work);
+-			err = TGT_CMD_USPACE_QUEUED;
+-		} else
+-			err = cmd-&gt;device-&gt;dt-&gt;execute_cmd(cmd);
+-	        switch (err) {
+-	        case TGT_CMD_FAILED:
+-		case TGT_CMD_COMPLETED:
+-			dprintk(&quot;command completed %d\n&quot;, err);
+-			tgt_transfer_response(cmd);
+-		default:
+-			dprintk(&quot;command %d queued to real dev\n&quot;, rq-&gt;tag);
+-		}
++		/* what should we do on failure here ? */
++		if (tgt_uspace_cmd_send(cmd, GFP_ATOMIC) &lt; 0)
++			eprintk(&quot;command %d failed\n&quot;, rq-&gt;tag);
+ 
+ 		spin_lock_irq(q-&gt;queue_lock);
+ 	}
+@@ -423,74 +405,6 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_session_destroy);
+ 
+-struct device_type_internal {
+-	struct tgt_device_template *sdt;
+-	struct list_head list;
+-};
+-
+-static struct tgt_device_template *device_template_get(const char *name)
+-{
+-	unsigned long flags;
+-	struct device_type_internal *ti;
+-
+-	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
+-
+-	list_for_each_entry(ti, &amp;device_tmpl_list, list)
+-		if (!strcmp(name, ti-&gt;sdt-&gt;name)) {
+-			if (!try_module_get(ti-&gt;sdt-&gt;module))
+-				ti = NULL;
+-			spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
+-			return ti ? ti-&gt;sdt : NULL;
+-		}
+-
+-	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
+-
+-	return NULL;
+-}
+-
+-static void device_template_put(struct tgt_device_template *sdt)
+-{
+-	module_put(sdt-&gt;module);
+-}
+-
+-int tgt_device_template_register(struct tgt_device_template *sdt)
+-{
+-	unsigned long flags;
+-	struct device_type_internal *ti;
+-
+-	ti = kzalloc(sizeof(*ti), GFP_KERNEL);
+-	if (!ti)
+-		return -ENOMEM;
+-
+-	INIT_LIST_HEAD(&amp;ti-&gt;list);
+-	ti-&gt;sdt = sdt;
+-
+-	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
+-	list_add_tail(&amp;ti-&gt;list, &amp;device_tmpl_list);
+-	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_device_template_register);
+-
+-void tgt_device_template_unregister(struct tgt_device_template *sdt)
+-{
+-	unsigned long flags;
+-	struct device_type_internal *ti;
+-
+-	spin_lock_irqsave(&amp;device_tmpl_lock, flags);
+-
+-	list_for_each_entry(ti, &amp;device_tmpl_list, list)
+-		if (ti-&gt;sdt == sdt) {
+-			list_del(&amp;ti-&gt;list);
+-			kfree(ti);
+-			break;
+-		}
+-
+-	spin_unlock_irqrestore(&amp;device_tmpl_lock, flags);
+-}
+-EXPORT_SYMBOL_GPL(tgt_device_template_unregister);
+-
+ /*
+  * TODO: use a hash or any better alg/ds
+  */
+@@ -585,6 +499,7 @@
+ 	struct tgt_target *target;
+ 	struct tgt_device *device;
+ 	unsigned long flags;
++	struct inode *inode;
+ 
+ 	dprintk(&quot;tid %d dev_id %&quot; PRIu64 &quot; type %s fd %d\n&quot;,
+ 		tid, dev_id, device_type, fd);
+@@ -607,22 +522,18 @@
+ 		goto free_device;
+ 	}
+ 
+-	device-&gt;dt = device_template_get(device_type);
+-	if (!device-&gt;dt) {
+-		eprintk(&quot;Could not get devive type %s\n&quot;, device_type);
+-		goto put_fd;
+-	}
++	/* TODO: kill me */
++	inode = device-&gt;file-&gt;f_dentry-&gt;d_inode;
++	if (S_ISREG(inode-&gt;i_mode))
++		;
++	else if (S_ISBLK(inode-&gt;i_mode))
++		inode = inode-&gt;i_bdev-&gt;bd_inode;
+ 
+-	device-&gt;dt_data = kzalloc(device-&gt;dt-&gt;priv_data_size, GFP_KERNEL);
+-	if (!device-&gt;dt_data)
+-		goto put_template;
++	device-&gt;use_clustering = 1;
++	device-&gt;size = inode-&gt;i_size;
+ 
+-	if (device-&gt;dt-&gt;create)
+-		if (device-&gt;dt-&gt;create(device))
+-			goto free_priv_dt_data;
+-
+ 	if (tgt_queue_create(target-&gt;proto, TGT_QUEUE_DEPTH, &amp;device-&gt;q))
+-		goto dt_destroy;
++		goto put_fd;
+ 	tgt_device_queue_setup(device);
+ 
+ 	if (tgt_sysfs_register_device(device))
+@@ -636,13 +547,6 @@
+ 
+ queue_destroy:
+ 	tgt_queue_destroy(device-&gt;q);
+-dt_destroy:
+-	if (device-&gt;dt-&gt;destroy)
+-		device-&gt;dt-&gt;destroy(device);
+-free_priv_dt_data:
+-	kfree(device-&gt;dt_data);
+-put_template:
+-	device_template_put(device-&gt;dt);
+ put_fd:
+ 	fput(device-&gt;file);
+ free_device:
+@@ -661,14 +565,9 @@
+ 	list_del(&amp;device-&gt;dlist);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	if (device-&gt;dt-&gt;destroy)
+-		device-&gt;dt-&gt;destroy(device);
+-
+ 	tgt_queue_destroy(device-&gt;q);
+ 	fput(device-&gt;file);
+-	device_template_put(device-&gt;dt);
+ 
+-	kfree(device-&gt;dt_data);
+ 	kfree(device);
+ }
+ 
+@@ -716,6 +615,22 @@
+ 	kfree(cmd-&gt;sg);
+ }
+ 
++static void tgt_unmap_user_pages(struct tgt_cmd *cmd)
++{
++	struct page *page;
++	int i;
++
++	for (i = 0; i &lt; cmd-&gt;sg_count; i++) {
++		page = cmd-&gt;pages[i];
++		if(!page)
++			break;
++		if (test_bit(TGT_CMD_RW, &amp;cmd-&gt;flags))
++			set_page_dirty_lock(page);
++		page_cache_release(page);
++	}
++	kfree(cmd-&gt;pages);
++}
++
+ static void __tgt_cmd_destroy(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+@@ -724,6 +639,14 @@
+ 	unsigned long flags;
+ 
+ 	dprintk(&quot;tag %d\n&quot;, rq-&gt;tag);
++
++	if (test_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags)) {
++		tgt_unmap_user_pages(cmd);
++		kfree(cmd-&gt;sg);
++		tgt_uspace_cmd_done_send(cmd, GFP_KERNEL);
++	} else
++		tgt_free_buffer(cmd);
++
+ 	spin_lock_irqsave(q-&gt;queue_lock, flags);
+ 	if (blk_rq_tagged(rq))
+ 		blk_queue_end_tag(q, rq);
+@@ -742,8 +665,6 @@
+ {
+ 	dprintk(&quot;cmd %p\n&quot;, cmd);
+ 
+-	tgt_free_buffer(cmd);
+-
+ 	/*
+ 	 * Goose the queue incase we are blocked on a queue depth
+ 	 * limit or resource problem.
+@@ -761,6 +682,8 @@
+ 	struct tgt_target *target = cmd-&gt;session-&gt;target;
+ 	int err;
+ 
++	dprintk(&quot;cmd %p\n&quot;, cmd);
++
+ 	cmd-&gt;done = tgt_cmd_destroy;
+ 	err = target-&gt;tt-&gt;transfer_response(cmd);
+ 	switch (err) {
+@@ -778,12 +701,35 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_transfer_response);
+ 
++static int tgt_cmd_queue(struct tgt_cmd *cmd, gfp_t gfp_mask)
++{
++	int write = (cmd-&gt;data_dir == DMA_TO_DEVICE);
++	struct request_queue *q;
++	struct request *rq;
++
++	if (cmd-&gt;device)
++		q = cmd-&gt;device-&gt;q;
++	else
++		q = cmd-&gt;session-&gt;target-&gt;q;
++
++	rq = blk_get_request(q, write, gfp_mask);
++	if (!rq)
++		return -ENOMEM;
++
++	cmd-&gt;rq = rq;
++	rq-&gt;special = cmd;
++	rq-&gt;flags |= REQ_SPECIAL | REQ_SOFTBARRIER | REQ_NOMERGE | REQ_BLOCK_PC;
++	elv_add_request(q, rq, ELEVATOR_INSERT_BACK, 1);
++	return 0;
++}
++
+ struct tgt_cmd *
+ tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
+ 	       uint32_t data_len, enum dma_data_direction data_dir,
+ 	       uint8_t *dev_buf, int dev_buf_size, int flags)
+ {
+ 	struct tgt_cmd *cmd;
++	int err;
+ 
+ 	cmd = mempool_alloc(session-&gt;cmd_pool, GFP_ATOMIC);
+ 	if (!cmd) {
+@@ -802,56 +748,23 @@
+ 
+ 	dprintk(&quot;%p %p\n&quot;, session, cmd);
+ 
+-	tgt_cmd_start(cmd);
++	err = tgt_cmd_queue(cmd, GFP_ATOMIC);
++	if (err) {
++		mempool_free(cmd, cmd-&gt;session-&gt;cmd_pool);
++		return NULL;
++	}
+ 
+ 	return cmd;
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_create);
+ 
+-static int tgt_cmd_queue(struct tgt_cmd *cmd, gfp_t gfp_mask)
+-{
+-	int write = (cmd-&gt;data_dir == DMA_TO_DEVICE);
+-	struct request_queue *q;
+-	struct request *rq;
+-
+-	if (cmd-&gt;device)
+-		q = cmd-&gt;device-&gt;q;
+-	else
+-		q = cmd-&gt;session-&gt;target-&gt;q;
+-
+-	rq = blk_get_request(q, write, gfp_mask);
+-	if (!rq)
+-		return -ENOMEM;
+-
+-	cmd-&gt;rq = rq;
+-	rq-&gt;special = cmd;
+-	rq-&gt;flags |= REQ_SPECIAL | REQ_SOFTBARRIER | REQ_NOMERGE | REQ_BLOCK_PC;
+-	elv_add_request(q, rq, ELEVATOR_INSERT_BACK, 0);
+-	return 0;
+-}
+-
+-static void set_cmd_ready(struct tgt_cmd *cmd)
+-{
+-	unsigned long flags;
+-	struct request_queue *q = cmd-&gt;rq-&gt;q;
+-
+-	/*
+-	 * we have a request that is ready for processing so
+-	 * plug the queue
+-	 */
+-	spin_lock_irqsave(q-&gt;queue_lock, flags);
+-	atomic_set(&amp;cmd-&gt;state, TGT_CMD_READY);
+-	blk_plug_device(q);
+-	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+-}
+-
+ static void tgt_write_data_transfer_done(struct tgt_cmd *cmd)
+ {
+ 	/*
+ 	 * TODO check for errors and add state checking. we may have
+ 	 * to internally queue for the target driver
+ 	 */
+-	set_cmd_ready(cmd);
++	tgt_transfer_response(cmd);
+ }
+ 
+ #define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_CACHE_MASK)) + PAGE_CACHE_SIZE - 1) &gt;&gt; PAGE_CACHE_SHIFT)
+@@ -894,72 +807,16 @@
+ 	}
+ }
+ 
+-static void tgt_alloc_buffer(void *data)
++/*
++ * we should jsut pass the cmd pointer between userspace and the kernel
++ * as a handle like open-iscsi
++ */
++static struct tgt_cmd *find_cmd_by_id(int tid, uint64_t dev_id, uint64_t cid)
+ {
+-	struct tgt_cmd *cmd = data;
+-
+-	__tgt_alloc_buffer(cmd);
+-	atomic_set(&amp;cmd-&gt;state, TGT_CMD_BUF_ALLOCATED);
+-
+-	/*
+-	 * we probably will not be able to rely on the target
+-	 * driver knowing the data_dir so this may have to move
+-	 * the devices or protocol if it becomes command specific
+-	 */
+-	if (cmd-&gt;data_dir == DMA_TO_DEVICE) {
+-		cmd-&gt;done = tgt_write_data_transfer_done;
+-		/*
+-		 * TODO handle errors and possibly requeue for the
+-		 * target driver
+-		 */
+-		cmd-&gt;session-&gt;target-&gt;tt-&gt;transfer_write_data(cmd);
+-	} else
+-		set_cmd_ready(cmd);
+-}
+-
+-int tgt_cmd_start(struct tgt_cmd *cmd)
+-{
+-	struct tgt_session *session = cmd-&gt;session;
+-	int err;
+-
+-	if (cmd-&gt;device)
+-		cmd-&gt;device-&gt;dt-&gt;prep_cmd(cmd);
+-
+-	err = tgt_cmd_queue(cmd, GFP_ATOMIC);
+-	if (err)
+-		return err;
+-
+-	if (cmd-&gt;bufflen) {
+-		atomic_set(&amp;cmd-&gt;state, TGT_CMD_STARTED);
+-		INIT_WORK(&amp;cmd-&gt;work, tgt_alloc_buffer, cmd);
+-		queue_work(session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
+-	} else
+-		set_cmd_ready(cmd);
+-
+-	return 0;
+-}
+-EXPORT_SYMBOL_GPL(tgt_cmd_start);
+-
+-static struct tgt_cmd *find_cmd_by_id(struct request_queue *q, uint64_t cid)
+-{
+-
+-	struct request *rq;
+-
+-	rq = blk_queue_find_tag(q, cid);
+-	if (rq)
+-		return rq-&gt;special;
+-	return NULL;
+-}
+-
+-int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
+-		    int result, uint32_t len)
+-{
+ 	struct tgt_target *target;
+ 	struct tgt_device *device;
+-	struct tgt_cmd *cmd;
+ 	struct request_queue *q;
+-	char *p = data;
+-	int i;
++	struct request *rq;
+ 
+ 	dprintk(&quot;%d %llu %llu\n&quot;, tid, (unsigned long long) dev_id,
+ 		(unsigned long long) cid);
+@@ -967,7 +824,7 @@
+ 	target = target_find(tid);
+ 	if (!target) {
+ 		eprintk(&quot;Could not find target %d\n&quot;, tid);
+-		return -EINVAL;
++		return NULL;
+ 	}
+ 
+ 	if (dev_id == TGT_INVALID_DEV_ID)
+@@ -977,12 +834,101 @@
+ 		if (!device) {
+ 			eprintk(&quot;Could not find device %llu\n&quot;,
+ 				(unsigned long long) dev_id);
+-			return -EINVAL;
++			return NULL;
+ 		}
+ 		q = device-&gt;q;
+ 	}
+ 
+-	cmd = find_cmd_by_id(q, cid);
++	rq = blk_queue_find_tag(q, cid);
++	if (rq)
++		return rq-&gt;special;
++
++	eprintk(&quot;Could not find rq for cid %llu\n&quot;, (unsigned long long) cid);
++	return NULL;
++}
++
++static int tgt_map_user_pages(int rw, struct tgt_cmd *cmd)
++{
++	int i, err = -EIO, cnt;
++	struct page *page, **pages;
++	uint64_t poffset = cmd-&gt;offset &amp; ~PAGE_MASK;
++	uint32_t size, rest = cmd-&gt;bufflen;
++
++	cnt = pgcnt(cmd-&gt;bufflen, cmd-&gt;offset);
++	pages = kzalloc(cnt * sizeof(struct page *), GFP_KERNEL);
++	if (!pages)
++		return -ENOMEM;
++	cmd-&gt;pages = pages;
++
++	cmd-&gt;sg = kmalloc(cnt * sizeof(struct scatterlist), GFP_KERNEL);
++	if (!cmd-&gt;sg)
++		goto release_pages;
++	cmd-&gt;sg_count = cnt;
++
++	dprintk(&quot;cmd %p addr %lx cnt %d\n&quot;, cmd, cmd-&gt;uaddr, cnt);
++
++	if (rw == WRITE)
++		__set_bit(TGT_CMD_RW, &amp;cmd-&gt;flags);
++
++	down_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
++	err = get_user_pages(tgtd_tsk, tgtd_tsk-&gt;mm, cmd-&gt;uaddr, cnt,
++			     rw == WRITE, 0, pages, NULL);
++	up_read(&amp;tgtd_tsk-&gt;mm-&gt;mmap_sem);
++
++	if (err &lt; cnt) {
++		err = -EIO;
++		goto free_sg;
++	}
++
++	__set_bit(TGT_CMD_MAPPED, &amp;cmd-&gt;flags);
++	/*
++	 * We have a request_queue and we have a the SGIO scatterlist stuff in
++	 * scsi-misc so we can use those functions to make us a request with
++	 * a proper scatterlist by using block layer funciotns ?????
++	 *
++	 * do a:
++	 * scsi_req_map_sg(cmd-&gt;rq, tmp_sg, cnt, orig_size, GFP_KERNEL);
++	 * blk_rq_map_sg(cmd-&gt;device-&gt;q or cmd-&gt;target-&gt;q, cmd-&gt;rq, cmd-&gt;sg);
++	 */
++	for (i = 0; i &lt; cnt; i++) {
++		size = min_t(uint32_t, rest, PAGE_SIZE - poffset);
++
++		cmd-&gt;sg[i].page = pages[i];
++		cmd-&gt;sg[i].offset = poffset;
++		cmd-&gt;sg[i].length = size;
++
++		poffset = 0;
++		rest -= size;
++	}
++
++	return 0;
++
++free_sg:
++	kfree(cmd-&gt;sg);
++release_pages:
++	for (i = 0; i &lt; cnt; i++) {
++		page = pages[i];
++		if(!page)
++			break;
++		if (!err &amp;&amp; rw == WRITE)
++			set_page_dirty_lock(page);
++		page_cache_release(page);
++	}
++	kfree(pages);
++
++	return err;
++}
++
++int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
++		    int result, uint32_t len, uint64_t offset,
++		    unsigned long uaddr, uint8_t rw, uint8_t try_map)
++{
++	struct tgt_target *target;
++	struct tgt_cmd *cmd;
++	char *p = data;
++	int i;
++
++	cmd = find_cmd_by_id(tid, dev_id, cid);
+ 	if (!cmd) {
+ 		eprintk(&quot;Could not find command %llu\n&quot;,
+ 			(unsigned long long) cid);
+@@ -992,20 +938,30 @@
+ 	dprintk(&quot;cmd %p tag %d result %d len %d bufflen %u\n&quot;,
+ 		cmd, cmd-&gt;rq-&gt;tag, result, len, cmd-&gt;bufflen);
+ 
+-	if (len) {
+-		/*
+-		 * yuck TODO fix.
+-		 * This will happen if we thought we were going to do some
+-		 * IO but we ended up just gettting some sense back
+-		 */
+-		if (len != cmd-&gt;bufflen) {
+-			tgt_free_buffer(cmd);
++	cmd-&gt;uaddr = uaddr;
++	cmd-&gt;result = result;
++	cmd-&gt;offset = offset;
+ 
+-			cmd-&gt;bufflen = len;
+-			cmd-&gt;offset = 0;
++	target = cmd-&gt;session-&gt;target;
++	target-&gt;proto-&gt;uspace_cmd_complete(cmd);
+ 
+-			__tgt_alloc_buffer(cmd);
++	if (try_map &amp;&amp; !cmd-&gt;result) {
++		if (tgt_map_user_pages(rw, cmd))
++			return -EIO;
++		/* what to do for errors */
++
++		if (cmd-&gt;data_dir == DMA_TO_DEVICE) {
++			cmd-&gt;done = tgt_write_data_transfer_done;
++			/*
++			 * TODO handle errors and possibly requeue for the
++			 * target driver
++			 */
++			target-&gt;tt-&gt;transfer_write_data(cmd);
++			return 0;
+ 		}
++	} else if (len) {
++		cmd-&gt;bufflen = len;
++		__tgt_alloc_buffer(cmd);
+ 
+ 		for (i = 0; i &lt; cmd-&gt;sg_count; i++) {
+ 			uint32_t copy = min_t(uint32_t, len, PAGE_CACHE_SIZE);
+@@ -1016,10 +972,7 @@
+ 		}
+ 	}
+ 
+-	cmd-&gt;result = result;
+-	target-&gt;proto-&gt;uspace_cmd_complete(cmd);
+ 	tgt_transfer_response(cmd);
+-
+ 	return 0;
+ }
+ 
+
+Modified: branches/uio-mmap/kernel/tgt.h
+===================================================================
+--- branches/uio-mmap/kernel/tgt.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -48,6 +48,11 @@
+ 	TGT_CMD_DONE,
+ };
+ 
++enum {
++	TGT_CMD_MAPPED,
++	TGT_CMD_RW,		/* not set == read, set == write */
++};
++
+ struct tgt_cmd {
+ 	struct tgt_session *session;
+ 	struct tgt_device *device;
+@@ -55,6 +60,7 @@
+ 
+ 	atomic_t state;
+ 	uint64_t dev_id;
++	unsigned long flags;
+ 
+ 	struct work_struct work;
+ 	void (*done) (struct tgt_cmd *);
+@@ -62,10 +68,13 @@
+ 	enum dma_data_direction data_dir;
+ 	int sg_count;
+ 	struct scatterlist *sg;
++	struct page **pages;
+ 	uint32_t bufflen;
+ 	uint64_t offset;
+ 	int result;
+ 
++	unsigned long uaddr;
++
+ 	struct request *rq;
+ 	/*
+ 	 * target driver private
+@@ -89,13 +98,13 @@
+ tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
+ 	       uint32_t data_len, enum dma_data_direction data_dir,
+ 	       uint8_t *dev_buf, int dev_buf_size, int flags);
+-extern int tgt_cmd_start(struct tgt_cmd *cmd);
+ extern void tgt_transfer_response(void *cmd);
+ extern int tgt_task_mgmt_send(struct tgt_target *target, uint64_t rid,
+ 			      int func, uint64_t dev_id, uint64_t tag,
+ 			      gfp_t gfp_mask);
++extern int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags);
+ 
+-#define DEBUG_TGT
++#define DEBUG_TGT 1
+ 
+ #define eprintk(fmt, args...)					\
+ do {								\
+
+Modified: branches/uio-mmap/kernel/tgt_device.h
+===================================================================
+--- branches/uio-mmap/kernel/tgt_device.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_device.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -29,43 +29,11 @@
+ 	TGT_DEV_DEL = 0,
+ };
+ 
+-struct tgt_device_template {
+-	const char *name;
+-	struct module *module;
+-	unsigned priv_data_size;
+-
+-	/*
+-	 * setup and destroy private structures
+-	 */
+-	int (* create)(struct tgt_device *);
+-	void (* destroy)(struct tgt_device *);
+-	/*
+-	 * queue or execute command. Return TGT_CMD*.
+-	 * If returning TGT_CMD_COMPLETED or TGT_CMD_FAILED the result
+-	 * field must be set.
+-	 */
+-	int (* execute_cmd)(struct tgt_cmd *cmd);
+-	/*
+-	 * complete a kernel command if your queue_command was async
+-	 * and the device used one of the tgt threads to process the
+-	 * command
+-	 */
+-	void (* complete_kern_cmd)(struct tgt_cmd *cmd);
+-	/*
+-	 * setup buffer or device fields if needed
+-	 */
+-	void (* prep_cmd)(struct tgt_cmd *cmd);
+-
+-	/*
+-	 * Pointer to the sysfs class properties for this host, NULL terminated.
+-	 */
+-	struct class_device_attribute **device_attrs;
+-};
+-
++/*
++ * TODO: we could do a queue per target instead of per device and kill
++ * all the tgt_device code
++ */
+ struct tgt_device {
+-	struct tgt_device_template *dt;
+-	void *dt_data;
+-
+ 	struct class_device cdev;
+ 
+ 	int fd;
+@@ -100,7 +68,5 @@
+ 
+ extern int tgt_sysfs_register_device(struct tgt_device *device);
+ extern void tgt_sysfs_unregister_device(struct tgt_device *device);
+-extern int tgt_device_template_register(struct tgt_device_template *dt);
+-extern void tgt_device_template_unregister(struct tgt_device_template *dt);
+ 
+ #endif
+
+Modified: branches/uio-mmap/kernel/tgt_nl.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_nl.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_nl.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -44,6 +44,8 @@
+ 	ev-&gt;k.cmd_req.dev_id = cmd-&gt;device ? cmd-&gt;dev_id : TGT_INVALID_DEV_ID;
+ 	ev-&gt;k.cmd_req.cid = cmd-&gt;rq-&gt;tag;
+ 	ev-&gt;k.cmd_req.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
++	ev-&gt;k.cmd_req.fd = cmd-&gt;device ? cmd-&gt;device-&gt;fd : 0;
++	ev-&gt;k.cmd_req.data_len = cmd-&gt;bufflen;
+ 
+ 	proto-&gt;uspace_pdu_build(cmd, pdu);
+ 
+@@ -88,6 +90,20 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_msg_send);
+ 
++int tgt_uspace_cmd_done_send(struct tgt_cmd *cmd, gfp_t flags)
++{
++	struct tgt_event ev;
++
++	memset(&amp;ev, 0, sizeof(ev));
++	ev.k.cmd_done.tid = cmd-&gt;session-&gt;target-&gt;tid;
++	ev.k.cmd_done.typeid = cmd-&gt;session-&gt;target-&gt;typeid;
++	ev.k.cmd_done.uaddr = cmd-&gt;uaddr;
++	ev.k.cmd_done.len = cmd-&gt;bufflen;
++
++	return send_event_res(TGT_KEVENT_CMD_DONE, &amp;ev, NULL, 0, flags);
++}
++EXPORT_SYMBOL_GPL(tgt_uspace_cmd_done_send);
++
+ int tgt_task_mgmt_send(struct tgt_target *target, uint64_t rid,
+ 		       int func, uint64_t dev_id, uint64_t tag, gfp_t flags)
+ {
+@@ -121,6 +137,7 @@
+ 	switch (nlh-&gt;nlmsg_type) {
+ 	case TGT_UEVENT_START:
+ 		tgtd_pid  = NETLINK_CREDS(skb)-&gt;pid;
++		tgtd_tsk = current;
+ 		eprintk(&quot;start target drivers\n&quot;);
+ 		break;
+ 	case TGT_UEVENT_TARGET_CREATE:
+@@ -164,7 +181,10 @@
+ 	case TGT_UEVENT_CMD_RES:
+ 		err = uspace_cmd_done(ev-&gt;u.cmd_res.tid, ev-&gt;u.cmd_res.dev_id,
+ 				      ev-&gt;u.cmd_res.cid, ev-&gt;data,
+-				      ev-&gt;u.cmd_res.result, ev-&gt;u.cmd_res.len);
++				      ev-&gt;u.cmd_res.result, ev-&gt;u.cmd_res.len,
++				      ev-&gt;u.cmd_res.offset,
++				      ev-&gt;u.cmd_res.uaddr, ev-&gt;u.cmd_res.rw,
++				      ev-&gt;u.cmd_res.try_map);
+ 		break;
+ 	case TGT_UEVENT_TASK_MGMT:
+ 		err = tgt_task_mgmt(ev-&gt;u.task_mgmt.rid, ev-&gt;u.task_mgmt.func,
+
+Modified: branches/uio-mmap/kernel/tgt_priv.h
+===================================================================
+--- branches/uio-mmap/kernel/tgt_priv.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_priv.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -9,10 +9,14 @@
+ 			     int fd, unsigned long dflags);
+ extern int tgt_device_destroy(int tid, uint64_t dev_id);
+ extern int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
+-			   int result, uint32_t len);
++			   int result, uint32_t len, uint64_t offset,
++			   unsigned long addr,
++			   uint8_t rw, uint8_t try_map);
+ extern int tgt_task_mgmt(uint64_t fid, int func, int tid, uint64_t sid,
+ 			 uint64_t lun, uint64_t tag, int res);
+ 
++extern struct task_struct *tgtd_tsk;
++
+ /* netlink */
+ extern void tgt_nl_exit(void);
+ extern int tgt_nl_init(void);
+
+Modified: branches/uio-mmap/kernel/tgt_protocol.h
+===================================================================
+--- branches/uio-mmap/kernel/tgt_protocol.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_protocol.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -45,7 +45,6 @@
+ 	void (* uspace_pdu_build)(struct tgt_cmd *cmd, void *data);
+ 
+ 	void (* uspace_cmd_complete)(struct tgt_cmd *cmd);
+-	void (* uspace_cmd_execute)(void *cmd);
+ };
+ 
+ extern void tgt_protocol_init(void);
+
+Modified: branches/uio-mmap/kernel/tgt_scsi.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_scsi.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_scsi.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -108,19 +108,6 @@
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_sense_copy);
+ 
+-static void scsi_tgt_uspace_cmd_exec(void *data)
+-{
+-	struct tgt_cmd *cmd = data;
+-	int err;
+-
+-	err = tgt_uspace_cmd_send(cmd, GFP_KERNEL);
+-	if (err &gt;= 0)
+-		return;
+-
+-	scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-	tgt_transfer_response(cmd);
+-}
+-
+ static void scsi_tgt_uspace_pdu_build(struct tgt_cmd *cmd, void *data)
+ {
+ 	struct scsi_tgt_cmd *scmd = (struct scsi_tgt_cmd *)cmd-&gt;proto_priv;
+@@ -129,9 +116,14 @@
+ 
+ static void scsi_tgt_uspace_cmd_complete(struct tgt_cmd *cmd)
+ {
+-	/* userspace did everything for us just copy the buffer */
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
++
++	dprintk(&quot;%d %lu\n&quot;, cmd-&gt;result, cmd-&gt;uaddr);
++
+ 	if (cmd-&gt;result != SAM_STAT_GOOD)
+ 		scsi_tgt_sense_copy(cmd);
++
++	dprintk(&quot;res %d, cmd %p op 0x%02x\n&quot;, cmd-&gt;result, cmd, scmd-&gt;scb[0]);
+ }
+ 
+ static struct tgt_protocol scsi_tgt_proto = {
+@@ -139,7 +131,6 @@
+ 	.module = THIS_MODULE,
+ 	.cmd_create = scsi_tgt_cmd_create,
+ 	.uspace_pdu_build = scsi_tgt_uspace_pdu_build,
+-	.uspace_cmd_execute = scsi_tgt_uspace_cmd_exec,
+ 	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+
+Modified: branches/uio-mmap/kernel/tgt_sysfs.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_sysfs.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_sysfs.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -257,24 +257,11 @@
+ 	if (!class_device_get(&amp;target-&gt;cdev))
+ 		return -EINVAL;
+ 
+-	if (device-&gt;dt-&gt;device_attrs) {
+-		for (i = 0; device-&gt;dt-&gt;device_attrs[i]; i++) {
+-			err = class_attr_add(&amp;device-&gt;cdev,
+-					     tgt_target_attrs,
+-					     device-&gt;dt-&gt;device_attrs[i]);
+-                        if (err)
+-                                goto cleanup;
+-		}
+-	}
+-
+ 	for (i = 0; tgt_device_attrs[i]; i++) {
+-		if (!class_attr_overridden(device-&gt;dt-&gt;device_attrs,
+-					   tgt_device_attrs[i])) {
+-			err = class_device_create_file(&amp;device-&gt;cdev,
+-						       tgt_device_attrs[i]);
+-			if (err)
+-				goto cleanup;
+-		}
++		err = class_device_create_file(&amp;device-&gt;cdev,
++					       tgt_device_attrs[i]);
++		if (err)
++			goto cleanup;
+ 	}
+ 
+ 	return 0;
+
+Modified: branches/uio-mmap/kernel/tgt_vsd.c
+===================================================================
+--- branches/uio-mmap/kernel/tgt_vsd.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/kernel/tgt_vsd.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -74,102 +74,17 @@
+ 	cmd-&gt;offset = off;
+ }
+ 
+-/*
+- * TODO: We need to redo our scatter lists so they take into account
+- * this common usage, but also not violate HW limits
+- */
+-static struct iovec* sg_to_iovec(struct scatterlist *sg, int sg_count)
+-{
+-	struct iovec* iov;
+-	int i;
+-
+-	iov = kmalloc(sizeof(struct iovec) * sg_count, GFP_KERNEL);
+-	if (!iov)
+-		return NULL;
+-
+-	for (i = 0; i &lt; sg_count; i++) {
+-		iov[i].iov_base = page_address(sg[i].page) + sg[i].offset;
+-		iov[i].iov_len = sg[i].length;
+-	}
+-
+-	return iov;
+-}
+-
+-/*
+- * TODO this will move to a io_handler callout
+- */
+-static int vsd_execute_file_io(struct tgt_cmd *cmd, int op)
+-{
+-	struct file *file = cmd-&gt;device-&gt;file;
+-	ssize_t ret;
+-	struct iovec *iov;
+-	loff_t pos = cmd-&gt;offset;
+-
+-	iov = sg_to_iovec(cmd-&gt;sg, cmd-&gt;sg_count);
+-	if (!iov)
+-		return -ENOMEM;
+-
+-	if (op == READ)
+-		ret = generic_file_readv(file, iov, cmd-&gt;sg_count, &amp;pos);
+-	else
+-		ret = generic_file_writev(file, iov, cmd-&gt;sg_count, &amp;pos);
+-
+-	kfree(iov);
+-
+-	if (ret &lt; 0 || ret != cmd-&gt;bufflen) {
+-		eprintk(&quot;I/O error %d %Zd %u %lld %&quot; PRIu64 &quot;\n&quot;,
+-			op, ret, cmd-&gt;bufflen, pos, cmd-&gt;device-&gt;size);
+-		return -EINVAL;
+-	}
+-
+-	/* sync_page_range(inode, inode-&gt;i_mapping, pos, (size_t) cmd-&gt;bufflen); */
+-	return 0;
+-}
+-
+ static void __tgt_vsd_execute(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+-	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-	int err, rw;
++	int err;
+ 
+-	switch (scmd-&gt;scb[0]) {
+-	case READ_6:
+-	case READ_10:
+-	case READ_16:
+-		rw = READ;
+-		break;
+-	case WRITE_6:
+-	case WRITE_10:
+-	case WRITE_16:
+-	case WRITE_VERIFY:
+-		rw = WRITE;
+-		break;
+-	default:
+-		err = tgt_uspace_cmd_send(cmd, GFP_KERNEL);
+-		/*
+-		 * successfully queued
+-		 */
+-		if (err &gt;= 0)
+-			return;
++	err = tgt_uspace_cmd_send(cmd, GFP_KERNEL);
++	if (err &gt;= 0)
++		return;
+ 
+-		goto failed;
+-	};
+-
+-	err = vsd_execute_file_io(cmd, rw);
+-	if (!err) {
+-		cmd-&gt;result = SAM_STAT_GOOD;
+-		goto done;
+-	}
+-
+-	/*
+-	 * we should do a switch but I am not sure of all the err values
+-	 * returned. If you find one add it
+-	 */
+-failed:
+ 	/* TODO if -ENOMEM return QUEUEFULL or BUSY ??? */
+ 	scsi_tgt_sense_data_build(cmd, HARDWARE_ERROR, 0, 0);
+-done:
+-	tgt_transfer_response(cmd);
+ }
+ 
+ static int tgt_vsd_execute(struct tgt_cmd *cmd)
+
+Modified: branches/uio-mmap/usr/dl.c
+===================================================================
+--- branches/uio-mmap/usr/dl.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/usr/dl.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -178,3 +178,11 @@
+ 
+ 	return NULL;
+ }
++
++void *dl_cmd_done_fn(int typeid)
++{
++	if (dinfo[typeid].pdl)
++		return dlsym(dinfo[typeid].pdl, &quot;cmd_done&quot;);
++
++	return NULL;
++}
+
+Modified: branches/uio-mmap/usr/dl.h
+===================================================================
+--- branches/uio-mmap/usr/dl.h	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/usr/dl.h	2005-12-23 06:51:07 UTC (rev 207)
+@@ -13,6 +13,7 @@
+ extern void *dl_event_fn(int tid, int typeid);
+ extern void *dl_proto_cmd_process(int tid, int typeid);
+ extern void *dl_task_mgmt_fn(int typeid);
++extern void *dl_cmd_done_fn(int typeid);
+ 
+ extern char *typeid_to_name(int typeid);
+ 
+
+Modified: branches/uio-mmap/usr/netlink.c
+===================================================================
+--- branches/uio-mmap/usr/netlink.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/usr/netlink.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -112,9 +112,11 @@
+ 	int result, len = 0;
+ 	struct tgt_event *ev_req = (struct tgt_event *) reqbuf;
+ 	struct tgt_event *ev_res = NLMSG_DATA(resbuf);
+-	uint64_t cid = ev_req-&gt;k.cmd_req.cid;
+-	uint8_t *scb;
+-	int (*fn) (int, uint64_t, uint8_t *, uint8_t *, int *);
++	uint64_t offset, cid = ev_req-&gt;k.cmd_req.cid;
++	uint8_t *scb, rw = 0, try_map = 0;
++	unsigned long uaddr;
++	int (*fn) (int, uint64_t, uint8_t *, uint8_t *, int *, int, uint32_t,
++		   unsigned long *, uint8_t *, uint8_t *, uint64_t *);
+ 
+ 	memset(resbuf, 0, NL_BUFSIZE);
+ 	scb = (uint8_t *) ev_req-&gt;data;
+@@ -125,8 +127,13 @@
+ 
+ 	if (fn)
+ 		result = fn(ev_req-&gt;k.cmd_req.tid,
+-			    ev_req-&gt;k.cmd_req.dev_id, scb,
+-			    (uint8_t *) ev_res-&gt;data, &amp;len);
++			    ev_req-&gt;k.cmd_req.dev_id,
++			    scb,
++			    (uint8_t *) ev_res-&gt;data,
++			    &amp;len,
++			    ev_req-&gt;k.cmd_req.fd,
++			    ev_req-&gt;k.cmd_req.data_len,
++			    &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset);
+ 	else {
+ 		result = -EINVAL;
+ 		eprintf(&quot;Cannot process cmd %d %&quot; PRIu64 &quot; %&quot; PRIu64 &quot;\n&quot;,
+@@ -139,8 +146,12 @@
+ 	ev_res-&gt;u.cmd_res.cid = cid;
+ 	ev_res-&gt;u.cmd_res.len = len;
+ 	ev_res-&gt;u.cmd_res.result = result;
++	ev_res-&gt;u.cmd_res.uaddr = uaddr;
++	ev_res-&gt;u.cmd_res.rw = rw;
++	ev_res-&gt;u.cmd_res.try_map = try_map;
++	ev_res-&gt;u.cmd_res.offset = offset;
+ 
+-	log_error(&quot;scsi_cmd_process res %d len %d\n&quot;, result, len);
++	log_debug(&quot;scsi_cmd_process res %d len %d\n&quot;, result, len);
+ 
+ 	return __nl_write(fd, TGT_UEVENT_CMD_RES, resbuf,
+ 			  NLMSG_SPACE(sizeof(*ev_res) + len));
+@@ -188,6 +199,14 @@
+ 	case TGT_KEVENT_TASK_MGMT:
+ 		nl_task_mgmt(ev);
+ 		break;
++	case TGT_KEVENT_CMD_DONE:
++		fn = dl_cmd_done_fn(ev-&gt;k.cmd_done.typeid);
++		if (fn)
++			fn(NLMSG_DATA(recvbuf));
++		else
++			eprintf(&quot;Cannot handle cmd done %d\n&quot;,
++				ev-&gt;k.cmd_done.tid);
++		break;
+ 	default:
+ 		/* kernel module bug */
+ 		eprintf(&quot;unknown event %u\n&quot;, nlh-&gt;nlmsg_type);
+
+Modified: branches/uio-mmap/usr/scsi.c
+===================================================================
+--- branches/uio-mmap/usr/scsi.c	2005-12-23 04:36:50 UTC (rev 206)
++++ branches/uio-mmap/usr/scsi.c	2005-12-23 06:51:07 UTC (rev 207)
+@@ -26,9 +26,12 @@
+ #include &lt;scsi/srp.h&gt;
+ #include &lt;scsi/iscsi_proto.h&gt;
+ #include &lt;asm/byteorder.h&gt;
++#include &lt;asm/page.h&gt;
++#include &lt;sys/mman.h&gt;
++#include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
++#include &lt;sys/types.h&gt;
+ #include &lt;fcntl.h&gt;
+-#include &lt;sys/socket.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
+@@ -39,7 +42,11 @@
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+ #define cpu_to_be64 __cpu_to_be64
++#define be64_to_cpu __be64_to_cpu
+ 
++#define READ 0
++#define WRITE 1
++
+ #ifndef REPORT_LUNS
+ #define REPORT_LUNS           0xa0
+ #endif
+@@ -501,13 +508,83 @@
+ 	return SAM_STAT_GOOD;
+ }
+ 
++#define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_MASK)) + PAGE_SIZE - 1) &gt;&gt; PAGE_SHIFT)
++
++static int io(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len,
++	      int fd, uint32_t datalen, unsigned long *uaddr)
++{
++	uint64_t off = 0;
++	void *p;
++	*len = 0;
++
++	switch (scb[0]) {
++	case READ_6:
++	case WRITE_6:
++		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
++		break;
++	case READ_10:
++	case WRITE_10:
++	case WRITE_VERIFY:
++		off = be32_to_cpu(*(uint32_t *) &amp;scb[2]);
++		break;
++	case READ_16:
++	case WRITE_16:
++		off = be64_to_cpu(*(uint64_t *) &amp;scb[2]);
++		break;
++	default:
++		break;
++	}
++
++	off &lt;&lt;= 9;
++
++	p = mmap(NULL, pgcnt(datalen, off) &lt;&lt; PAGE_SHIFT,
++		 PROT_READ | PROT_WRITE, MAP_SHARED, fd, off &amp; PAGE_MASK);
++
++	*uaddr = (unsigned long) p;
++	dprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, off);
++
++	return (p == MAP_FAILED) ? SAM_STAT_CHECK_CONDITION : SAM_STAT_GOOD;
++}
++
++static uint64_t get_offset(uint8_t *scb)
++{
++	uint64_t off;
++
++	/*
++	 * set bufflen and offset
++	 */
++	switch (scb[0]) {
++	case READ_6:
++	case WRITE_6:
++		off = ((scb[1] &amp; 0x1f) &lt;&lt; 16) + (scb[2] &lt;&lt; 8) + scb[3];
++		break;
++	case READ_10:
++	case WRITE_10:
++	case WRITE_VERIFY:
++		off = be32_to_cpu(*(uint32_t *) &amp;scb[2]);
++		break;
++	case READ_16:
++	case WRITE_16:
++		off = be64_to_cpu(*(uint64_t *) &amp;scb[2]);
++		break;
++	default:
++		off = 0;
++		break;
++	}
++
++	return off &lt;&lt; 9;
++}
++
+ int cmd_process(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len,
+-		uint32_t flags)
++		int fd, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
++		uint8_t *try_map, uint64_t *offset)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 
+-	dprintf(&quot;%d %&quot; PRIu64 &quot; %x %x\n&quot;, tid, lun, scb[0], flags);
++	dprintf(&quot;%d %&quot; PRIu64 &quot; %x %d %u\n&quot;, tid, lun, scb[0], fd, datalen);
+ 
++	*offset = get_offset(scb);
++
+ 	if (lun == TGT_INVALID_DEV_ID)
+ 		switch (scb[0]) {
+ 		case REQUEST_SENSE:
+@@ -515,6 +592,7 @@
+ 		case REPORT_LUNS:
+ 			break;
+ 		default:
++			*offset = 0;
+ 			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+ 			result = SAM_STAT_CHECK_CONDITION;
+@@ -550,9 +628,19 @@
+ 		break;
+ 	case READ_6:
+ 	case READ_10:
++	case READ_16:
++		*rw = READ;
++		goto run_io;
+ 	case WRITE_6:
+ 	case WRITE_10:
++	case WRITE_16:
+ 	case WRITE_VERIFY:
++		*rw = WRITE;
++run_io:
++		result = io(tid, lun, scb, data, len, fd, datalen, uaddr);
++		if (result == SAM_STAT_GOOD)
++			*try_map = 1;
++		break;
+ 	case RESERVE:
+ 	case RELEASE:
+ 	case RESERVE_10:
+@@ -717,3 +805,12 @@
+ 			    ev-&gt;k.task_mgmt.sid, ev-&gt;k.task_mgmt.dev_id,
+ 			    ev-&gt;k.task_mgmt.tag);
+ }
++
++int cmd_done(struct tgt_event *ev)
++{
++	int err;
++	err = munmap((void *) ev-&gt;k.cmd_done.uaddr, ev-&gt;k.cmd_done.len);
++	dprintf(&quot;%lx %u %d\n&quot;, ev-&gt;k.cmd_done.uaddr, ev-&gt;k.cmd_done.len, err);
++	return err;
++}
++
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000193.html">[Stgt-svn] r206 - branches
+</A></li>
+	<LI>Next message: <A HREF="000195.html">[Stgt-svn] r208 - branches/uio-mmap
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#194">[ date ]</a>
+              <a href="thread.html#194">[ thread ]</a>
+              <a href="subject.html#194">[ subject ]</a>
+              <a href="author.html#194">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

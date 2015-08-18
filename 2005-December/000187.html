@@ -1,0 +1,121 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r198 - in trunk: . kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r198%20-%20in%20trunk%3A%20.%20kernel&In-Reply-To=%3C200512071008.jB7A8QBd002142%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000186.html">
+   <LINK REL="Next"  HREF="000188.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r198 - in trunk: . kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r198%20-%20in%20trunk%3A%20.%20kernel&In-Reply-To=%3C200512071008.jB7A8QBd002142%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r198 - in trunk: . kernel">mnc at berlios.de
+       </A><BR>
+    <I>Wed Dec  7 11:08:26 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000186.html">[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+        <LI>Next message: <A HREF="000188.html">[Stgt-svn] r199 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#187">[ date ]</a>
+              <a href="thread.html#187">[ thread ]</a>
+              <a href="subject.html#187">[ subject ]</a>
+              <a href="author.html#187">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2005-12-07 11:08:02 +0100 (Wed, 07 Dec 2005)
+New Revision: 198
+
+Added:
+   trunk/qla2xxx/
+Modified:
+   trunk/kernel/tgt_priv.h
+   trunk/kernel/tgt_target.h
+Log:
+trivial header cleanup: move soem private functions to the tgt_priv header
+
+Modified: trunk/kernel/tgt_priv.h
+===================================================================
+--- trunk/kernel/tgt_priv.h	2005-12-07 09:53:53 UTC (rev 197)
++++ trunk/kernel/tgt_priv.h	2005-12-07 10:08:02 UTC (rev 198)
+@@ -3,15 +3,24 @@
+ 
+ struct tgt_target;
+ 
++/* tgt core */
+ extern struct tgt_target *target_find(int tid);
+ extern int tgt_device_create(int tid, uint64_t dev_id, char *device_type,
+ 			     int fd, unsigned long dflags);
+ extern int tgt_device_destroy(int tid, uint64_t dev_id);
+ extern int uspace_cmd_done(int tid, uint64_t dev_id, uint64_t cid, void *data,
+ 			   int result, uint32_t len);
++
++/* netlink */
+ extern void tgt_nl_exit(void);
+ extern int tgt_nl_init(void);
++
++/* Sysfs */
+ extern int tgt_sysfs_init(void);
+ extern void tgt_sysfs_exit(void);
++extern int tgt_sysfs_register_type(struct target_type_internal *ti);
++extern void tgt_sysfs_unregister_type(struct target_type_internal *ti);
++extern int tgt_sysfs_register_target(struct tgt_target *target);
++extern void tgt_sysfs_unregister_target(struct tgt_target *target);
+ 
+ #endif
+
+Modified: trunk/kernel/tgt_target.h
+===================================================================
+--- trunk/kernel/tgt_target.h	2005-12-07 09:53:53 UTC (rev 197)
++++ trunk/kernel/tgt_target.h	2005-12-07 10:08:02 UTC (rev 198)
+@@ -122,12 +122,8 @@
+ 
+ extern struct tgt_target *tgt_target_create(char *target_type, int nr_cmds);
+ extern int tgt_target_destroy(struct tgt_target *target);
+-extern int tgt_sysfs_register_target(struct tgt_target *target);
+-extern void tgt_sysfs_unregister_target(struct tgt_target *target);
+ 
+ extern int tgt_target_template_register(struct tgt_target_template *tt);
+ extern void tgt_target_template_unregister(struct tgt_target_template *tt);
+-extern int tgt_sysfs_register_type(struct target_type_internal *ti);
+-extern void tgt_sysfs_unregister_type(struct target_type_internal *ti);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000186.html">[Stgt-svn] r197 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+	<LI>Next message: <A HREF="000188.html">[Stgt-svn] r199 - trunk/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#187">[ date ]</a>
+              <a href="thread.html#187">[ thread ]</a>
+              <a href="subject.html#187">[ subject ]</a>
+              <a href="author.html#187">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

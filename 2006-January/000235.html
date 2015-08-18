@@ -1,0 +1,187 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r248 - branches/use-scsi-ml/istgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r248%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200601292333.k0TNXBVQ007880%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000234.html">
+   <LINK REL="Next"  HREF="000236.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r248 - branches/use-scsi-ml/istgt/kernel</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r248%20-%20branches/use-scsi-ml/istgt/kernel&In-Reply-To=%3C200601292333.k0TNXBVQ007880%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r248 - branches/use-scsi-ml/istgt/kernel">mnc at berlios.de
+       </A><BR>
+    <I>Mon Jan 30 00:33:11 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000234.html">[Stgt-svn] r247 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000236.html">[Stgt-svn] r249 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#235">[ date ]</a>
+              <a href="thread.html#235">[ thread ]</a>
+              <a href="subject.html#235">[ subject ]</a>
+              <a href="author.html#235">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-30 00:33:11 +0100 (Mon, 30 Jan 2006)
+New Revision: 248
+
+Removed:
+   branches/use-scsi-ml/istgt/kernel/session.c
+Log:
+rm session.c
+
+Deleted: branches/use-scsi-ml/istgt/kernel/session.c
+===================================================================
+--- branches/use-scsi-ml/istgt/kernel/session.c	2006-01-29 23:32:01 UTC (rev 247)
++++ branches/use-scsi-ml/istgt/kernel/session.c	2006-01-29 23:33:11 UTC (rev 248)
+@@ -1,111 +0,0 @@
+-/*
+- * Copyright (C) 2002-2003 Ardis Technolgies &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">roman at ardistech.com</A>&gt;
+- *
+- * Released under the terms of the GNU GPL v2.0.
+- */
+-
+-#include &lt;linux/mempool.h&gt;
+-
+-#include &lt;iscsi.h&gt;
+-
+-struct iscsi_session *session_lookup(struct iscsi_target *target, uint64_t sid)
+-{
+-	struct iscsi_session *session;
+-
+-	list_for_each_entry(session, &amp;target-&gt;session_list, list) {
+-		if (session-&gt;sid == sid)
+-			return session;
+-	}
+-	return NULL;
+-}
+-
+-struct session_wait {
+-	struct completion event;
+-	struct tgt_session *ts;
+-};
+-
+-static void session_done(void *arg, struct tgt_session *session)
+-{
+-	struct session_wait *w = (struct session_wait *) arg;
+-
+-	w-&gt;ts = session;
+-	complete(&amp;w-&gt;event);
+-}
+-
+-int session_add(struct iscsi_target *target, struct session_info *info)
+-{
+-	struct iscsi_session *session;
+-	struct session_wait w;
+-	int i;
+-
+-	dprintk(&quot;%p %u %&quot; PRIx64 &quot;\n&quot;, target, target-&gt;tid, info-&gt;sid);
+-
+-	session = session_lookup(target, info-&gt;sid);
+-	if (session)
+-		return -EEXIST;
+-
+-	session = kzalloc(sizeof(*session), GFP_KERNEL);
+-	if (!session)
+-		return -ENOMEM;
+-
+-	init_completion(&amp;w.event);
+-	if (tgt_session_create(target-&gt;tt, session_done, &amp;w))
+-		goto kfree_session;
+-	wait_for_completion(&amp;w.event);
+-	if (!w.ts)
+-		goto kfree_session;
+-
+-	session-&gt;ts = w.ts;
+-	session-&gt;target = target;
+-	session-&gt;sid = info-&gt;sid;
+-	memcpy(&amp;session-&gt;param, &amp;target-&gt;sess_param, sizeof(session-&gt;param));
+-	session-&gt;max_queued_cmnds = target-&gt;trgt_param.queued_cmnds;
+-
+-	session-&gt;exp_cmd_sn = info-&gt;exp_cmd_sn;
+-	session-&gt;max_cmd_sn = info-&gt;max_cmd_sn;
+-
+-	INIT_LIST_HEAD(&amp;session-&gt;conn_list);
+-	INIT_LIST_HEAD(&amp;session-&gt;pending_list);
+-
+-	spin_lock_init(&amp;session-&gt;cmnd_hash_lock);
+-	for (i = 0; i &lt; ARRAY_SIZE(session-&gt;cmnd_hash); i++)
+-		INIT_LIST_HEAD(&amp;session-&gt;cmnd_hash[i]);
+-
+-	session-&gt;next_ttt = 1;
+-
+-	list_add(&amp;session-&gt;list, &amp;target-&gt;session_list);
+-
+-	return 0;
+-kfree_session:
+-	kfree(session);
+-	return -ENOMEM;
+-}
+-
+-int session_del(struct iscsi_target *target, uint64_t sid)
+-{
+-	int i;
+-	struct iscsi_session *session;
+-
+-	session = session_lookup(target, sid);
+-	if (!session)
+-		return -ENOENT;
+-
+-	dprintk(&quot;%&quot; PRIx64 &quot;\n&quot;, session-&gt;sid);
+-
+-	if (!list_empty(&amp;session-&gt;conn_list)) {
+-		eprintk(&quot;%&quot; PRIx64 &quot; still have connections\n&quot;, session-&gt;sid);
+-		return -EBUSY;
+-	}
+-
+-	BUG_ON(!list_empty(&amp;session-&gt;conn_list));
+-
+-	for (i = 0; i &lt; ARRAY_SIZE(session-&gt;cmnd_hash); i++)
+-		BUG_ON(!list_empty(&amp;session-&gt;cmnd_hash[i]));
+-
+-	list_del(&amp;session-&gt;list);
+-
+-	tgt_session_destroy(session-&gt;ts, NULL, NULL);
+-	kfree(session);
+-
+-	return 0;
+-}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000234.html">[Stgt-svn] r247 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000236.html">[Stgt-svn] r249 - branches/use-scsi-ml/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#235">[ date ]</a>
+              <a href="thread.html#235">[ thread ]</a>
+              <a href="subject.html#235">[ subject ]</a>
+              <a href="author.html#235">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

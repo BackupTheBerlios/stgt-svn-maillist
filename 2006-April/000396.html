@@ -1,0 +1,150 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r409 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r409%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604141544.k3EFiKIA025543%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000395.html">
+   <LINK REL="Next"  HREF="000397.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r409 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r409%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604141544.k3EFiKIA025543%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r409 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Apr 14 17:44:20 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000395.html">[Stgt-svn] r408 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000397.html">[Stgt-svn] r410 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#396">[ date ]</a>
+              <a href="thread.html#396">[ thread ]</a>
+              <a href="subject.html#396">[ subject ]</a>
+              <a href="author.html#396">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-14 17:44:20 +0200 (Fri, 14 Apr 2006)
+New Revision: 409
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+kill sense in iu_entry structure.
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 13:09:29 UTC (rev 408)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 15:44:20 UTC (rev 409)
+@@ -116,7 +116,6 @@
+ 
+ 	struct {
+ 		dma_addr_t remote_token;
+-		char *sense;
+ 		unsigned long flags;
+ 		int data_out_residual_count;
+ 		int data_in_residual_count;
+@@ -180,7 +179,6 @@
+ 		    unsigned char asc)
+ {
+ 	union viosrp_iu *iu = vio_iu(iue);
+-	uint8_t *sense = iu-&gt;srp.rsp.data;
+ 	uint64_t tag = iu-&gt;srp.rsp.tag;
+ 	unsigned long flags;
+ 
+@@ -204,30 +202,29 @@
+ 	iu-&gt;srp.rsp.flags &amp;= ~SRP_RSP_FLAG_RSPVALID;
+ 
+ 	iu-&gt;srp.rsp.resp_data_len = 0;
++	iu-&gt;srp.rsp.status = status;
++	if (status) {
++		uint8_t *sense = iu-&gt;srp.rsp.data;
+ 
+-	if (status &amp;&amp; !iue-&gt;req.sense) {
+-		iu-&gt;srp.rsp.status = SAM_STAT_CHECK_CONDITION;
+-		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
+-		iu-&gt;srp.rsp.sense_data_len = SRP_RSP_SENSE_DATA_LEN;
+-
+-		/* Valid bit and 'current errors' */
+-		sense[0] = (0x1 &lt;&lt; 7 | 0x70);
+-
+-		/* Sense key */
+-		sense[2] = status;
+-
+-		/* Additional sense length */
+-		sense[7] = 0xa;	/* 10 bytes */
+-
+-		/* Additional sense code */
+-		sense[12] = asc;
+-	} else {
+-		if (iue-&gt;req.sense) {
++		if (iue-&gt;scmd) {
+ 			iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
+ 			iu-&gt;srp.rsp.sense_data_len = SCSI_SENSE_BUFFERSIZE;
+-			memcpy(sense, iue-&gt;req.sense, SCSI_SENSE_BUFFERSIZE);
++			memcpy(sense, iue-&gt;scmd-&gt;sense_buffer,
++			       SCSI_SENSE_BUFFERSIZE);
++		} else {
++			iu-&gt;srp.rsp.status = SAM_STAT_CHECK_CONDITION;
++			iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
++			iu-&gt;srp.rsp.sense_data_len = SRP_RSP_SENSE_DATA_LEN;
++
++			/* Valid bit and 'current errors' */
++			sense[0] = (0x1 &lt;&lt; 7 | 0x70);
++			/* Sense key */
++			sense[2] = status;
++			/* Additional sense length */
++			sense[7] = 0xa;	/* 10 bytes */
++			/* Additional sense code */
++			sense[12] = asc;
+ 		}
+-		iu-&gt;srp.rsp.status = status;
+ 	}
+ 
+ 	send_iu(iue, sizeof(iu-&gt;srp.rsp) + SRP_RSP_SENSE_DATA_LEN,
+@@ -608,6 +605,7 @@
+ 
+ 	memset(&amp;iue-&gt;req, 0, sizeof(iue-&gt;req));
+ 	iue-&gt;adapter = adapter;
++	iue-&gt;scmd = NULL;
+ 	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
+ 
+ 	iue-&gt;iu_token = dma_map_single(adapter-&gt;dev, vio_iu(iue),
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000395.html">[Stgt-svn] r408 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000397.html">[Stgt-svn] r410 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#396">[ date ]</a>
+              <a href="thread.html#396">[ thread ]</a>
+              <a href="subject.html#396">[ subject ]</a>
+              <a href="author.html#396">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

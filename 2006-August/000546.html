@@ -1,0 +1,679 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r559 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r559%20-%20trunk/usr&In-Reply-To=%3C200608310744.k7V7iYcw008189%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000545.html">
+   <LINK REL="Next"  HREF="000547.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r559 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r559%20-%20trunk/usr&In-Reply-To=%3C200608310744.k7V7iYcw008189%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r559 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 09:44:34 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000545.html">[Stgt-svn] r558 - in trunk/usr: . ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000547.html">[Stgt-svn] r560 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#546">[ date ]</a>
+              <a href="thread.html#546">[ thread ]</a>
+              <a href="subject.html#546">[ subject ]</a>
+              <a href="author.html#546">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 09:44:04 +0200 (Thu, 31 Aug 2006)
+New Revision: 559
+
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/bd_aio.c
+   trunk/usr/bd_mmap.c
+   trunk/usr/driver.h
+   trunk/usr/mgmt.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtd.h
+   trunk/usr/tgtif.c
+Log:
+Preparation for user-mode iSCSI target code.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/Makefile	2006-08-31 07:44:04 UTC (rev 559)
+@@ -10,18 +10,19 @@
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+-TGTD_OBJS += $(addprefix iscsi/, istgt.o conn.o param.o session.o iscsid.o target.o chap.o netlink.o)
++TGTD_OBJS += $(addprefix iscsi/, istgt.o conn.o param.o session.o iscsid.o target.o chap.o)
+ LIBS += -lcrypto
++BD_AIO=1
+ endif
+ 
+ ifneq ($(BD_MMAP),)
+ TGTD_OBJS += bd_mmap.o
+ endif
+ 
+-# ifneq ($(BD_AIO),)
+-# TGTD_OBJS += bd_aio.o
+-# LIBS += -laio
+-# endif
++ifneq ($(BD_AIO),)
++TGTD_OBJS += bd_aio.o
++LIBS += -laio
++endif
+ 
+ all: $(PROGRAMS)
+ 
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/bd_aio.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -1,3 +1,24 @@
++/*
++ * AIO file backed routine
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;inttypes.h&gt;
+@@ -5,14 +26,14 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;signal.h&gt;
++#include &lt;libaio.h&gt;
+ 
+ #include &lt;linux/fs.h&gt;
++#include &lt;sys/epoll.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+-#include &quot;libaio.h&quot;
+ 
+ /*
+  * We need an interface to wait for both synchronous and asynchronous
+@@ -39,17 +60,21 @@
+ 	struct io_event events[MAX_AIO_REQS];
+ };
+ 
+-static void aio_event_handler(int fd, void *data)
++static void aio_event_handler(int fd, int events, void *data)
+ {
+-	struct tgt_device *dev = (struct tgt_device *) data;
+-	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
++	struct tgt_device *dev;
++	struct bd_aio_info *bai;
+ 	int i, nr;
+ 	struct iocb *iocb;
+ 
++	dev = (struct tgt_device *) data;
++	bai = (struct bd_aio_info *) dev-&gt;bddata;
++
+ 	nr = io_getevents(bai-&gt;ctx, 0, MAX_AIO_REQS, bai-&gt;events, NULL);
+ 
+ 	for (i = 0; i &lt; nr; i++) {
+ 		iocb = bai-&gt;events[i].obj;
++		dprintf(&quot;%p\n&quot;, iocb-&gt;data);
+ 		target_cmd_io_done(iocb-&gt;data, 0);
+ 	}
+ }
+@@ -60,25 +85,29 @@
+ 	struct bd_aio_info *bai;
+ 	int err;
+ 
+-	dev = malloc(sizeof(*dev) + sizeof(struct bd_aio_info));
++	dev = zalloc(sizeof(*dev) + sizeof(*bai));
+ 	if (!dev)
+ 		return NULL;
+ 
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE | O_DIRECT, size);
++	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+ 	if (*fd &lt; 0)
+-		goto free_info;
++		goto free_dev;
+ 
+-	bai = (struct bd_aio_info *)dev-&gt;bddata;
++	bai = (struct bd_aio_info *) dev-&gt;bddata;
+ 
+ 	bai-&gt;ctx = (io_context_t) REQUEST_ASYNC_FD;
+ 	bai-&gt;aio_fd = io_setup(MAX_AIO_REQS, &amp;bai-&gt;ctx);
+-	if (bai-&gt;aio_fd &lt; 0)
++	if (bai-&gt;aio_fd &lt; 0) {
++		eprintf(&quot;Can't setup aio fd, %m\n&quot;);
+ 		goto close_fd;
++	}
+ 
+-	err = tgt_event_add(bai-&gt;aio_fd, POLL_IN, aio_event_handler, dev);
++	err = tgt_event_add(bai-&gt;aio_fd, EPOLLIN, aio_event_handler, dev);
+ 	if (err)
+ 		goto aio_cb_destroy;
+ 
++	dprintf(&quot;Succeeded to setup aio fd, %s\n&quot;, path);
++
+ 	bai-&gt;fd = *fd;
+ 	return dev;
+ 
+@@ -86,7 +115,7 @@
+ 	io_destroy(bai-&gt;ctx);
+ close_fd:
+ 	close(*fd);
+-free_info:
++free_dev:
+ 	free(dev);
+ 
+ 	return NULL;
+@@ -107,19 +136,24 @@
+ {
+ 	struct bd_aio_info *bai = (struct bd_aio_info *) dev-&gt;bddata;
+ 	struct iocb iocb, *io;
++	int err;
+ 
+ 	*async = 1;
+ 
+ 	io = &iocb;
+ 	memset(io, 0, sizeof(*io));
+ 
+-	io-&gt;data = key;
++	dprintf(&quot;%d %d %u %lx %&quot; PRIx64 &quot; %p\n&quot;, bai-&gt;fd, rw, datalen, *uaddr, offset, key);
++
+ 	if (rw == READ)
+-		io_prep_pread(io, bai-&gt;fd, uaddr, datalen, offset);
++		io_prep_pread(io, bai-&gt;fd, (void *) *uaddr, datalen, offset);
+ 	else
+-		io_prep_pwrite(io, bai-&gt;fd, uaddr, datalen, offset);
++		io_prep_pwrite(io, bai-&gt;fd, (void *) *uaddr, datalen, offset);
+ 
+-	return io_submit(bai-&gt;ctx, 1, &amp;io);
++	io-&gt;data = key;
++	err = io_submit(bai-&gt;ctx, 1, &amp;io);
++
++	return 0;
+ }
+ 
+ static int bd_aio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/bd_mmap.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -54,18 +54,6 @@
+ 	free(dev);
+ }
+ 
+-static void *bd_mmap_cmd_buffer_alloc(int devio, uint32_t datalen)
+-{
+-	void *data = NULL;
+-	if (!devio) {
+-		datalen = ALIGN(datalen, PAGE_SIZE);
+-		data = valloc(datalen);
+-		if (data)
+-			memset(data, 0, datalen);
+-	}
+-	return data;
+-}
+-
+ static int bd_mmap_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+ 			      unsigned long *uaddr, uint64_t offset, int *async,
+ 			      void *key)
+@@ -114,7 +102,6 @@
+ struct backedio_template mmap_bdt = {
+ 	.bd_open		= bd_mmap_open,
+ 	.bd_close		= bd_mmap_close,
+-	.bd_cmd_buffer_alloc	= bd_mmap_cmd_buffer_alloc,
+ 	.bd_cmd_submit		= bd_mmap_cmd_submit,
+ 	.bd_cmd_done		= bd_mmap_cmd_done,
+ };
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/driver.h	2006-08-31 07:44:04 UTC (rev 559)
+@@ -1,9 +1,9 @@
+-extern struct backedio_template mmap_bdt;
++extern struct backedio_template mmap_bdt, aio_bdt;
+ 
+ struct tgt_driver {
+ 	const char *name;
+ 
+-	int (*init) (int *);
++	int (*init) (void);
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/mgmt.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -28,7 +28,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;signal.h&gt;
++#include &lt;sys/epoll.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
+@@ -196,7 +196,7 @@
+ 		eprintf(&quot;can't write, %m\n&quot;);
+ }
+ 
+-static void mgmt_event_handler(int accept_fd, void *data)
++static void mgmt_event_handler(int accept_fd, int events, void *data)
+ {
+ 	int fd, err;
+ 	char sbuf[BUFSIZE], rbuf[BUFSIZE];
+@@ -304,12 +304,12 @@
+ 	}
+ 
+ 	err = listen(fd, 32);
+-	if (err &lt; 0) {
++	if (err) {
+ 		eprintf(&quot;can't listen a socket, %m\n&quot;);
+ 		goto out;
+ 	}
+ 
+-	err = tgt_event_add(fd, POLL_IN, mgmt_event_handler, NULL);
++	err = tgt_event_add(fd, EPOLLIN, mgmt_event_handler, NULL);
+ 	if (err)
+ 		goto out;
+ 
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/scsi.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -412,7 +412,7 @@
+ 
+ static int scsi_cmd_rw(uint8_t *scb, uint8_t *rw)
+ {
+-	int is_data = 1;
++	int is_alloc = 0;
+ 
+ 	switch (scb[0]) {
+ 	case READ_6:
+@@ -427,9 +427,9 @@
+ 		*rw = WRITE;
+ 		break;
+ 	default:
+-		is_data = 0;
++		is_alloc = 1;
+ 	}
+-	return is_data;
++	return is_alloc;
+ }
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+@@ -461,20 +461,22 @@
+ 	return fn(p);
+ }
+ 
+-int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu, int *len,
+-		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
++int scsi_cmd_perform(int lid, int host_no, uint8_t *pdu,
++		     int *len, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+ 		     struct tgt_device *dev, struct list_head *dev_list, int *async,
+ 		     void *key)
+ {
+ 	int result = SAM_STAT_GOOD;
+-	uint8_t *data, *scb = pdu;
++	uint8_t *data = NULL, *scb = pdu;
+ 
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+ 	*async = *offset = 0;
+-	data = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
+-							  datalen);
++	if (scsi_cmd_rw(scb, rw)) {
++		data = valloc(PAGE_SIZE);
++		memset(data, 0, PAGE_SIZE);
++	}
+ 
+ 	if (!dev)
+ 		switch (scb[0]) {
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/target.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -246,7 +246,8 @@
+ 	}
+ }
+ 
+-int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun, uint32_t data_len,
++int target_cmd_queue(int host_no, uint8_t *scb, unsigned long uaddr,
++		     uint8_t *lun, uint32_t data_len,
+ 		     int attribute, uint64_t tag)
+ {
+ 	struct target *target;
+@@ -255,7 +256,6 @@
+ 	int result, enabled, async, len = 0;
+ 	uint64_t offset, dev_id;
+ 	uint8_t rw = 0, mmapped = 0;
+-	unsigned long uaddr = 0;
+ 
+ 	target = host_to_target(host_no);
+ 	if (!target) {
+@@ -278,10 +278,9 @@
+ 	dprintf(&quot;%x %&quot; PRIx64 &quot;\n&quot;, scb[0], dev_id);
+ 
+ 	cmd-&gt;dev = device_lookup(target, dev_id);
+-	if (cmd-&gt;dev) {
+-		uaddr = cmd-&gt;dev-&gt;addr;
++	if (cmd-&gt;dev)
+ 		q = &amp;cmd-&gt;dev-&gt;cmd_queue;
+-	} else
++	else
+ 		q = &amp;target-&gt;cmd_queue;
+ 
+ 	enabled = cmd_enabled(q, cmd);
+@@ -295,8 +294,8 @@
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+-		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+-			tag, scb[0], uaddr, offset, result);
++		dprintf(&quot;%&quot; PRIx64 &quot; %x %lx %&quot; PRIu64 &quot; %d %d\n&quot;,
++			tag, scb[0], uaddr, offset, result, async);
+ 
+ 		cmd-&gt;rw = rw;
+ 		set_cmd_processed(cmd);
+@@ -312,6 +311,7 @@
+ 		memcpy(cmd-&gt;scb, scb, sizeof(cmd-&gt;scb));
+ 		memcpy(cmd-&gt;lun, lun, sizeof(cmd-&gt;lun));
+ 		cmd-&gt;len = data_len;
++		cmd-&gt;uaddr = uaddr;
+ 		list_add_tail(&amp;cmd-&gt;qlist, &amp;q-&gt;queue);
+ 	}
+ 
+@@ -336,7 +336,6 @@
+ 	int enabled, result, async, len = 0;
+ 	uint8_t rw = 0, mmapped = 0;
+ 	uint64_t offset;
+-	unsigned long uaddr = 0;
+ 
+ 	list_for_each_entry_safe(cmd, tmp, &amp;q-&gt;queue, qlist) {
+ 		enabled = cmd_enabled(q, cmd);
+@@ -345,20 +344,21 @@
+ 			dprintf(&quot;perform %&quot; PRIx64 &quot; %x\n&quot;, cmd-&gt;tag, cmd-&gt;attribute);
+ 			result = scsi_cmd_perform(cmd-&gt;c_target-&gt;lid,
+ 						  cmd-&gt;hostno, cmd-&gt;scb,
+-						  &amp;len, cmd-&gt;len, &amp;uaddr,
++						  &amp;len, cmd-&gt;len,
++						  (unsigned long *) &amp;cmd-&gt;uaddr,
+ 						  &amp;rw, &amp;mmapped, &amp;offset,
+ 						  cmd-&gt;lun, cmd-&gt;dev,
+ 						  &amp;cmd-&gt;c_target-&gt;device_list,
+ 						  &amp;async, (void *) cmd);
+ 			cmd-&gt;rw = rw;
+-			cmd_post_perform(q, cmd, uaddr, len, mmapped);
++			cmd_post_perform(q, cmd, cmd-&gt;uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+ 			if (!async)
+ 				tgt_drivers[cmd-&gt;c_target-&gt;lid]-&gt;cmd_end_notify(cmd-&gt;hostno,
+ 										len,
+ 										result,
+ 										rw,
+-										uaddr,
++										cmd-&gt;uaddr,
+ 										cmd-&gt;tag);
+ 		} else
+ 			break;
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/tgtd.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -124,19 +124,47 @@
+ 	return err;
+ }
+ 
++static struct tgt_event *tgt_event_lookup(int fd)
++{
++	struct tgt_event *tev;
++
++	list_for_each_entry(tev, &amp;tgt_events_list, e_list) {
++		if (tev-&gt;fd == fd)
++			return tev;
++	}
++	return NULL;
++}
++
+ void tgt_event_del(int fd)
+ {
+ 	struct tgt_event *tev;
+ 
++	tev = tgt_event_lookup(fd);
++	if (!tev) {
++		eprintf(&quot;Cannot find event %d\n&quot;, fd);
++		return;
++	}
++
+ 	epoll_ctl(ep_fd, EPOLL_CTL_DEL, fd, NULL);
++	list_del(&amp;tev-&gt;e_list);
++	free(tev);
++}
+ 
+-	list_for_each_entry(tev, &amp;tgt_events_list, e_list) {
+-		if (tev-&gt;fd == fd) {
+-			list_del(&amp;tev-&gt;e_list);
+-			free(tev);
+-			break;
+-		}
++int tgt_event_modify(int fd, int events)
++{
++	struct epoll_event ev;
++	struct tgt_event *tev;
++
++	tev = tgt_event_lookup(fd);
++	if (!tev) {
++		eprintf(&quot;Cannot find event %d\n&quot;, fd);
++		return -EINVAL;
+ 	}
++
++	ev.events = events;
++	ev.data.ptr = tev;
++
++	return epoll_ctl(ep_fd, EPOLL_CTL_MOD, fd, &amp;ev);
+ }
+ 
+ static void event_loop(void)
+@@ -162,7 +190,7 @@
+ 
+ 	for (i = 0; i &lt; nevent; i++) {
+ 		tev = (struct tgt_event *) events[i].data.ptr;
+-		tev-&gt;handler(tev-&gt;fd, tev-&gt;data);
++		tev-&gt;handler(tev-&gt;fd, events[i].events, tev-&gt;data);
+ 	}
+ 
+ 	goto retry;
+@@ -171,7 +199,7 @@
+ static int lld_init(char *data)
+ {
+ 	char *list, *p, *q;
+-	int index, err, np, ndriver = 0;
++	int index, err, ndriver = 0;
+ 
+ 	p = list = strdup(data);
+ 	if (!p)
+@@ -184,9 +212,8 @@
+ 		index = get_driver_index(p);
+ 		p = q;
+ 		if (index &gt;= 0) {
+-			np = 0;
+ 			if (tgt_drivers[index]-&gt;init) {
+-				err = tgt_drivers[index]-&gt;init(&amp;np);
++				err = tgt_drivers[index]-&gt;init();
+ 				if (err)
+ 					continue;
+ 			}
+@@ -239,7 +266,14 @@
+ 		}
+ 	}
+ 
+-	nr_lld = lld_init(modes);
++	ep_fd = epoll_create(maxfds);
++	if (ep_fd &lt; 0) {
++		fprintf(stderr, &quot;can't create epoll fd, %m\n&quot;);
++		exit(1);
++	}
++
++	if (modes)
++		nr_lld = lld_init(modes);
+ 	if (!nr_lld) {
+ 		printf(&quot;No available low level driver!\n&quot;);
+ 		exit(1);
+@@ -254,12 +288,6 @@
+ 	if (err)
+ 		exit(1);
+ 
+-	ep_fd = epoll_create(maxfds);
+-	if (ep_fd &lt; 0) {
+-		eprintf(&quot;can't create epoll fd, %m\n&quot;);
+-		exit(1);
+-	}
+-
+ 	err = kreq_init();
+ 	if (err)
+ 		eprintf(&quot;No kernel interface\n&quot;);
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/tgtd.h	2006-08-31 07:44:04 UTC (rev 559)
+@@ -29,7 +29,6 @@
+ struct backedio_template {
+ 	struct tgt_device *(*bd_open)(char *path, int *fd, uint64_t *size);
+ 	void (*bd_close)(struct tgt_device *dev);
+-	void *(*bd_cmd_buffer_alloc)(int devio, uint32_t datalen);
+ 	int (*bd_cmd_submit)(struct tgt_device *dev, int rw, uint32_t datalen,
+ 			     unsigned long *uaddr, uint64_t offset, int *async,
+ 			     void *key);
+@@ -49,12 +48,14 @@
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+ 
+-typedef void (event_handler_t)(int fd, void *data);
++typedef void (event_handler_t)(int fd, int events, void *data);
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+ extern void tgt_event_del(int fd);
++extern int tgt_event_modify(int fd, int events);
+ 
+-extern int target_cmd_queue(int host_no, uint8_t *scb, uint8_t *lun,
+-			    uint32_t data_len, int attribute, uint64_t tag);
++extern int target_cmd_queue(int host_no, uint8_t *scb, unsigned long uaddr,
++			    uint8_t *lun, uint32_t data_len,
++			    int attribute, uint64_t tag);
+ extern void target_cmd_done(int host_no, uint64_t tag);
+ extern void target_mgmt_request(int host_no, int req_id, int function,
+ 				uint8_t *lun, uint64_t tag);
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2006-08-29 06:27:37 UTC (rev 558)
++++ trunk/usr/tgtif.c	2006-08-31 07:44:04 UTC (rev 559)
+@@ -24,12 +24,12 @@
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
+ #include &lt;inttypes.h&gt;
+-#include &lt;signal.h&gt;
+ #include &lt;stdint.h&gt;
+ #include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;sys/epoll.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/stat.h&gt;
+ 
+@@ -106,7 +106,7 @@
+ 	return kreq_send(&amp;ev);
+ }
+ 
+-static void kern_event_handler(int fd, void *data)
++static void kern_event_handler(int fd, int events, void *data)
+ {
+ 	struct tgt_event *ev;
+ 
+@@ -120,6 +120,8 @@
+ 	switch (ev-&gt;type) {
+ 	case TGT_KEVENT_CMD_REQ:
+ 		target_cmd_queue(ev-&gt;k.cmd_req.host_no, ev-&gt;k.cmd_req.scb,
++				 0,
++/* 				 ev-&gt;k.cmd_req.uaddr, */
+ 				 ev-&gt;k.cmd_req.lun, ev-&gt;k.cmd_req.data_len,
+ 				 ev-&gt;k.cmd_req.attribute, ev-&gt;k.cmd_req.tag);
+ 		break;
+@@ -200,7 +202,7 @@
+ 	kuring.buf = buf;
+ 	ukring.buf = buf + size;
+ 
+-	err = tgt_event_add(chrfd, POLL_IN, kern_event_handler, NULL);
++	err = tgt_event_add(chrfd, EPOLLIN, kern_event_handler, NULL);
+ 	if (err)
+ 		close(chrfd);
+ 	return err;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000545.html">[Stgt-svn] r558 - in trunk/usr: . ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000547.html">[Stgt-svn] r560 - branches
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#546">[ date ]</a>
+              <a href="thread.html#546">[ thread ]</a>
+              <a href="subject.html#546">[ subject ]</a>
+              <a href="author.html#546">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

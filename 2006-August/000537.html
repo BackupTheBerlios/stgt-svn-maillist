@@ -1,0 +1,193 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r550 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r550%20-%20trunk/usr&In-Reply-To=%3C200608280913.k7S9DIYj010273%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000536.html">
+   <LINK REL="Next"  HREF="000538.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r550 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r550%20-%20trunk/usr&In-Reply-To=%3C200608280913.k7S9DIYj010273%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r550 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Aug 28 11:13:18 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000536.html">[Stgt-svn] r549 - in trunk/usr: . ibmvio
+</A></li>
+        <LI>Next message: <A HREF="000538.html">[Stgt-svn] r551 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#537">[ date ]</a>
+              <a href="thread.html#537">[ thread ]</a>
+              <a href="subject.html#537">[ subject ]</a>
+              <a href="author.html#537">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-28 11:13:17 +0200 (Mon, 28 Aug 2006)
+New Revision: 550
+
+Added:
+   trunk/usr/bd_mmap.c
+Removed:
+   trunk/usr/mmapio.c
+Modified:
+   trunk/usr/Makefile
+Log:
+Rename mmapio.c bd_mmap.c.
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-08-28 09:09:32 UTC (rev 549)
++++ trunk/usr/Makefile	2006-08-28 09:13:17 UTC (rev 550)
+@@ -1,6 +1,6 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o mmapio.o
++TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o bd_mmap.o
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO
+
+Copied: trunk/usr/bd_mmap.c (from rev 549, trunk/usr/mmapio.c)
+
+Deleted: trunk/usr/mmapio.c
+===================================================================
+--- trunk/usr/mmapio.c	2006-08-28 09:09:32 UTC (rev 549)
++++ trunk/usr/mmapio.c	2006-08-28 09:13:17 UTC (rev 550)
+@@ -1,98 +0,0 @@
+-#include &lt;errno.h&gt;
+-#include &lt;fcntl.h&gt;
+-#include &lt;inttypes.h&gt;
+-#include &lt;stdio.h&gt;
+-#include &lt;stdlib.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;unistd.h&gt;
+-#include &lt;sys/mman.h&gt;
+-
+-#include &quot;list.h&quot;
+-#include &quot;util.h&quot;
+-#include &quot;tgtd.h&quot;
+-
+-static struct tgt_device *bd_mmap_open(char *path, int *fd, uint64_t *size)
+-{
+-	struct tgt_device *dev;
+-
+-	dev = malloc(sizeof(*dev));
+-	if (!dev)
+-		return NULL;
+-
+-	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
+-	if (*fd &lt; 0) {
+-		free(dev);
+-		dev = NULL;
+-	}
+-
+-	return dev;
+-}
+-
+-static void bd_mmap_close(struct tgt_device *dev)
+-{
+-	free(dev);
+-}
+-
+-static void *bd_mmap_cmd_buffer_alloc(int devio, uint32_t datalen)
+-{
+-	void *data = NULL;
+-	if (!devio) {
+-		datalen = ALIGN(datalen, PAGE_SIZE);
+-		data = valloc(datalen);
+-		if (data)
+-			memset(data, 0, datalen);
+-	}
+-	return data;
+-}
+-
+-static int bd_mmap_cmd_submit(struct tgt_device *dev, int rw, uint32_t datalen,
+-			      unsigned long *uaddr, uint64_t offset)
+-{
+-	int fd = dev-&gt;fd;
+-	void *p;
+-	int err = 0;
+-
+-	if (*uaddr)
+-		*uaddr = *uaddr + offset;
+-	else {
+-		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; PAGE_SHIFT,
+-			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   offset &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
+-
+-		*uaddr = (unsigned long) p + (offset &amp; ~PAGE_MASK);
+-		if (p == MAP_FAILED) {
+-			err = -EINVAL;
+-			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+-		}
+-	}
+-
+-	printf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+-
+-	return err;
+-}
+-
+-static int bd_mmap_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	int err = 0;
+-
+-	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
+-
+-	if (do_munmap) {
+-		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
+-		uaddr &amp;= PAGE_MASK;
+-		err = munmap((void *) (unsigned long) uaddr, len);
+-		if (err)
+-			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
+-	} else if (do_free)
+-		free((void *) (unsigned long) uaddr);
+-
+-	return err;
+-}
+-
+-struct backedio_template mmap_bdt = {
+-	.bd_open		= bd_mmap_open,
+-	.bd_close		= bd_mmap_close,
+-	.bd_cmd_buffer_alloc	= bd_mmap_cmd_buffer_alloc,
+-	.bd_cmd_submit		= bd_mmap_cmd_submit,
+-	.bd_cmd_done		= bd_mmap_cmd_done,
+-};
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000536.html">[Stgt-svn] r549 - in trunk/usr: . ibmvio
+</A></li>
+	<LI>Next message: <A HREF="000538.html">[Stgt-svn] r551 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#537">[ date ]</a>
+              <a href="thread.html#537">[ thread ]</a>
+              <a href="subject.html#537">[ subject ]</a>
+              <a href="author.html#537">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

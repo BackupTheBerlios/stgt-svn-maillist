@@ -1,0 +1,192 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r240 - branches/use-scsi-ml/include
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r240%20-%20branches/use-scsi-ml/include&In-Reply-To=%3C200601280011.k0S0Bmhu028340%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000226.html">
+   <LINK REL="Next"  HREF="000228.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r240 - branches/use-scsi-ml/include</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r240%20-%20branches/use-scsi-ml/include&In-Reply-To=%3C200601280011.k0S0Bmhu028340%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r240 - branches/use-scsi-ml/include">mnc at berlios.de
+       </A><BR>
+    <I>Sat Jan 28 01:11:48 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000226.html">[Stgt-svn] r239 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000228.html">[Stgt-svn] r241 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#227">[ date ]</a>
+              <a href="thread.html#227">[ thread ]</a>
+              <a href="subject.html#227">[ subject ]</a>
+              <a href="author.html#227">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-01-28 01:11:43 +0100 (Sat, 28 Jan 2006)
+New Revision: 240
+
+Removed:
+   branches/use-scsi-ml/include/tgt_if.h
+   branches/use-scsi-ml/include/tgt_scsi_if.h
+Log:
+rm old headers
+
+Deleted: branches/use-scsi-ml/include/tgt_if.h
+===================================================================
+--- branches/use-scsi-ml/include/tgt_if.h	2006-01-28 00:04:04 UTC (rev 239)
++++ branches/use-scsi-ml/include/tgt_if.h	2006-01-28 00:11:43 UTC (rev 240)
+@@ -1,89 +0,0 @@
+-/*
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#ifndef TARGET_FRAMEWORK_IF_H
+-#define TARGET_FRAMEWORK_IF_H
+-
+-enum tgt_event_type {
+-	/* user -&gt; kernel */
+-	TGT_UEVENT_START,
+-	TGT_UEVENT_TARGET_CREATE,
+-	TGT_UEVENT_TARGET_DESTROY,
+-	TGT_UEVENT_TARGET_PASSTHRU,
+-	TGT_UEVENT_CMD_RES,
+-
+-	/* kernel -&gt; user */
+-	TGT_KEVENT_RESPONSE,
+-	TGT_KEVENT_CMD_REQ,
+-	TGT_KEVENT_TARGET_PASSTHRU,
+-	TGT_KEVENT_CMD_DONE,
+-};
+-
+-struct tgt_event {
+-	/* user-&gt; kernel */
+-	union {
+-		struct {
+-			char type[32];
+-			int nr_cmds;
+-		} c_target;
+-		struct {
+-			int tid;
+-		} d_target;
+-		struct {
+-			int tid;
+-			uint32_t len;
+-		} tgt_passthru;
+-		struct {
+-			int tid;
+-			uint64_t cid;
+-			uint32_t len;
+-			int result;
+-			/*
+-			 * this is screwed for setups with 64 bit kernel
+-			 * and 32 bit userspace
+-			 */
+-			unsigned long uaddr;
+-			uint64_t offset;
+-			uint8_t rw;
+-			uint8_t try_map;
+-		} cmd_res;
+-	} u;
+-
+-	/* kernel -&gt; user */
+-	union {
+-		struct {
+-			int err;
+-		} event_res;
+-		struct {
+-			int tid;
+-			uint64_t cid;
+-			int typeid;
+-			uint32_t data_len;
+-		} cmd_req;
+-		struct {
+-			int tid;
+-			uint32_t len;
+-			int typeid;
+-		} tgt_passthru;
+-		struct {
+-			int tid;
+-			int typeid;
+-			unsigned long uaddr;
+-			uint32_t len;
+-			int mmapped;
+-		} cmd_done;
+-	} k;
+-
+-	/*
+-	 * I think a pointer is a unsigned long but this struct
+-	 * gets passed around from the kernel to userspace and
+-	 * back again so to handle some ppc64 setups where userspace is
+-	 * 32 bits but the kernel is 64 we do this odd thing
+-	 */
+-	uint64_t data[0];
+-} __attribute__ ((aligned (sizeof(uint64_t))));
+-
+-#endif
+
+Deleted: branches/use-scsi-ml/include/tgt_scsi_if.h
+===================================================================
+--- branches/use-scsi-ml/include/tgt_scsi_if.h	2006-01-28 00:04:04 UTC (rev 239)
++++ branches/use-scsi-ml/include/tgt_scsi_if.h	2006-01-28 00:11:43 UTC (rev 240)
+@@ -1,20 +0,0 @@
+-/*
+- * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+- * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+- * This code is licenced under the GPL.
+- */
+-
+-#ifndef __TGT_SCSI_IF_H
+-#define __TGT_SCSI_IF_H
+-
+-#ifndef __KERNEL__
+-#define MAX_COMMAND_SIZE	16
+-#endif
+-
+-struct tgt_scsi_cmd {
+-	uint8_t scb[MAX_COMMAND_SIZE];
+-	uint8_t lun[8];
+-	int tags;
+-} __attribute__ ((aligned (sizeof(uint64_t))));
+-
+-#endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000226.html">[Stgt-svn] r239 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000228.html">[Stgt-svn] r241 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#227">[ date ]</a>
+              <a href="thread.html#227">[ thread ]</a>
+              <a href="subject.html#227">[ subject ]</a>
+              <a href="author.html#227">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

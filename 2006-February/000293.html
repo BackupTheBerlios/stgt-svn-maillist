@@ -1,0 +1,111 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r306 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r306%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602190412.k1J4CUfA013088%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000292.html">
+   <LINK REL="Next"  HREF="000294.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r306 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r306%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602190412.k1J4CUfA013088%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r306 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Feb 19 05:12:30 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000292.html">[Stgt-svn] r305 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000294.html">[Stgt-svn] r307 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#293">[ date ]</a>
+              <a href="thread.html#293">[ thread ]</a>
+              <a href="subject.html#293">[ subject ]</a>
+              <a href="author.html#293">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-19 05:12:26 +0100 (Sun, 19 Feb 2006)
+New Revision: 306
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+Log:
+Kill unnecessary headers and defines.
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-18 21:34:57 UTC (rev 305)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-19 04:12:26 UTC (rev 306)
+@@ -21,17 +21,12 @@
+ #include &lt;syscall.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;asm/byteorder.h&gt;
+-#include &lt;asm/page.h&gt;
+-#include &lt;scsi/iscsi_proto.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &lt;sys/mman.h&gt;
+-#include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+ #include &lt;sys/types.h&gt;
+ 
+-#include &lt;linux/netlink.h&gt;
+-
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
+@@ -53,17 +48,6 @@
+ #define READ 0
+ #define WRITE 1
+ 
+-#ifndef REPORT_LUNS
+-#define REPORT_LUNS           0xa0
+-#endif
+-
+-#ifndef SERVICE_ACTION_IN
+-#define SERVICE_ACTION_IN     0x9e
+-#endif
+-
+-#define SAM_STAT_GOOD            0x00
+-#define SAM_STAT_CHECK_CONDITION 0x02
+-
+ static uint32_t blk_shift = 9;
+ 
+ #define min(x,y) ({ \
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000292.html">[Stgt-svn] r305 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000294.html">[Stgt-svn] r307 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#293">[ date ]</a>
+              <a href="thread.html#293">[ thread ]</a>
+              <a href="subject.html#293">[ subject ]</a>
+              <a href="author.html#293">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

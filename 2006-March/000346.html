@@ -1,0 +1,137 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r359 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r359%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031020.k23AKSVY019027%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000345.html">
+   <LINK REL="Next"  HREF="000347.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r359 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r359%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603031020.k23AKSVY019027%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r359 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Fri Mar  3 11:20:28 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000345.html">[Stgt-svn] r358 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000347.html">[Stgt-svn] r360 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#346">[ date ]</a>
+              <a href="thread.html#346">[ thread ]</a>
+              <a href="subject.html#346">[ subject ]</a>
+              <a href="author.html#346">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-03 11:20:26 +0100 (Fri, 03 Mar 2006)
+New Revision: 359
+
+Modified:
+   branches/use-scsi-ml/usr/target.c
+Log:
+Use tgt_device structure pointer in cmd struture.
+
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-03-03 09:54:48 UTC (rev 358)
++++ branches/use-scsi-ml/usr/target.c	2006-03-03 10:20:26 UTC (rev 359)
+@@ -55,9 +55,8 @@
+ 	uint32_t cid;
+ 	uint64_t uaddr;
+ 	uint32_t len;
+-	uint64_t dev_id;
+-	int mmap;
+-	struct tgt_cmd_queue *queue;
++	int mmapped;
++	struct tgt_device *dev;
+ };
+ 
+ struct target {
+@@ -277,10 +276,10 @@
+ 	/* TODO: preallocate cmd */
+ 	cmd = malloc(sizeof(*cmd));
+  	cmd-&gt;cid = cid;
+-	cmd-&gt;dev_id = dev_id;
++	cmd-&gt;dev = device;
+ 	cmd-&gt;uaddr = uaddr;
+ 	cmd-&gt;len = len;
+-	cmd-&gt;mmap = try_map;
++	cmd-&gt;mmapped = try_map;
+ 
+ 	insque(&amp;cmd-&gt;hlist, &amp;target-&gt;cmd_hash_list[cmd_hashfn(cid)]);
+ 
+@@ -328,7 +327,6 @@
+ static void cmd_done(struct tgt_event *ev)
+ {
+ 	struct target *target;
+-	struct tgt_device *device;
+ 	struct cmd *cmd;
+ 	int err, do_munmap, host_no = ev-&gt;k.cmd_done.host_no;
+ 	uint32_t cid = ev-&gt;k.cmd_done.cid;
+@@ -345,21 +343,19 @@
+ 		return;
+ 	}
+ 	remque(&amp;cmd-&gt;hlist);
+-	do_munmap = cmd-&gt;mmap;
+-
++	do_munmap = cmd-&gt;mmapped;
+ 	if (do_munmap) {
+-		device = device_get(target, cmd-&gt;dev_id);
+-		if (!device) {
+-			eprintf(&quot;%&quot; PRIu64 &quot; is null\n&quot;, cmd-&gt;dev_id);
++		if (!cmd-&gt;dev) {
++			eprintf(&quot;device is null\n&quot;);
+ 			exit(1);
+ 		}
+ 
+-		if (device-&gt;addr)
++		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = scsi_cmd_done(do_munmap, !cmd-&gt;mmap, cmd-&gt;uaddr, cmd-&gt;len);
++	err = scsi_cmd_done(do_munmap, !cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len);
+ 
+-	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmap, cmd-&gt;uaddr, cmd-&gt;len, err);
++	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len, err);
+ 
+ 	free(cmd);
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000345.html">[Stgt-svn] r358 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000347.html">[Stgt-svn] r360 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#346">[ date ]</a>
+              <a href="thread.html#346">[ thread ]</a>
+              <a href="subject.html#346">[ subject ]</a>
+              <a href="author.html#346">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

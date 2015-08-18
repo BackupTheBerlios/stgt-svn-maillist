@@ -1,0 +1,268 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r7 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r7%20-%20trunk/kernel&In-Reply-To=%3C200508181807.j7II7LZo027998%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000001.html">
+   <LINK REL="Next"  HREF="000003.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r7 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r7%20-%20trunk/kernel&In-Reply-To=%3C200508181807.j7II7LZo027998%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r7 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Aug 18 20:07:21 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000001.html">[Stgt-svn] r6 - trunk/iscsi/kernel
+</A></li>
+        <LI>Next message: <A HREF="000003.html">[Stgt-svn] r8 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#2">[ date ]</a>
+              <a href="thread.html#2">[ thread ]</a>
+              <a href="subject.html#2">[ subject ]</a>
+              <a href="author.html#2">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-18 20:07:21 +0200 (Thu, 18 Aug 2005)
+New Revision: 7
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+Log:
+stgt_session_create() can be called in an atomic manner (that is, interrupt context is OK), however, not tested yet.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-17 07:41:44 UTC (rev 6)
++++ trunk/kernel/stgt.c	2005-08-18 18:07:21 UTC (rev 7)
+@@ -46,6 +46,12 @@
+ static spinlock_t all_targets_lock;
+ static LIST_HEAD(all_targets);
+ 
++static void session_init_handler(void *data);
++static spinlock_t atomic_sessions_lock;
++static LIST_HEAD(atomic_sessions);
++static DECLARE_WORK(atomic_session_work, session_init_handler,
++		    &amp;atomic_sessions);
++
+ static int daemon_pid;
+ static struct sock *nls;
+ 
+@@ -57,6 +63,14 @@
+ #define	cmnd_hashfn(key)	hash_long((key), STGT_HASH_ORDER)
+ static struct list_head cmnd_hash[1 &lt;&lt; STGT_HASH_ORDER];
+ 
++struct atomic_session_args {
++	struct stgt_session *session;
++	void (*done) (void *, struct stgt_session *);
++	int max_cmnds;
++	void *arg;
++	struct list_head list;
++};
++
+ struct stgt_work {
+ 	void (*fn) (void *);
+ 	void *arg;
+@@ -140,26 +154,11 @@
+ }
+ EXPORT_SYMBOL(stgt_target_destroy);
+ 
+-struct stgt_session *stgt_session_create(struct stgt_target *target,
+-					 void (*done)(void *), int max_cmnds)
++static int session_init(struct stgt_session *session, int max_cmnds)
+ {
+-	struct stgt_session *session;
++	struct stgt_target *target = session-&gt;target;
+ 	unsigned long flags;
+ 
+-	if (!target) {
+-		eprintk(&quot;%s\n&quot;, &quot;Null target pointer!&quot;);
+-		return NULL;
+-	}
+-
+-	dprintk(&quot;%p %d\n&quot;, target, max_cmnds);
+-	session = kmalloc(sizeof(*session), GFP_KERNEL);
+-	if (!session)
+-		return NULL;
+-
+-	memset(session, 0, sizeof(*session));
+-	session-&gt;target = target;
+-	INIT_LIST_HEAD(&amp;session-&gt;slist);
+-
+ 	session-&gt;cmnd_pool = mempool_create(max_cmnds, mempool_alloc_slab,
+ 					    mempool_free_slab, cmnd_slab);
+ 	if (!session-&gt;cmnd_pool)
+@@ -174,8 +173,7 @@
+ 	list_add(&amp;session-&gt;slist, &amp;target-&gt;session_list);
+ 	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+ 
+-	return session;
+-
++	return 0;
+ out:
+ 	if (session-&gt;cmnd_pool)
+ 		mempool_destroy(session-&gt;cmnd_pool);
+@@ -183,8 +181,97 @@
+ 	if (session-&gt;work_pool)
+ 		mempool_destroy(session-&gt;work_pool);
+ 
++	return -ENOMEM;
++}
++
++static void session_init_handler(void *data)
++{
++	struct list_head *head = (struct list_head *) data;
++	struct atomic_session_args *ssa = NULL;
++	unsigned long flags;
++	int err;
++
++	spin_lock_irqsave(&amp;atomic_sessions_lock, flags);
++	if (!list_empty(&amp;atomic_sessions)) {
++		ssa = list_entry(head-&gt;next, struct atomic_session_args, list);
++		list_del(&amp;ssa-&gt;list);
++	}
++	spin_unlock_irqrestore(&amp;atomic_sessions_lock, flags);
++
++	if (!ssa)
++		return;
++
++	err = session_init(ssa-&gt;session, ssa-&gt;max_cmnds);
++	if (err)
++		kfree(ssa-&gt;session);
++
++	ssa-&gt;done(ssa-&gt;arg, err ? NULL : ssa-&gt;session);
++
++	kfree(ssa);
++}
++
++static int session_atomic_init(struct stgt_session *session,
++			       int max_cmnds,
++			       void (*done) (void *, struct stgt_session *),
++			       int *arg)
++{
++	struct atomic_session_args *ssa;
++	unsigned long flags;
++
++	ssa = kmalloc(sizeof(*ssa), GFP_ATOMIC);
++	if (!ssa)
++		return -ENOMEM;
++
++	ssa-&gt;session = session;
++	ssa-&gt;max_cmnds = max_cmnds;
++	ssa-&gt;arg = arg;
++
++	spin_lock_irqsave(&amp;atomic_sessions_lock, flags);
++	list_add(&amp;ssa-&gt;list, &amp;atomic_sessions);
++	spin_unlock_irqrestore(&amp;atomic_sessions_lock, flags);
++
++	schedule_work(&amp;atomic_session_work);
++
++	return 0;
++}
++
++struct stgt_session *
++stgt_session_create(struct stgt_target *target,
++		    int max_cmnds,
++		    void (*done)(void *, struct stgt_session *),
++		    void *arg)
++{
++	struct stgt_session *session;
++
++	if (!target) {
++		eprintk(&quot;%s\n&quot;, &quot;Null target pointer!&quot;);
++		return NULL;
++	}
++
++	dprintk(&quot;%p %d\n&quot;, target, max_cmnds);
++
++	session = kmalloc(sizeof(*session), done ? GFP_ATOMIC : GFP_KERNEL);
++	if (!session)
++		return NULL;
++
++	memset(session, 0, sizeof(*session));
++	session-&gt;target = target;
++	INIT_LIST_HEAD(&amp;session-&gt;slist);
++
++	if (done) {
++		if (session_atomic_init(session, max_cmnds, done, arg) &lt; 0)
++			goto out;
++
++		return session;
++	}
++
++	if (session_init(session, max_cmnds) &lt; 0)
++		goto out;
++
++	return session;
++
++out:
+ 	kfree(session);
+-
+ 	return NULL;
+ }
+ EXPORT_SYMBOL(stgt_session_create);
+@@ -539,6 +626,7 @@
+ 	int i, err = -ENOMEM;
+ 
+ 	spin_lock_init(&amp;all_targets_lock);
++	spin_lock_init(&amp;atomic_sessions_lock);
+ 	spin_lock_init(&amp;cmnd_hash_lock);
+ 
+ 	cmnd_slab = kmem_cache_create(&quot;stgt_cmnd&quot;, sizeof(struct stgt_cmnd), 0,
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-08-17 07:41:44 UTC (rev 6)
++++ trunk/kernel/stgt.h	2005-08-18 18:07:21 UTC (rev 7)
+@@ -54,8 +54,10 @@
+ extern struct stgt_target *stgt_target_create(void);
+ extern int stgt_target_destroy(struct stgt_target *target);
+ 
+-extern struct stgt_session *stgt_session_create(struct stgt_target *target,
+-						void (*done)(void *), int nr);
++extern struct stgt_session *
++stgt_session_create(struct stgt_target *target,
++		    int max_cmnds,
++		    void (*done)(void *, struct stgt_session *), void *arg);
+ extern int stgt_session_destroy(struct stgt_session *session);
+ 
+ extern struct stgt_cmnd *stgt_cmnd_create(struct stgt_session *session);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000001.html">[Stgt-svn] r6 - trunk/iscsi/kernel
+</A></li>
+	<LI>Next message: <A HREF="000003.html">[Stgt-svn] r8 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#2">[ date ]</a>
+              <a href="thread.html#2">[ thread ]</a>
+              <a href="subject.html#2">[ subject ]</a>
+              <a href="author.html#2">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

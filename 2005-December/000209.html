@@ -1,0 +1,162 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r222 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r222%20-%20trunk/kernel&In-Reply-To=%3C200512301321.jBUDL4qp005524%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000208.html">
+   <LINK REL="Next"  HREF="000210.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r222 - trunk/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r222%20-%20trunk/kernel&In-Reply-To=%3C200512301321.jBUDL4qp005524%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r222 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Dec 30 14:21:04 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000208.html">[Stgt-svn] r221 - in trunk: include istgt/kernel kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000210.html">[Stgt-svn] r223 - in trunk: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#209">[ date ]</a>
+              <a href="thread.html#209">[ thread ]</a>
+              <a href="subject.html#209">[ subject ]</a>
+              <a href="author.html#209">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-30 14:21:02 +0100 (Fri, 30 Dec 2005)
+New Revision: 222
+
+Modified:
+   trunk/kernel/tgt_scsi.c
+Log:
+Just clean up tgt_scsi.c
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-12-30 13:12:06 UTC (rev 221)
++++ trunk/kernel/tgt_scsi.c	2005-12-30 13:21:02 UTC (rev 222)
+@@ -26,18 +26,16 @@
+ }
+ 
+ static void
+-scsi_tgt_cmd_create(struct tgt_cmd *cmd, uint8_t *scb,
++tgt_scsi_cmd_create(struct tgt_cmd *cmd, uint8_t *scb,
+ 		    uint32_t data_len, enum dma_data_direction data_dir,
+ 		    uint8_t *lun, int lun_size, int tags)
+ {
+-	struct tgt_scsi_cmd *scmd;
++	struct tgt_scsi_cmd *scmd = tgt_cmd_to_scsi(cmd);
+ 
+-	scmd = tgt_cmd_to_scsi(cmd);
+ 	memcpy(scmd-&gt;scb, scb, sizeof(scmd-&gt;scb));
+ 	memcpy(scmd-&gt;lun, lun, sizeof(scmd-&gt;lun));
+ 	scmd-&gt;tags = tags;
+ 
+-	/* is this device specific */
+ 	cmd-&gt;data_dir = data_dir;
+ 	/*
+ 	 * set bufflen based on data_len for now, but let device specific
+@@ -46,30 +44,22 @@
+ 	cmd-&gt;bufflen = data_len;
+ }
+ 
+-static void scsi_tgt_uspace_pdu_build(struct tgt_cmd *cmd, void *data)
++static void tgt_scsi_pdu_build(struct tgt_cmd *cmd, void *data)
+ {
+ 	struct tgt_scsi_cmd *scmd = tgt_cmd_to_scsi(cmd);
++
+ 	memcpy(data, scmd, sizeof(struct tgt_scsi_cmd));
+ }
+ 
+-static void scsi_tgt_uspace_cmd_complete(struct tgt_cmd *cmd)
+-{
+-	struct tgt_scsi_cmd *scmd = tgt_cmd_to_scsi(cmd);
+-
+-	dprintk(&quot;res %d, cmd %p op 0x%02x %lx\n&quot;, cmd-&gt;result, cmd, scmd-&gt;scb[0],
+-		cmd-&gt;uaddr);
+-}
+-
+-static struct tgt_protocol scsi_tgt_proto = {
++static struct tgt_protocol tgt_scsi_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
+-	.cmd_create = scsi_tgt_cmd_create,
+-	.uspace_pdu_build = scsi_tgt_uspace_pdu_build,
+-	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
++	.cmd_create = tgt_scsi_cmd_create,
++	.uspace_pdu_build = tgt_scsi_pdu_build,
+ 	.uspace_pdu_size = sizeof(struct tgt_scsi_cmd),
+ };
+ 
+-static int __init scsi_tgt_init(void)
++static int __init tgt_scsi_init(void)
+ {
+ 	int err;
+ 	size_t size = sizeof(struct tgt_cmd) + sizeof(struct tgt_scsi_cmd);
+@@ -80,9 +70,9 @@
+ 					       NULL, NULL);
+ 	if (!tgt_scsi_cmd_cache)
+ 		return -ENOMEM;
+-	scsi_tgt_proto.cmd_cache = tgt_scsi_cmd_cache;
++	tgt_scsi_proto.cmd_cache = tgt_scsi_cmd_cache;
+ 
+-	err = tgt_protocol_register(&amp;scsi_tgt_proto);
++	err = tgt_protocol_register(&amp;tgt_scsi_proto);
+ 	if (err)
+ 		goto cache_destroy;
+ 
+@@ -93,12 +83,12 @@
+ 	return err;
+ }
+ 
+-static void __exit scsi_tgt_exit(void)
++static void __exit tgt_scsi_exit(void)
+ {
+ 	kmem_cache_destroy(tgt_scsi_cmd_cache);
+-	tgt_protocol_unregister(&amp;scsi_tgt_proto);
++	tgt_protocol_unregister(&amp;tgt_scsi_proto);
+ }
+ 
+-module_init(scsi_tgt_init);
+-module_exit(scsi_tgt_exit);
++module_init(tgt_scsi_init);
++module_exit(tgt_scsi_exit);
+ MODULE_LICENSE(&quot;GPL&quot;);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000208.html">[Stgt-svn] r221 - in trunk: include istgt/kernel kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000210.html">[Stgt-svn] r223 - in trunk: include kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#209">[ date ]</a>
+              <a href="thread.html#209">[ thread ]</a>
+              <a href="subject.html#209">[ subject ]</a>
+              <a href="author.html#209">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

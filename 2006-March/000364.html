@@ -1,0 +1,173 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r377 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r377%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603131437.k2DEbS2N027476%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000363.html">
+   <LINK REL="Next"  HREF="000365.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r377 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r377%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200603131437.k2DEbS2N027476%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r377 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Mon Mar 13 15:37:28 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000363.html">[Stgt-svn] r376 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000365.html">[Stgt-svn] r378 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#364">[ date ]</a>
+              <a href="thread.html#364">[ thread ]</a>
+              <a href="subject.html#364">[ subject ]</a>
+              <a href="author.html#364">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-13 15:37:22 +0100 (Mon, 13 Mar 2006)
+New Revision: 377
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+Log:
+Kill cpu_to_* and *_to_cpu macro.
+
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-03-13 14:30:37 UTC (rev 376)
++++ branches/use-scsi-ml/usr/scsi.c	2006-03-13 14:37:22 UTC (rev 377)
+@@ -27,11 +27,6 @@
+ 
+ #include &quot;tgtd.h&quot;
+ 
+-#define cpu_to_be32 __cpu_to_be32
+-#define be32_to_cpu __be32_to_cpu
+-#define cpu_to_be64 __cpu_to_be64
+-#define be64_to_cpu __be64_to_cpu
+-
+ #define BLK_SHIFT	9
+ 
+ #define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+@@ -109,7 +104,7 @@
+ 	memcpy(ptr, geo_m_pg, sizeof(geo_m_pg));
+ 	ncyl = sec &gt;&gt; 14; /* 256 * 64 */
+ 	p = (uint32_t *)(ptr + 1);
+-	*p = *p | cpu_to_be32(ncyl);
++	*p = *p | __cpu_to_be32(ncyl);
+ 	return sizeof(geo_m_pg);
+ }
+ 
+@@ -128,8 +123,8 @@
+ 		data[3] = 8;
+ 		*len += 8;
+ 		*(uint32_t *)(data + 4) = (size &gt;&gt; 32) ?
+-			cpu_to_be32(0xffffffff) : cpu_to_be32(size);
+-		*(uint32_t *)(data + 8) = cpu_to_be32(1 &lt;&lt; BLK_SHIFT);
++			__cpu_to_be32(0xffffffff) : __cpu_to_be32(size);
++		*(uint32_t *)(data + 8) = __cpu_to_be32(1 &lt;&lt; BLK_SHIFT);
+ 	}
+ 
+ 	switch (pcode) {
+@@ -360,7 +355,7 @@
+ 
+ 	memset(data, 0, rbuflen);
+ 
+-	alen = be32_to_cpu(*(uint32_t *)&amp;scb[6]);
++	alen = __be32_to_cpu(*(uint32_t *)&amp;scb[6]);
+ 	if (alen &lt; 16) {
+ 		*len = sense_data_build(p, 0x70, ILLEGAL_REQUEST,
+ 					0x24, 0);
+@@ -392,8 +387,8 @@
+ /* 		lun = ((lun &gt; 0xff) ? (0x1 &lt;&lt; 30) : 0) | ((0x3ff &amp; lun) &lt;&lt; 16); */
+ 		lun = make_lun(0, lun &amp; 0x003f, 0);
+ 		dprintf(&quot;%&quot; PRIx64 &quot;\n&quot;, lun);
+-/* 		data[idx++] = cpu_to_be64(lun &lt;&lt; 32); */
+-		data[idx++] = cpu_to_be64(lun);
++/* 		data[idx++] = __cpu_to_be64(lun &lt;&lt; 32); */
++		data[idx++] = __cpu_to_be64(lun);
+ 		if (!(alen -= 8))
+ 			break;
+ 		if (!(rbuflen -= 8)) {
+@@ -404,7 +399,7 @@
+ 	}
+ 
+ done:
+-	*((uint32_t *) data) = cpu_to_be32(nr_luns * 8);
++	*((uint32_t *) data) = __cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+ 
+ 	return result;
+@@ -424,8 +419,8 @@
+ 	size = dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+ 	data[0] = (size &gt;&gt; 32) ?
+-		cpu_to_be32(0xffffffff) : cpu_to_be32(size - 1);
+-	data[1] = cpu_to_be32(1U &lt;&lt; BLK_SHIFT);
++		__cpu_to_be32(0xffffffff) : __cpu_to_be32(size - 1);
++	data[1] = __cpu_to_be32(1U &lt;&lt; BLK_SHIFT);
+ 	*len = 8;
+ 
+ 	return SAM_STAT_GOOD;
+@@ -472,8 +467,8 @@
+ 	size = dev-&gt;size &gt;&gt; BLK_SHIFT;
+ 
+ 	data64 = (uint64_t *) data;
+-	data64[0] = cpu_to_be64(size - 1);
+-	data[2] = cpu_to_be32(1UL &lt;&lt; BLK_SHIFT);
++	data64[0] = __cpu_to_be64(size - 1);
++	data[2] = __cpu_to_be32(1UL &lt;&lt; BLK_SHIFT);
+ 
+ 	*len = 32;
+ 
+@@ -496,11 +491,11 @@
+ 	case READ_10:
+ 	case WRITE_10:
+ 	case WRITE_VERIFY:
+-		off = be32_to_cpu(*(uint32_t *) &amp;scb[2]);
++		off = __be32_to_cpu(*(uint32_t *) &amp;scb[2]);
+ 		break;
+ 	case READ_16:
+ 	case WRITE_16:
+-		off = be64_to_cpu(*(uint64_t *) &amp;scb[2]);
++		off = __be64_to_cpu(*(uint64_t *) &amp;scb[2]);
+ 		break;
+ 	default:
+ 		off = 0;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000363.html">[Stgt-svn] r376 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000365.html">[Stgt-svn] r378 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#364">[ date ]</a>
+              <a href="thread.html#364">[ thread ]</a>
+              <a href="subject.html#364">[ subject ]</a>
+              <a href="author.html#364">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

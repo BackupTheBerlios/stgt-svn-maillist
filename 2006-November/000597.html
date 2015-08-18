@@ -1,0 +1,81 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r610 - trunk/usr/ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r610%20-%20trunk/usr/ibmvio&In-Reply-To=%3C200611030838.kA38cW15022052%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000598.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r610 - trunk/usr/ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r610%20-%20trunk/usr/ibmvio&In-Reply-To=%3C200611030838.kA38cW15022052%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r610 - trunk/usr/ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Nov  3 09:38:32 CET 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000598.html">[Stgt-svn] r611 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#597">[ date ]</a>
+              <a href="thread.html#597">[ thread ]</a>
+              <a href="subject.html#597">[ subject ]</a>
+              <a href="author.html#597">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-03 09:38:32 +0100 (Fri, 03 Nov 2006)
+New Revision: 610
+
+Modified:
+   trunk/usr/ibmvio/ibmvio.c
+Log:
+ibmvio.c does not need to include scsi_tgt_if.h
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2006-10-31 14:48:40 UTC (rev 609)
++++ trunk/usr/ibmvio/ibmvio.c	2006-11-03 08:38:32 UTC (rev 610)
+@@ -37,7 +37,6 @@
+ #include &lt;asm/byteorder.h&gt;
+ #include &lt;linux/fs.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+-#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &lt;sys/mman.h&gt;
+ 
+ #include &quot;list.h&quot;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000598.html">[Stgt-svn] r611 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#597">[ date ]</a>
+              <a href="thread.html#597">[ thread ]</a>
+              <a href="subject.html#597">[ subject ]</a>
+              <a href="author.html#597">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

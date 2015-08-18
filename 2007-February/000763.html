@@ -1,0 +1,259 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r776 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r776%20-%20trunk/usr&In-Reply-To=%3C200702100431.l1A4VI2E001266%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000762.html">
+   <LINK REL="Next"  HREF="000764.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r776 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r776%20-%20trunk/usr&In-Reply-To=%3C200702100431.l1A4VI2E001266%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r776 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Feb 10 05:31:18 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000762.html">[Stgt-svn] r775 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000764.html">[Stgt-svn] r777 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#763">[ date ]</a>
+              <a href="thread.html#763">[ thread ]</a>
+              <a href="subject.html#763">[ subject ]</a>
+              <a href="author.html#763">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-02-10 05:31:17 +0100 (Sat, 10 Feb 2007)
+New Revision: 776
+
+Modified:
+   trunk/usr/bd_mmap.c
+   trunk/usr/scsi.c
+   trunk/usr/tgtd.c
+   trunk/usr/tgtif.c
+   trunk/usr/util.h
+Log:
+Fix PAGE_SIZE mess (or stop using PAGE_SIZE).
+
+getpagesize manpage says:
+
+a user program should not find PAGE_SIZE at compile time from a header
+file.
+
+Now we can remove stupid TGT_RING_PAGES, TGT_EVENT_PER_PAGE,
+TGT_MAX_EVENTS in scsi_tgt_if.h
+
+
+
+Modified: trunk/usr/bd_mmap.c
+===================================================================
+--- trunk/usr/bd_mmap.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/bd_mmap.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -44,6 +44,8 @@
+ 	close(dev-&gt;fd);
+ }
+ 
++#define pgcnt(size, offset)	((((size) + ((offset) &amp; (pagesize - 1))) + (pagesize - 1)) &gt;&gt; pageshift)
++
+ static int bd_mmap_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
+ 			      uint32_t datalen, unsigned long *uaddr,
+ 			      uint64_t offset, int *async, void *key)
+@@ -55,11 +57,11 @@
+ 	if (*uaddr)
+ 		*uaddr = *uaddr + offset;
+ 	else {
+-		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; PAGE_SHIFT,
++		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; pageshift,
+ 			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   offset &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
++			   offset &amp; ~((1ULL &lt;&lt; pageshift) - 1));
+ 
+-		*uaddr = (unsigned long) p + (offset &amp; ~PAGE_MASK);
++		*uaddr = (unsigned long) p + (offset &amp; (pagesize - 1));
+ 		if (p == MAP_FAILED) {
+ 			err = -EINVAL;
+ 			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+@@ -78,8 +80,8 @@
+ 	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
+ 
+ 	if (do_munmap) {
+-		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
+-		uaddr &amp;= PAGE_MASK;
++		len = pgcnt(len, (uaddr &amp; (pagesize - 1))) &lt;&lt; pageshift;
++		uaddr &amp;= ~(pagesize - 1);
+ 		err = munmap((void *) (unsigned long) uaddr, len);
+ 		if (err)
+ 			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/scsi.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -491,8 +491,8 @@
+ 
+ 	*async = *offset = 0;
+ 	if (scsi_cmd_rw(scb, rw)) {
+-		data = valloc(PAGE_SIZE);
+-		memset(data, 0, PAGE_SIZE);
++		data = valloc(pagesize);
++		memset(data, 0, pagesize);
+ 	}
+ 
+ 	if (!dev) {
+@@ -504,8 +504,8 @@
+ 		default:
+ 			*offset = 0;
+ 			if (!data) {
+-				data = valloc(PAGE_SIZE);
+-				memset(data, 0, PAGE_SIZE);
++				data = valloc(pagesize);
++				memset(data, 0, pagesize);
+ 			}
+ 			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+@@ -583,7 +583,7 @@
+ 			*rw = READ;
+ 			*offset = 0;
+ 			if (!data)
+-				data = valloc(PAGE_SIZE);
++				data = valloc(pagesize);
+ 			*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 						0x25, 0);
+ 		}
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/tgtd.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -49,6 +49,7 @@
+ };
+ 
+ io_context_t ctx;
++unsigned long pagesize, pageshift, pagemask;
+ 
+ static int ep_fd;
+ static char program_name[] = &quot;tgtd&quot;;
+@@ -281,6 +282,11 @@
+ 	sigaction(SIGPIPE, &amp;sa_new, &amp;sa_old );
+ 	sigaction(SIGTERM, &amp;sa_new, &amp;sa_old );
+ 
++	pagesize = sysconf(_SC_PAGESIZE);
++	for (pageshift = 0;; pageshift++)
++		if (1UL &lt;&lt; pageshift == pagesize)
++			break;
++
+ 	while ((ch = getopt_long(argc, argv, short_options, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+
+Modified: trunk/usr/tgtif.c
+===================================================================
+--- trunk/usr/tgtif.c	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/tgtif.c	2007-02-10 04:31:17 UTC (rev 776)
+@@ -50,18 +50,20 @@
+ static struct uring kuring, ukring;
+ static int chrfd;
+ 
++static unsigned long tgt_ring_pages, tgt_max_events, tgt_event_per_page;
++
+ static inline void ring_index_inc(struct uring *ring)
+ {
+-	ring-&gt;idx = (ring-&gt;idx == TGT_MAX_EVENTS - 1) ? 0 : ring-&gt;idx + 1;
++	ring-&gt;idx = (ring-&gt;idx == tgt_max_events - 1) ? 0 : ring-&gt;idx + 1;
+ }
+ 
+ static inline struct tgt_event *head_ring_hdr(struct uring *ring)
+ {
+ 	uint32_t pidx, off, pos;
+ 
+-	pidx = ring-&gt;idx / TGT_EVENT_PER_PAGE;
+-	off = ring-&gt;idx % TGT_EVENT_PER_PAGE;
+-	pos = pidx * PAGE_SIZE + off * sizeof(struct tgt_event);
++	pidx = ring-&gt;idx / tgt_event_per_page;
++	off = ring-&gt;idx % tgt_event_per_page;
++	pos = pidx * pagesize + off * sizeof(struct tgt_event);
+ 
+ 	return (struct tgt_event *) (ring-&gt;buf + pos);
+ }
+@@ -210,6 +212,11 @@
+ 		return -EINVAL;
+ 	}
+ 
++	tgt_ring_pages = (pagesize &gt; size) ? 1 : size &gt;&gt; pageshift;
++
++	tgt_event_per_page = pagesize / sizeof(struct tgt_event);
++	tgt_max_events = tgt_event_per_page * tgt_ring_pages;
++
+ 	kuring.idx = ukring.idx = 0;
+ 	kuring.buf = buf;
+ 	ukring.buf = buf + size;
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2007-02-09 12:36:30 UTC (rev 775)
++++ trunk/usr/util.h	2007-02-10 04:31:17 UTC (rev 776)
+@@ -2,19 +2,10 @@
+ #define __UTIL_H__
+ 
+ #include &lt;byteswap.h&gt;
+-#include &lt;sys/user.h&gt;
+ 
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+ #define ALIGN(x,a) (((x)+(a)-1)&amp;~((a)-1))
+ 
+-#ifndef PAGE_SHIFT
+-#define	PAGE_SHIFT	12
+-#define	PAGE_SIZE	(1UL &lt;&lt; PAGE_SHIFT)
+-#define	PAGE_MASK	(~(PAGE_SIZE-1))
+-#endif
+-
+-#define pgcnt(size, offset)	((((size) + ((offset) &amp; ~PAGE_MASK)) + PAGE_SIZE - 1) &gt;&gt; PAGE_SHIFT)
+-
+ #if __BYTE_ORDER == __LITTLE_ENDIAN
+ #define __cpu_to_be16(x) bswap_16(x)
+ #define __cpu_to_be32(x) bswap_32(x)
+@@ -92,4 +83,6 @@
+ 	rest -= len;							\
+ } while (0)
+ 
++extern unsigned long pagesize, pageshift;
++
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000762.html">[Stgt-svn] r775 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000764.html">[Stgt-svn] r777 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#763">[ date ]</a>
+              <a href="thread.html#763">[ thread ]</a>
+              <a href="subject.html#763">[ subject ]</a>
+              <a href="author.html#763">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

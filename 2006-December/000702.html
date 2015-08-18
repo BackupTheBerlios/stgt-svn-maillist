@@ -1,0 +1,403 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r715 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r715%20-%20trunk/usr&In-Reply-To=%3C200612251057.kBPAv4xm022450%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000701.html">
+   <LINK REL="Next"  HREF="000703.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r715 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r715%20-%20trunk/usr&In-Reply-To=%3C200612251057.kBPAv4xm022450%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r715 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Dec 25 11:57:04 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000701.html">[Stgt-svn] r714 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000703.html">[Stgt-svn] r716 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#702">[ date ]</a>
+              <a href="thread.html#702">[ thread ]</a>
+              <a href="subject.html#702">[ subject ]</a>
+              <a href="author.html#702">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-25 11:57:04 +0100 (Mon, 25 Dec 2006)
+New Revision: 715
+
+Modified:
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.h
+Log:
+tgt_target_show_all can handle long responses.
+
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-12-25 09:19:24 UTC (rev 714)
++++ trunk/usr/mgmt.c	2006-12-25 10:57:04 UTC (rev 715)
+@@ -41,8 +41,6 @@
+ #include &quot;driver.h&quot;
+ #include &quot;util.h&quot;
+ 
+-#define BUFSIZE 4096
+-
+ enum mgmt_task_state {
+ 	MTASK_STATE_HDR_RECV,
+ 	MTASK_STATE_PDU_RECV,
+@@ -54,6 +52,9 @@
+ 	int retry;
+ 	int done;
+ 	char *buf;
++	int bsize;
++	struct tgtadm_req req;
++	struct tgtadm_rsp rsp;
+ /* 	struct tgt_work work; */
+ };
+ 
+@@ -68,17 +69,17 @@
+ 	}
+ }
+ 
+-static int target_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+-		       struct tgtadm_rsp *rsp, int *rlen)
++static int target_mgmt(int lld_no, struct mgmt_task *mtask)
+ {
++	struct tgtadm_req *req = &amp;mtask-&gt;req;
++	struct tgtadm_rsp *rsp = &amp;mtask-&gt;rsp;
+ 	int err = -EINVAL;
+-	char *pdu = (char *)rsp + sizeof(*rsp);
+ 
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+-		err = tgt_target_create(lld_no, req-&gt;tid, params);
++		err = tgt_target_create(lld_no, req-&gt;tid, mtask-&gt;buf);
+ 		if (!err &amp;&amp; tgt_drivers[lld_no]-&gt;target_create)
+-			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, params);
++			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, mtask-&gt;buf);
+ 		break;
+ 	case OP_DELETE:
+ 		err = tgt_target_destroy(req-&gt;tid);
+@@ -93,26 +94,36 @@
+ 		char *p;
+ 		err = -EINVAL;
+ 
+-		p = strchr(params, '=');
++		p = strchr(mtask-&gt;buf, '=');
+ 		if (!p)
+ 			break;
+ 		*p++ = '\0';
+ 
+-		if (!strcmp(params, &quot;state&quot;))
++		if (!strcmp(mtask-&gt;buf, &quot;state&quot;))
+ 			err = tgt_set_target_state(req-&gt;tid, p);
+ 		else if (tgt_drivers[lld_no]-&gt;target_update)
+-			err = tgt_drivers[lld_no]-&gt;target_update(req-&gt;tid, params);
++			err = tgt_drivers[lld_no]-&gt;target_update(req-&gt;tid, mtask-&gt;buf);
+ 		break;
+ 	}
+ 	case OP_SHOW:
+-		if (req-&gt;tid &lt; 0)
+-			err = tgt_target_show_all(pdu, *rlen - sizeof(*rsp));
+-		else if (tgt_drivers[lld_no]-&gt;show)
++		if (req-&gt;tid &lt; 0) {
++			retry:
++			err = tgt_target_show_all(mtask-&gt;buf, mtask-&gt;bsize);
++			if (err == mtask-&gt;bsize) {
++				char *p;
++				mtask-&gt;bsize &lt;&lt;= 1;
++				p = realloc(mtask-&gt;buf, mtask-&gt;bsize);
++				if (p) {
++					mtask-&gt;buf = p;
++					goto retry;
++				} else
++					err = TGTADM_NOMEM;
++			}
++		} else if (tgt_drivers[lld_no]-&gt;show)
+ 			err = tgt_drivers[lld_no]-&gt;show(req-&gt;mode,
+ 							req-&gt;tid, req-&gt;sid,
+ 							req-&gt;cid, req-&gt;lun,
+-							pdu,
+-							*rlen - sizeof(*rsp));
++							mtask-&gt;buf, mtask-&gt;bsize);
+ 		break;
+ 	default:
+ 		break;
+@@ -161,11 +172,11 @@
+ 	return err;
+ }
+ 
+-static int tgt_mgmt(struct tgtadm_req *req, struct tgtadm_rsp *rsp, int len)
++static int tgt_mgmt(struct mgmt_task *mtask)
+ {
+-	int lld_no, err = -EINVAL;
+-	char *params = (char *) req + sizeof(*req);
+-	char *pdu = (char *) rsp + sizeof(*rsp);
++	struct tgtadm_req *req = &amp;mtask-&gt;req;
++	struct tgtadm_rsp *rsp = &amp;mtask-&gt;rsp;
++	int lld_no, err = -EINVAL, len = mtask-&gt;bsize;
+ 
+ 	lld_no = get_driver_index(req-&gt;lld);
+ 	if (lld_no &lt; 0) {
+@@ -177,22 +188,21 @@
+ 
+ 	dprintf(&quot;%d %d %d %d %d %&quot; PRIx64 &quot; %&quot; PRIx64 &quot; %s %d\n&quot;,
+ 		req-&gt;len, lld_no, req-&gt;mode, req-&gt;op,
+-		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
++		req-&gt;tid, req-&gt;sid, req-&gt;lun, mtask-&gt;buf, getpid());
+ 
+ 	switch (req-&gt;mode) {
+ 	case MODE_SYSTEM:
+ 		break;
+ 	case MODE_TARGET:
+-		err = target_mgmt(lld_no, req, params, rsp, &amp;len);
++		err = target_mgmt(lld_no, mtask);
+ 		break;
+ 	case MODE_DEVICE:
+-		err = device_mgmt(lld_no, req, params, rsp, &amp;len);
++		err = device_mgmt(lld_no, req, mtask-&gt;buf, rsp, &amp;len);
+ 		break;
+ 	case MODE_ACCOUNT:
+ 		if (tgt_drivers[lld_no]-&gt;account)
+ 			err = tgt_drivers[lld_no]-&gt;account(req-&gt;op, req-&gt;tid, req-&gt;aid,
+-							   params, pdu,
+-							   len - sizeof(*rsp));
++							   mtask-&gt;buf, mtask-&gt;buf, len);
+ 		if (req-&gt;op == OP_SHOW) {
+ 			set_show_results(rsp, &amp;err);
+ 			err = 0;
+@@ -206,8 +216,7 @@
+ 			err = tgt_drivers[lld_no]-&gt;show(req-&gt;mode,
+ 							req-&gt;tid, req-&gt;sid,
+ 							req-&gt;cid, req-&gt;lun,
+-							pdu,
+-							len - sizeof(*rsp));
++							mtask-&gt;buf, len);
+ 
+ 			set_show_results(rsp, &amp;err);
+ 		}
+@@ -252,28 +261,34 @@
+ static void mtask_handler(int fd, int events, void *data)
+ {
+ 	int err, len;
+-	char *pdu;
++	char *p;
+ 	struct mgmt_task *mtask = data;
+-	struct tgtadm_req *req = (struct tgtadm_req *) mtask-&gt;buf;
+-	struct tgtadm_rsp *rsp = (struct tgtadm_rsp *) mtask-&gt;buf;
++	struct tgtadm_req *req = &amp;mtask-&gt;req;
++	struct tgtadm_rsp *rsp = &amp;mtask-&gt;rsp;
+ 
+ 	switch (mtask-&gt;mtask_state) {
+ 	case MTASK_STATE_HDR_RECV:
+ 		len = sizeof(*req) - mtask-&gt;done;
+-		err = read(fd, mtask-&gt;buf + mtask-&gt;done, len);
++		err = read(fd, (char *)req + mtask-&gt;done, len);
+ 		if (err &gt; 0) {
+ 			mtask-&gt;done += err;
+ 			if (mtask-&gt;done == sizeof(*req)) {
+ 				if (req-&gt;len == sizeof(*req)) {
+-					tgt_mgmt(req, rsp, BUFSIZE);
++					tgt_mgmt(mtask);
+ 					mtask-&gt;mtask_state =
+ 						MTASK_STATE_RSP_SEND;
+ 					tgt_event_modify(fd, EPOLLOUT);
+ 					mtask-&gt;done = 0;
+ 				} else {
++					/* the pdu exists */
++					mtask-&gt;done = 0;
+ 					mtask-&gt;mtask_state =
+ 						MTASK_STATE_PDU_RECV;
+-					mtask-&gt;done = 0;
++
++					if (mtask-&gt;bsize &lt; req-&gt;len) {
++						eprintf(&quot;FIXME: %d\n&quot;, req-&gt;len);
++						goto out;
++					}
+ 				}
+ 			}
+ 		} else
+@@ -283,12 +298,11 @@
+ 		break;
+ 	case MTASK_STATE_PDU_RECV:
+ 		len = req-&gt;len - (sizeof(*req) + mtask-&gt;done);
+-		pdu = mtask-&gt;buf + sizeof(*req);
+-		err = read(fd, pdu + mtask-&gt;done, len);
++		err = read(fd, mtask-&gt;buf + mtask-&gt;done, len);
+ 		if (err &gt; 0) {
+ 			mtask-&gt;done += err;
+ 			if (mtask-&gt;done == req-&gt;len - (sizeof(*req))) {
+-				tgt_mgmt(req, rsp, BUFSIZE);
++				tgt_mgmt(mtask);
+ 				mtask-&gt;mtask_state = MTASK_STATE_RSP_SEND;
+ 				tgt_event_modify(fd, EPOLLOUT);
+ 				mtask-&gt;done = 0;
+@@ -299,8 +313,15 @@
+ 
+ 		break;
+ 	case MTASK_STATE_RSP_SEND:
+-		len = rsp-&gt;len - mtask-&gt;done;
+-		err = write(fd, mtask-&gt;buf + mtask-&gt;done, len);
++		if (mtask-&gt;done &lt; sizeof(*rsp)) {
++			p = (char *)rsp + mtask-&gt;done;
++			len = sizeof(*rsp) - mtask-&gt;done;
++		} else {
++			p = mtask-&gt;buf + (mtask-&gt;done - sizeof(*rsp));
++			len = rsp-&gt;len - mtask-&gt;done;
++		}
++
++		err = write(fd, p, len);
+ 		if (err &gt; 0) {
+ 			mtask-&gt;done += err;
+ 
+@@ -317,10 +338,13 @@
+ 	return;
+ out:
+ 	tgt_event_del(fd);
++	free(mtask-&gt;buf);
+ 	free(mtask);
+ 	close(fd);
+ }
+ 
++#define BUFSIZE 1024
++
+ static void mgmt_event_handler(int accept_fd, int events, void *data)
+ {
+ 	int fd, err;
+@@ -338,14 +362,20 @@
+ 	if (err)
+ 		goto out;
+ 
+-	mtask = zalloc(sizeof(*mtask) + sizeof(struct tgtadm_req) + BUFSIZE);
++	mtask = zalloc(sizeof(*mtask));
+ 	if (!mtask) {
+ 		eprintf(&quot;can't allocate mtask\n&quot;);
+ 		goto out;
+ 	}
+ 
++	mtask-&gt;buf = zalloc(BUFSIZE);
++	if (!mtask-&gt;buf) {
++		free(mtask);
++		goto out;
++	}
++
++	mtask-&gt;bsize = BUFSIZE;
+ 	mtask-&gt;mtask_state = MTASK_STATE_HDR_RECV;
+-	mtask-&gt;buf = (char *) mtask + sizeof(*mtask);
+ 	err = tgt_event_add(fd, EPOLLIN, mtask_handler, mtask);
+ 	if (err) {
+ 		free(mtask);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-12-25 09:19:24 UTC (rev 714)
++++ trunk/usr/target.c	2006-12-25 10:57:04 UTC (rev 715)
+@@ -773,7 +773,7 @@
+ 
+ int tgt_target_show_all(char *buf, int rest)
+ {
+-	int i, len, total;
++	int i, len, total, max = rest;
+ 	struct target *target;
+ 	struct tgt_device *device;
+ 
+@@ -787,18 +787,24 @@
+ 				       target-&gt;name,
+ 				       tgt_drivers[target-&gt;lid]-&gt;name,
+ 				       target_state_name(target-&gt;target_state));
++			if (len &gt; rest) {
++				total = max;
++				goto out;
++			}
++
+ 			buf += len;
+ 			total += len;
+ 			rest -= len;
+-			if (!rest)
++
++			len = snprintf(buf, rest, TAB1 &quot;LUN information:\n&quot;);
++			if (len &gt; rest) {
++				total = max;
+ 				goto out;
++			}
+ 
+-			len = snprintf(buf, rest, TAB1 &quot;LUN information:\n&quot;);
+ 			buf += len;
+ 			total += len;
+ 			rest -= len;
+-			if (!rest)
+-				goto out;
+ 
+ 			list_for_each_entry(device, &amp;target-&gt;device_list, d_list) {
+ 				len = snprintf(buf, rest,
+@@ -814,11 +820,14 @@
+ 					       print_disksize(device-&gt;size),
+ 					       device-&gt;path,
+ 					       target_iotype_name(target-&gt;target_iotype));
++				if (len &gt; rest) {
++					total = max;
++					goto out;
++				}
++
+ 				buf += len;
+ 				total += len;
+ 				rest -= len;
+-				if (!rest)
+-					goto out;
+ 			}
+ 		}
+ 	}
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2006-12-25 09:19:24 UTC (rev 714)
++++ trunk/usr/tgtadm.h	2006-12-25 10:57:04 UTC (rev 715)
+@@ -7,7 +7,7 @@
+ enum tgtadm_errno {
+ 	TGTADM_SUCCESS,
+ 	TGTADM_UNKNOWN_ERR,
+-	TGTADM_OOM,
++	TGTADM_NOMEM,
+ 	TGTADM_NO_DRIVER,
+ 	TGTADM_NO_TARGET,
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000701.html">[Stgt-svn] r714 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000703.html">[Stgt-svn] r716 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#702">[ date ]</a>
+              <a href="thread.html#702">[ thread ]</a>
+              <a href="subject.html#702">[ subject ]</a>
+              <a href="author.html#702">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

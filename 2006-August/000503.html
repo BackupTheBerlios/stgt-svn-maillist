@@ -1,0 +1,289 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r516 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r516%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608050704.k7574nso006455%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000502.html">
+   <LINK REL="Next"  HREF="000504.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r516 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r516%20-%20trunk/usr/iscsi&In-Reply-To=%3C200608050704.k7574nso006455%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r516 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Aug  5 09:04:49 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000502.html">[Stgt-svn] r515 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000504.html">[Stgt-svn] r517 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#503">[ date ]</a>
+              <a href="thread.html#503">[ thread ]</a>
+              <a href="subject.html#503">[ subject ]</a>
+              <a href="author.html#503">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-05 09:04:32 +0200 (Sat, 05 Aug 2006)
+New Revision: 516
+
+Removed:
+   trunk/usr/iscsi/misc.h
+Modified:
+   trunk/usr/iscsi/conn.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+Log:
+Replace iscsi's list structure with the standard one.
+
+
+Modified: trunk/usr/iscsi/conn.c
+===================================================================
+--- trunk/usr/iscsi/conn.c	2006-08-02 05:18:25 UTC (rev 515)
++++ trunk/usr/iscsi/conn.c	2006-08-05 07:04:32 UTC (rev 516)
+@@ -26,7 +26,7 @@
+ 	}
+ 
+ 	conn-&gt;session = session;
+-	insque(&amp;conn-&gt;clist, &amp;session-&gt;conn_list);
++	list_add(&amp;conn-&gt;clist, &amp;session-&gt;conn_list);
+ }
+ 
+ struct connection *conn_alloc(void)
+@@ -47,7 +47,7 @@
+ 
+ void conn_free(struct connection *conn)
+ {
+-	remque(&amp;conn-&gt;clist);
++	list_del(&amp;conn-&gt;clist);
+ 	free(conn-&gt;initiator);
+ 	free(conn);
+ }
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-08-02 05:18:25 UTC (rev 515)
++++ trunk/usr/iscsi/iscsid.h	2006-08-05 07:04:32 UTC (rev 516)
+@@ -7,13 +7,12 @@
+ #ifndef ISCSID_H
+ #define ISCSID_H
+ 
+-#include &lt;search.h&gt;
+ #include &lt;sys/types.h&gt;
+ #include &lt;linux/types.h&gt;
+ 
+ #include &quot;types.h&quot;
+ #include &quot;iscsi_if.h&quot;
+-#include &quot;misc.h&quot;
++#include &quot;list.h&quot;
+ #include &quot;param.h&quot;
+ #include &quot;log.h&quot;
+ 
+@@ -50,8 +49,8 @@
+ #define KEY_STATE_DONE		2
+ 
+ struct session {
+-	struct qelem slist;
+-	struct qelem hlist;
++	struct list_head slist;
++	struct list_head hlist;
+ 
+ 	char *initiator;
+ 	struct target *target;
+@@ -62,7 +61,7 @@
+ 	uint32_t ksid;
+ 	uint32_t hostno;
+ 
+-	struct qelem conn_list;
++	struct list_head conn_list;
+ 	int conn_cnt;
+ };
+ 
+@@ -71,7 +70,7 @@
+ 	int iostate;
+ 	int fd;
+ 
+-	struct qelem clist;
++	struct list_head clist;
+ 	struct session *session;
+ 
+ 	int tid;
+@@ -152,9 +151,9 @@
+ #define INCOMING_BUFSIZE	8192
+ 
+ struct target {
+-	struct qelem tlist;
++	struct list_head tlist;
+ 
+-	struct qelem sessions_list;
++	struct list_head sessions_list;
+ 
+ 	int tid;
+ 	char name[ISCSI_NAME_LEN];
+
+Deleted: trunk/usr/iscsi/misc.h
+===================================================================
+--- trunk/usr/iscsi/misc.h	2006-08-02 05:18:25 UTC (rev 515)
++++ trunk/usr/iscsi/misc.h	2006-08-05 07:04:32 UTC (rev 516)
+@@ -1,45 +0,0 @@
+-/*
+- * Released under the terms of the GNU GPL v2.0.
+- */
+-
+-#ifndef MISC_H
+-#define MISC_H
+-
+-struct qelem {
+-	struct qelem *q_forw;
+-	struct qelem *q_back;
+-};
+-
+-/* stolen list stuff from Linux kernel */
+-
+-#undef offsetof
+-#ifdef __compiler_offsetof
+-#define offsetof(TYPE,MEMBER) __compiler_offsetof(TYPE,MEMBER)
+-#else
+-#define offsetof(TYPE, MEMBER) ((size_t) &amp;((TYPE *)0)-&gt;MEMBER)
+-#endif
+-
+-#define LIST_HEAD_INIT(name) { &amp;(name), &amp;(name) }
+-
+-#define INIT_LIST_HEAD(ptr) do { \
+-	(ptr)-&gt;q_forw = (ptr); (ptr)-&gt;q_back = (ptr); \
+-} while (0)
+-
+-static inline int list_empty(const struct qelem *head)
+-{
+-	return head-&gt;q_forw == head;
+-}
+-
+-#define container_of(ptr, type, member) ({			\
+-        const typeof( ((type *)0)-&gt;member ) *__mptr = (ptr);	\
+-        (type *)( (char *)__mptr - offsetof(type,member) );})
+-
+-#define list_entry(ptr, type, member) \
+-	container_of(ptr, type, member)
+-
+-#define list_for_each_entry(pos, head, member)				\
+-	for (pos = list_entry((head)-&gt;q_forw, typeof(*pos), member);	\
+-	     &amp;pos-&gt;member != (head); 	\
+-	     pos = list_entry(pos-&gt;member.q_forw, typeof(*pos), member))
+-
+-#endif
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-08-02 05:18:25 UTC (rev 515)
++++ trunk/usr/iscsi/session.c	2006-08-05 07:04:32 UTC (rev 516)
+@@ -16,7 +16,7 @@
+ 
+ #include &quot;iscsid.h&quot;
+ 
+-struct qelem sessions_list = LIST_HEAD_INIT(sessions_list);
++static LIST_HEAD(sessions_list);
+ 
+ static struct session *session_alloc(int tid)
+ {
+@@ -31,7 +31,7 @@
+ 
+ 	session-&gt;target = target;
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+-	insque(&amp;session-&gt;slist, &amp;target-&gt;sessions_list);
++	list_add(&amp;session-&gt;slist, &amp;target-&gt;sessions_list);
+ 
+ 	INIT_LIST_HEAD(&amp;session-&gt;conn_list);
+ 
+@@ -115,7 +115,7 @@
+ 	ki-&gt;create_session(thandle, conn-&gt;exp_cmd_sn, &amp;session-&gt;ksid,
+ 			   &amp;session-&gt;hostno);
+ 
+-	insque(&amp;session-&gt;hlist, &amp;sessions_list);
++	list_add(&amp;session-&gt;hlist, &amp;sessions_list);
+ }
+ 
+ void session_remove(struct session *session)
+@@ -131,11 +131,11 @@
+ 		ki-&gt;destroy_session(thandle, session-&gt;ksid);
+ 
+ 	if (session-&gt;target) {
+-		remque(&amp;session-&gt;slist);
++		list_del(&amp;session-&gt;slist);
+ /* 		session-&gt;target-&gt;nr_sessions--; */
+ 	}
+ 
+-	remque(&amp;session-&gt;hlist);
++	list_del(&amp;session-&gt;hlist);
+ 
+ 	free(session-&gt;initiator);
+ 	free(session);
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-08-02 05:18:25 UTC (rev 515)
++++ trunk/usr/iscsi/target.c	2006-08-05 07:04:32 UTC (rev 516)
+@@ -19,7 +19,7 @@
+ #include &quot;iscsid.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+-struct qelem targets_list = LIST_HEAD_INIT(targets_list);
++static LIST_HEAD(targets_list);
+ 
+ void target_list_build(struct connection *conn, char *addr, char *name)
+ {
+@@ -77,7 +77,7 @@
+ 		exit(-1);
+ 	}
+ 
+-	remque(&amp;target-&gt;tlist);
++	list_del(&amp;target-&gt;tlist);
+ 
+ 	free(target);
+ 
+@@ -102,7 +102,7 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;tlist);
+ 	INIT_LIST_HEAD(&amp;target-&gt;sessions_list);
+ 	target-&gt;tid = tid;
+-	insque(&amp;target-&gt;tlist, &amp;targets_list);
++	list_add(&amp;target-&gt;tlist, &amp;targets_list);
+ 
+ 	return 0;
+ }
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000502.html">[Stgt-svn] r515 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000504.html">[Stgt-svn] r517 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#503">[ date ]</a>
+              <a href="thread.html#503">[ thread ]</a>
+              <a href="subject.html#503">[ subject ]</a>
+              <a href="author.html#503">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

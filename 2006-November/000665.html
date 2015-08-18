@@ -1,0 +1,626 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r678 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r678%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611261458.kAQEwxbX029382%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000664.html">
+   <LINK REL="Next"  HREF="000666.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r678 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r678%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611261458.kAQEwxbX029382%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r678 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 26 15:58:59 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000664.html">[Stgt-svn] r677 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000666.html">[Stgt-svn] r679 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#665">[ date ]</a>
+              <a href="thread.html#665">[ thread ]</a>
+              <a href="subject.html#665">[ subject ]</a>
+              <a href="author.html#665">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-26 15:58:59 +0100 (Sun, 26 Nov 2006)
+New Revision: 678
+
+Added:
+   trunk/usr/tgtadm-iscsi.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/iscsi/account.c
+Log:
+Add tgtadm-iscsi, a wrapper of tgtadm.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-11-26 08:00:32 UTC (rev 677)
++++ trunk/usr/Makefile	2006-11-26 14:58:59 UTC (rev 678)
+@@ -1,6 +1,7 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE \
+ 	-I$(KERNELSRC)/include -I../include -I.
+-PROGRAMS = tgtd tgtadm
++
++PROGRAMS = tgtd tgtadm tgtadm-iscsi
+ TGTD_OBJS = tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o bd_sg.o
+ LIBS += -laio
+ 
+@@ -35,5 +36,8 @@
+ tgtadm: tgtadm.o
+ 	$(CC) $^ -o $@
+ 
++tgtadm-iscsi: tgtadm-iscsi.o
++	$(CC) $^ -o $@
++
+ clean:
+ 	rm -f *.o $(PROGRAMS) iscsi/*.o ibmvio/*.o
+
+Modified: trunk/usr/iscsi/account.c
+===================================================================
+--- trunk/usr/iscsi/account.c	2006-11-26 08:00:32 UTC (rev 677)
++++ trunk/usr/iscsi/account.c	2006-11-26 14:58:59 UTC (rev 678)
+@@ -59,17 +59,12 @@
+ 	return NULL;
+ }
+ 
+-static int iscsi_create_account(void)
++static int iscsi_create_account(uint32_t uid)
+ {
+-	static uint32_t id;
+-	uint32_t new_id;
+ 	struct iscsi_account *ac;
+ 
+-	for (new_id = id + 1; iscsi_lookup_account(new_id) &amp;&amp; new_id == id;
+-	     new_id++)
+-		;
+-	if (new_id == id) {
+-		eprintf(&quot;Too many accounts\n&quot;);
++	if (iscsi_lookup_account(uid)) {
++		eprintf(&quot;aid %u already exists\n&quot;, uid);
+ 		return EINVAL;
+ 	}
+ 
+@@ -77,7 +72,7 @@
+ 	if (!ac)
+ 		return ENOMEM;
+ 
+-	ac-&gt;id = id = new_id;
++	ac-&gt;id = uid;
+ 	ac-&gt;type = ACCOUNT_INVALID;
+ 	ac-&gt;ach.first = NULL;
+ 
+@@ -241,7 +236,7 @@
+ 
+ 	switch (op) {
+ 	case OP_NEW:
+-		err = iscsi_create_account();
++		err = iscsi_create_account(uid);
+ 		break;
+ 	case OP_DELETE:
+ 		eprintf(&quot;Not implemented yet\n&quot;);
+
+Added: trunk/usr/tgtadm-iscsi.c
+===================================================================
+--- trunk/usr/tgtadm-iscsi.c	2006-11-26 08:00:32 UTC (rev 677)
++++ trunk/usr/tgtadm-iscsi.c	2006-11-26 14:58:59 UTC (rev 678)
+@@ -0,0 +1,479 @@
++/*
++ * iSCSI target management interface
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;ctype.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;dlfcn.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;getopt.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++
++#include &quot;util.h&quot;
++#include &quot;list.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;tgtadm.h&quot;
++#include &quot;driver.h&quot;
++
++/*
++ * This program is just a wrapper of tgtadm. Maybe it would be better
++ * to implement this program by using Python or Perl.
++ */
++
++static char cmdstr[] = &quot;tgtadm --lld iscsi&quot;;
++static char cmdline[2048];
++
++static struct option const long_options[] =
++{
++	{&quot;op&quot;, required_argument, NULL, 'o'},
++	{&quot;tid&quot;, required_argument, NULL, 't'},
++	{&quot;sid&quot;, required_argument, NULL, 's'},
++	{&quot;cid&quot;, required_argument, NULL, 'c'},
++	{&quot;lun&quot;, required_argument, NULL, 'u'},
++	{&quot;aid&quot;, required_argument, NULL, 'a'},
++	{&quot;iqn&quot;, required_argument, NULL, 'i'},
++	{&quot;path&quot;, required_argument, NULL, 'p'},
++	{&quot;name&quot;, required_argument, NULL, 'n'},
++	{&quot;value&quot;, required_argument, NULL, 'v'},
++	{&quot;start&quot;, no_argument, NULL, 'S'},
++	{&quot;stop&quot;, no_argument, NULL, 'P'},
++	{&quot;user&quot;, required_argument, NULL, 'r'},
++	{&quot;password&quot;, required_argument, NULL, 'w'},
++	{&quot;in&quot;, no_argument, NULL, 'I'},
++	{&quot;out&quot;, no_argument, NULL, 'O'},
++	{&quot;debug&quot;, no_argument, NULL, 'd'},
++	{&quot;help&quot;, no_argument, NULL, 'h'},
++	{NULL, 0, NULL, 0},
++};
++
++static char *short_options = &quot;o:t:s:c:u:a:n:i:p:v:SPr:w:IOdh&quot;;
++
++static void usage(int status)
++{
++}
++
++static int target_op(int op, int tid, char *iqn, char *name, char *value,
++		     int start, int stop)
++{
++	int err = -EINVAL;
++	FILE *fp;
++
++	if (start &amp;&amp; stop) {
++		fprintf(stderr,
++			&quot;Cannot start and stop a target at the same time\n&quot;);
++		exit(1);
++	}
++
++	if (start || stop)
++		op = OP_UPDATE;
++
++	switch (op) {
++	case OP_NEW:
++		if (!iqn) {
++			fprintf(stderr, &quot;specifiy target's iqn\n&quot;);
++			exit(1);
++		}
++
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o new -m tgt -t %d&quot;,
++			 cmdstr, tid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to create a new target\n&quot;);
++			exit(1);
++		}
++
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o update -m tgt -t %d&quot;
++			 &quot; -n iqn -v %s&quot;, cmdstr, tid, iqn);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++			/* remove the target. */
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to create a new target\n&quot;);
++			exit(1);
++			/* remove the target. */
++		}
++		break;
++	case OP_SHOW:
++		if (tid == -1)
++			snprintf(cmdline, sizeof(cmdline), &quot;%s -o show -m tgt&quot;,
++				 cmdstr);
++		else
++			snprintf(cmdline, sizeof(cmdline),
++				 &quot;%s -o show -m tgt -t %d&quot;, cmdstr, tid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		while (fgets(cmdline, sizeof(cmdline), fp))
++			fputs(cmdline, stdout);
++
++		err = pclose(fp);
++
++		break;
++	case OP_UPDATE:
++		if (start || stop)
++			snprintf(cmdline, sizeof(cmdline),
++				 &quot;%s -o update -m tgt -t %d -n state -v %s&quot;,
++				 cmdstr, tid, start ? &quot;running&quot; : &quot;suspended&quot;);
++		else
++			snprintf(cmdline, sizeof(cmdline),
++				 &quot;%s -o update -m tgt -t %d -n %s -v %s&quot;,
++				 cmdstr, tid, name, value);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to change the state\n&quot;);
++			exit(1);
++		}
++		break;
++	default:
++		break;
++	}
++
++	return err;
++}
++
++static int session_op(int op, int tid, uint64_t sid, char *name, char *value)
++{
++	int err = -EINVAL;
++	FILE *fp;
++
++	switch (op) {
++	case OP_SHOW:
++		if (sid)
++			snprintf(cmdline, sizeof(cmdline),
++				 &quot;%s -o show -m sess -t %d -s %&quot; PRIu64,
++				 cmdstr, tid, sid);
++		else
++			snprintf(cmdline, sizeof(cmdline),
++				 &quot;%s -o show -m sess -t %d&quot;, cmdstr, tid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		while (fgets(cmdline, sizeof(cmdline), fp))
++			fputs(cmdline, stdout);
++
++		err = pclose(fp);
++		break;
++	default:
++		break;
++	}
++
++	return err;
++}
++
++static int logicalunit_op(int op, int tid, uint64_t lun, char *path,
++			  char *name, char *value)
++{
++	int err = -EINVAL;
++	FILE *fp;
++
++	switch (op) {
++	case OP_NEW:
++		if (!path) {
++			fprintf(stderr, &quot;specifiy logical unit's path\n&quot;);
++			exit(1);
++		}
++
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o new -m lu -t %d -u %&quot; PRIu64,
++			 cmdstr, tid, lun);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to create a logical unit\n&quot;);
++			exit(1);
++			/* remove the lu. */
++		}
++
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o update -m lu -t %d -u %&quot; PRIu64
++			 &quot; -n path -v %s&quot;, cmdstr, tid, lun, path);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++
++			/* remove the lu */
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to create a logical unit\n&quot;);
++			exit(1);
++			/* remove the lu. */
++		}
++		break;
++	case OP_SHOW:
++		snprintf(cmdline, sizeof(cmdline),
++			 &quot;%s -o show -m lu -t %d -u %&quot; PRIu64,
++			 cmdstr, tid, lun);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		while (fgets(cmdline, sizeof(cmdline), fp))
++			fputs(cmdline, stdout);
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to show a logical unit\n&quot;);
++			exit(1);
++			/* remove the lu. */
++		}
++	}
++
++	return err;
++}
++
++static int account_op(int op, int tid, int in, int out, int aid,
++		      char *user, char *password, char *name, char *value)
++{
++	int err = -EINVAL;
++	FILE *fp;
++
++	switch (op) {
++	case OP_NEW:
++		/* TODO: error handling */
++
++		if ((!in &amp;&amp; !out) || (in &amp;&amp; out)) {
++			fprintf(stderr, &quot;specify incoming or outgoing\n&quot;);
++			exit(1);
++		}
++
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o new -m account -a %u&quot;,
++			 cmdstr, aid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		err = pclose(fp);
++		if (err) {
++			fprintf(stderr, &quot;fail to create a logical unit\n&quot;);
++			exit(1);
++		}
++
++		snprintf(cmdline, sizeof(cmdline),
++			 &quot;%s -o update -m account -a %u -n User -v %s&quot;,
++			 cmdstr, aid, user);
++
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp)
++			exit(1);
++
++		err = pclose(fp);
++		if (err)
++			exit(1);
++
++		snprintf(cmdline, sizeof(cmdline),
++			 &quot;%s -o update -m account -a %u -n Password -v %s&quot;,
++			 cmdstr, aid, password);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp)
++			exit(1);
++
++		err = pclose(fp);
++		if (err)
++			exit(1);
++
++		snprintf(cmdline, sizeof(cmdline),
++			 &quot;%s -o update -m account -a %u -n Type -v %s&quot;,
++			 cmdstr, aid, in ? &quot;Incoming&quot; : &quot;Outgoing&quot;);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp)
++			exit(1);
++
++		err = pclose(fp);
++		if (err)
++			exit(1);
++
++		snprintf(cmdline, sizeof(cmdline),
++			 &quot;%s -o bind -m account -t %d -a %u&quot;,
++			 cmdstr, tid, aid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp)
++			exit(1);
++
++		err = pclose(fp);
++		if (err)
++			exit(1);
++		break;
++	case OP_SHOW:
++		snprintf(cmdline, sizeof(cmdline), &quot;%s -o show -m account -t %d&quot;,
++			 cmdstr, tid);
++		fp = popen(cmdline, &quot;r&quot;);
++		if (!fp) {
++			fprintf(stderr, &quot;fail to exec %s\n&quot;, cmdstr);
++			exit(1);
++		}
++
++		while (fgets(cmdline, sizeof(cmdline), fp))
++			fputs(cmdline, stdout);
++
++		err = pclose(fp);
++		if (err)
++			exit(1);
++	}
++
++	return err;
++}
++
++static int str_to_op(char *str)
++{
++	int op;
++
++	if (!strcmp(&quot;new&quot;, str))
++		op = OP_NEW;
++	else if (!strcmp(&quot;delete&quot;, str))
++		op = OP_DELETE;
++	else if (!strcmp(&quot;bind&quot;, str))
++		op = OP_BIND;
++	else if (!strcmp(&quot;show&quot;, str))
++		op = OP_SHOW;
++	else if (!strcmp(&quot;update&quot;, str))
++		op = OP_UPDATE;
++	else
++		op = -1;
++
++	return op;
++}
++
++int main(int argc, char **argv)
++{
++	int ch, longindex;
++	char *name, *value, *iqn, *path, *user, *password;
++	int err = -EINVAL, op = -1, tid = -1, mode = 0;
++	uint32_t cid, aid = 0;
++	uint64_t sid = 0, lun = -1;
++	int start, stop, in, out;
++
++	start = stop = in = out = 0;
++	name = value = iqn = path = user = password = NULL;
++
++	while ((ch = getopt_long(argc, argv, short_options,
++				 long_options, &amp;longindex)) &gt;= 0) {
++		switch (ch) {
++		case 'o':
++			op = str_to_op(optarg);
++			break;
++		case 't':
++			tid = strtol(optarg, NULL, 10);
++			mode |= (1 &lt;&lt; MODE_TARGET);
++			break;
++		case 's':
++			sid = strtoull(optarg, NULL, 10);
++			mode |= (1 &lt;&lt; MODE_SESSION);
++			break;
++		case 'c':
++			cid = strtoul(optarg, NULL, 10);
++			mode |= (1 &lt;&lt; MODE_CONNECTION);
++			break;
++		case 'u':
++			lun = strtoull(optarg, NULL, 10);
++			mode |= (1 &lt;&lt; MODE_DEVICE);
++			break;
++		case 'a':
++			aid = strtol(optarg, NULL, 10);
++			mode |= (1 &lt;&lt; MODE_ACCOUNT);
++			break;
++		case 'i':
++			iqn = optarg;
++			break;
++		case 'p':
++			path = optarg;
++			break;
++		case 'n':
++			name = optarg;
++			break;
++		case 'v':
++			value = optarg;
++			break;
++		case 'S':
++			start = 1;
++			break;
++		case 'P':
++			stop = 1;
++			break;
++		case 'r':
++			user = optarg;
++			break;
++		case 'w':
++			password = optarg;
++			break;
++		case 'I':
++			in = 1;
++			break;
++		case 'O':
++			out = 1;
++			break;
++		case 'h':
++			usage(0);
++			break;
++		default:
++			usage(-1);
++		}
++	}
++
++	if (mode &amp; (1 &lt;&lt; MODE_ACCOUNT))
++		account_op(op, tid, in, out, aid, user, password, name, value);
++	else if (mode &amp; (1 &lt;&lt; MODE_DEVICE))
++		err = logicalunit_op(op, tid, lun, path, name, value);
++	else if (mode &amp; (1 &lt;&lt; MODE_CONNECTION))
++		;
++	else if (mode &amp; (1 &lt;&lt; MODE_SESSION))
++		err = session_op(op, tid, sid, name, value);
++	else
++		err = target_op(op, tid, iqn, name, value, start, stop);
++
++	return err;
++}
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000664.html">[Stgt-svn] r677 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000666.html">[Stgt-svn] r679 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#665">[ date ]</a>
+              <a href="thread.html#665">[ thread ]</a>
+              <a href="subject.html#665">[ subject ]</a>
+              <a href="author.html#665">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

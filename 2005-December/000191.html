@@ -1,0 +1,271 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r202%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200512071119.jB7BJBen012617%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000190.html">
+   <LINK REL="Next"  HREF="000192.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r202%20-%20in%20trunk%3A%20ibmvstgt/kernel%20istgt/kernel%20kernel&In-Reply-To=%3C200512071119.jB7BJBen012617%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r202 - in trunk: ibmvstgt/kernel istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Dec  7 12:19:11 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000190.html">[Stgt-svn] r201 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000192.html">[Stgt-svn] r205 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#191">[ date ]</a>
+              <a href="thread.html#191">[ thread ]</a>
+              <a href="subject.html#191">[ subject ]</a>
+              <a href="author.html#191">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-12-07 12:19:08 +0100 (Wed, 07 Dec 2005)
+New Revision: 202
+
+Modified:
+   trunk/ibmvstgt/kernel/ibmvstgt.c
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_scsi.h
+Log:
+Now tgt_cmd_create calls proto-&gt;cmd_create and then tgt_cmd_start. Target LLDs should not call proto-&gt;cmd_create directly.
+
+
+Modified: trunk/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- trunk/ibmvstgt/kernel/ibmvstgt.c	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/ibmvstgt/kernel/ibmvstgt.c	2005-12-07 11:19:08 UTC (rev 202)
+@@ -349,8 +349,8 @@
+ 		iue, iu-&gt;srp.cmd.cdb[0], iu-&gt;srp.cmd.lun, data_dir, len, lun[1], tags);
+ 
+ 	BUG_ON(!iue-&gt;adapter-&gt;ts);
+-	iue-&gt;tc = scsi_tgt_create_cmd(iue-&gt;adapter-&gt;ts, iue, iu-&gt;srp.cmd.cdb,
+-				      len, data_dir, lun, sizeof(lun), tags);
++	iue-&gt;tc = tgt_cmd_create(iue-&gt;adapter-&gt;ts, iue, iu-&gt;srp.cmd.cdb,
++				 len, data_dir, lun, sizeof(lun), tags);
+ 	BUG_ON(!iue-&gt;tc);
+ 	dprintk(&quot;%p\n&quot;, iue-&gt;tc);
+ 
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/istgt/kernel/iscsi.c	2005-12-07 11:19:08 UTC (rev 202)
+@@ -789,11 +789,11 @@
+ 		break;
+ 	}
+ 
+-	req-&gt;tc = scsi_tgt_create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
+-				     be32_to_cpu(req_hdr-&gt;data_length),
+-				     data_dir, req_hdr-&gt;lun,
+-				     sizeof(req_hdr-&gt;lun),
+-				     tags);
++	req-&gt;tc = tgt_cmd_create(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
++				 be32_to_cpu(req_hdr-&gt;data_length),
++				 data_dir, req_hdr-&gt;lun,
++				 sizeof(req_hdr-&gt;lun),
++				 tags);
+ 	BUG_ON(!req-&gt;tc);
+ 
+ 	if (data_dir == DMA_TO_DEVICE &amp;&amp; be32_to_cpu(req_hdr-&gt;data_length)) {
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/kernel/tgt.c	2005-12-07 11:19:08 UTC (rev 202)
+@@ -778,8 +778,10 @@
+ }
+ EXPORT_SYMBOL_GPL(tgt_transfer_response);
+ 
+-struct tgt_cmd *tgt_cmd_create(struct tgt_session *session, uint64_t dev_id,
+-			       void *tgt_priv)
++struct tgt_cmd *
++tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
++	       uint32_t data_len, enum dma_data_direction data_dir,
++	       uint8_t *dev_buf, int dev_buf_size, int flags)
+ {
+ 	struct tgt_cmd *cmd;
+ 
+@@ -788,9 +790,10 @@
+ 		eprintk(&quot;Could not allocate tgt_cmd for %p\n&quot;, session);
+ 		return NULL;
+ 	}
++	memset(cmd, 0, sizeof(*cmd));
++	session-&gt;target-&gt;proto-&gt;cmd_create(cmd, cb, data_len, data_dir,
++					   dev_buf, dev_buf_size, flags);
+ 
+-	memset(cmd, 0, sizeof(*cmd));
+-	cmd-&gt;dev_id = dev_id;
+ 	cmd-&gt;device = tgt_device_get(session-&gt;target, cmd-&gt;dev_id);
+ 	cmd-&gt;session = session;
+ 	cmd-&gt;private = tgt_priv;
+@@ -798,6 +801,9 @@
+ 	atomic_set(&amp;cmd-&gt;state, TGT_CMD_CREATED);
+ 
+ 	dprintk(&quot;%p %p\n&quot;, session, cmd);
++
++	tgt_cmd_start(cmd);
++
+ 	return cmd;
+ }
+ EXPORT_SYMBOL_GPL(tgt_cmd_create);
+
+Modified: trunk/kernel/tgt.h
+===================================================================
+--- trunk/kernel/tgt.h	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/kernel/tgt.h	2005-12-07 11:19:08 UTC (rev 202)
+@@ -85,8 +85,10 @@
+ extern int tgt_msg_send(struct tgt_target *target, void *data, int dlen,
+ 			gfp_t flags);
+ extern int tgt_uspace_cmd_send(struct tgt_cmd *cmd, gfp_t gfp_mask);
+-extern struct tgt_cmd *tgt_cmd_create(struct tgt_session *session, uint64_t id,
+-				      void *priv);
++extern struct tgt_cmd *
++tgt_cmd_create(struct tgt_session *session, void *tgt_priv, uint8_t *cb,
++	       uint32_t data_len, enum dma_data_direction data_dir,
++	       uint8_t *dev_buf, int dev_buf_size, int flags);
+ extern int tgt_cmd_start(struct tgt_cmd *cmd);
+ extern void tgt_transfer_response(void *cmd);
+ 
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/kernel/tgt_protocol.h	2005-12-07 11:19:08 UTC (rev 202)
+@@ -26,9 +26,22 @@
+ 
+ 	kmem_cache_t *cmd_cache;
+ 	unsigned uspace_pdu_size;
++
++ 	/*
++	 * Create a command and allocate a buffer of size data_len for
++	 * for transfer. The buffer will be allocated with GFP_KERNEL
++	 * and preprocesed by tgt/scsi_proto so the next time
++	 * the target driver is notified about the cmd is when
++	 * the transfer* is called.
++	 */
++	void (* cmd_create)(struct tgt_cmd *cmd, uint8_t *cb,
++			    uint32_t data_len, enum dma_data_direction data_dir,
++			    uint8_t *dev_id_buff, int id_buff_size,
++			    int flags);
+ 	/*
+ 	 * Build userspace packet
+ 	 */
++
+ 	void (* uspace_pdu_build)(struct tgt_cmd *cmd, void *data);
+ 
+ 	void (* uspace_cmd_complete)(struct tgt_cmd *cmd);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/kernel/tgt_scsi.c	2005-12-07 11:19:08 UTC (rev 202)
+@@ -46,23 +46,15 @@
+  * we may have to add a wrapper becuase people are passing the lun in
+  * differently
+  */
+-struct tgt_cmd *
+-scsi_tgt_create_cmd(struct tgt_session *session, void *tgt_priv, uint8_t *scb,
++static void
++scsi_tgt_cmd_create(struct tgt_cmd *cmd, uint8_t *scb,
+ 		    uint32_t data_len, enum dma_data_direction data_dir,
+ 		    uint8_t *lun, int lun_size, int tags)
+ {
+-	struct tgt_cmd *cmd;
+ 	struct scsi_tgt_cmd *scmd;
+-	uint64_t id;
+ 
+ 	/* translate target driver LUN to device id */
+-	id = scsi_tgt_translate_lun(lun, lun_size);
+-
+-	cmd = tgt_cmd_create(session, id, tgt_priv);
+-	if (!cmd) {
+-		eprintk(&quot;Could not allocate command\n&quot;);
+-		return NULL;
+-	}
++	cmd-&gt;dev_id = scsi_tgt_translate_lun(lun, lun_size);
+ 	scmd = tgt_cmd_to_scsi(cmd);
+ 	memcpy(scmd-&gt;scb, scb, sizeof(scmd-&gt;scb));
+ 	scmd-&gt;tags = tags;
+@@ -74,13 +66,8 @@
+ 	 * handler overide just in case
+ 	 */
+ 	cmd-&gt;bufflen = data_len;
+-
+-	tgt_cmd_start(cmd);
+-	return cmd;
+ }
+ 
+-EXPORT_SYMBOL_GPL(scsi_tgt_create_cmd);
+-
+ /* kspace command failure */
+ int scsi_tgt_sense_data_build(struct tgt_cmd *cmd, uint8_t key,
+ 			      uint8_t ascode, uint8_t ascodeq)
+@@ -150,6 +137,7 @@
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
++	.cmd_create = scsi_tgt_cmd_create,
+ 	.uspace_pdu_build = scsi_tgt_uspace_pdu_build,
+ 	.uspace_cmd_execute = scsi_tgt_uspace_cmd_exec,
+ 	.uspace_cmd_complete = scsi_tgt_uspace_cmd_complete,
+
+Modified: trunk/kernel/tgt_scsi.h
+===================================================================
+--- trunk/kernel/tgt_scsi.h	2005-12-07 11:03:27 UTC (rev 201)
++++ trunk/kernel/tgt_scsi.h	2005-12-07 11:19:08 UTC (rev 202)
+@@ -27,9 +27,4 @@
+ extern int scsi_tgt_sense_copy(struct tgt_cmd *cmd);
+ extern int scsi_tgt_sense_data_build(struct tgt_cmd *cmd, uint8_t key,
+ 				     uint8_t ascode, uint8_t ascodeq);
+-extern struct tgt_cmd *scsi_tgt_create_cmd(struct tgt_session *session,
+-			void *tgt_priv, uint8_t *scb, uint32_t data_len,
+-			enum dma_data_direction data_dir, uint8_t *lun,
+-			int lun_size, int tags);
+-
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000190.html">[Stgt-svn] r201 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000192.html">[Stgt-svn] r205 - in trunk: istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#191">[ date ]</a>
+              <a href="thread.html#191">[ thread ]</a>
+              <a href="subject.html#191">[ subject ]</a>
+              <a href="author.html#191">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

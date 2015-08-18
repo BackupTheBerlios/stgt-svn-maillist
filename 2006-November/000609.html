@@ -1,0 +1,133 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r622 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r622%20-%20trunk/doc&In-Reply-To=%3C200611081040.kA8Ae7LP014543%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000608.html">
+   <LINK REL="Next"  HREF="000610.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r622 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r622%20-%20trunk/doc&In-Reply-To=%3C200611081040.kA8Ae7LP014543%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r622 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov  8 11:40:07 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000608.html">[Stgt-svn] r621 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000610.html">[Stgt-svn] r623 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#609">[ date ]</a>
+              <a href="thread.html#609">[ thread ]</a>
+              <a href="subject.html#609">[ subject ]</a>
+              <a href="author.html#609">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-08 11:40:06 +0100 (Wed, 08 Nov 2006)
+New Revision: 622
+
+Modified:
+   trunk/doc/README.ibmvstgt
+Log:
+Update IBMVIO doc.
+
+
+Modified: trunk/doc/README.ibmvstgt
+===================================================================
+--- trunk/doc/README.ibmvstgt	2006-11-08 10:39:43 UTC (rev 621)
++++ trunk/doc/README.ibmvstgt	2006-11-08 10:40:06 UTC (rev 622)
+@@ -1,3 +1,56 @@
++Starting
++-------------
++Try the following commands:
++
++host:~/tgt$ su
++host:~/tgt# modprobe scsi_tgt
++host:~/tgt# modprobe libsrp
++host:~/tgt# modprobe ibmvstgt
++host:~/tgt# ./usr/tgtd --lld ibmvio
++
++See /var/log/kern.log (your Linux distributions may use the different
++log file name) to make sure that the kernel modules are loaded
++properly. You should see messages like the followings:
++
++Feb 27 19:37:52 lilac kernel: IBM eServer i/pSeries Virtual SCSI Target Driver
++Feb 27 19:37:52 lilac kernel: vio_register_driver: driver ibmvscsi registering
++Feb 27 19:37:52 lilac kernel: scsi1 : ibmvstgt
++
++You need the scsi host number (it is 1 in this example) in the next
++stage (configuration).
++
++
++Configuration
++-------------
++Everyting is configured via the tgtadm management tool.
++
++The following example creates a target with id 1, adds a logical unit
++(backed by /dev/sdb1) with lun 0, and then bind the target with #1 scsi host.
++
++host:~/tgt# ./usr/tgtadm --lld ibmvio --op new --tid 1
++host:~/tgt# ./usr/tgtadm --lld ibmvio --op new --tid 1 --lun 0 --params Path=/dev/sdb1
++host:~/tgt# ./usr/tgtadm --lld ibmvio --op bind --tid 1 --host 1
++
++Please see /var/log/daemon.log (your Linux distributions may use the
++different log file name again) to make sure that everything is
++fine. You should see something like the followings:
++
++Feb 27 22:36:40 lilac tgtd: dl_init(71) istgt library is not loaded.
++Feb 27 22:36:40 lilac tgtd: dl_init(71) ibmvstgt library is not loaded.
++Feb 27 22:37:08 lilac tgtd: tgt_target_create(572) Succeed to create a new target 1
++Feb 27 22:37:08 lilac tgtd: tgt_target_bind(517) Succeed to bind the target 1 to the scsi host 1
++Feb 27 22:37:08 lilac tgtd: tgt_device_create(238) Succeed to add a logical unit 0 to the target 1
++Now you are ready. Boot up VIO clients.
++
++
++History
++-------------
++The following description was taken from the original ibmvscsis
++driver:
++
++<A HREF="http://lkml.org/lkml/2005/10/17/99">http://lkml.org/lkml/2005/10/17/99</A>
++
++
+ This driver is a SCSI target that interoperates according to the PAPR
+ (POWER Architecture Platform Requirements) document.  Currently it is
+ specific to POWER logical partitioning, however in the future it would
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000608.html">[Stgt-svn] r621 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000610.html">[Stgt-svn] r623 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#609">[ date ]</a>
+              <a href="thread.html#609">[ thread ]</a>
+              <a href="subject.html#609">[ subject ]</a>
+              <a href="author.html#609">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,125 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r260 - branches/use-scsi-ml
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r260%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602030620.k136KFsS019525%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000246.html">
+   <LINK REL="Next"  HREF="000248.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r260 - branches/use-scsi-ml</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r260%20-%20branches/use-scsi-ml&In-Reply-To=%3C200602030620.k136KFsS019525%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r260 - branches/use-scsi-ml">tomo at berlios.de
+       </A><BR>
+    <I>Fri Feb  3 07:20:15 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000246.html">[Stgt-svn] r259 - branches/use-scsi-ml/usr
+</A></li>
+        <LI>Next message: <A HREF="000248.html">[Stgt-svn] r261 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#247">[ date ]</a>
+              <a href="thread.html#247">[ thread ]</a>
+              <a href="subject.html#247">[ subject ]</a>
+              <a href="author.html#247">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-03 07:20:12 +0100 (Fri, 03 Feb 2006)
+New Revision: 260
+
+Modified:
+   branches/use-scsi-ml/initd
+Log:
+Update the init script.
+
+Modified: branches/use-scsi-ml/initd
+===================================================================
+--- branches/use-scsi-ml/initd	2006-02-03 06:16:31 UTC (rev 259)
++++ branches/use-scsi-ml/initd	2006-02-03 06:20:12 UTC (rev 260)
+@@ -13,8 +13,7 @@
+ 
+ start_server()
+ {
+-	insmod ${PWD}/kernel/tgt_core.ko
+-	insmod ${PWD}/kernel/tgt_scsi.ko
++	insmod ${PWD}/kernel/scsi_tgt_core.ko
+ 
+ 	if [ $TARGET = &quot;istgt&quot; ] ; then
+ 		modprobe -q crc32c
+@@ -23,7 +22,20 @@
+ 		insmod ${PWD}/ibmvstgt/kernel/ibmvstgt.ko
+ 	fi
+ 
+-	${PWD}/usr/tgtd
++	${PWD}/usr/tgtd -d1
++
++	sleep 1
++
++	if [ $TARGET = &quot;istgt&quot; ] ; then
++		echo &quot;Start istgt&quot;    
++#		${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --params iqn.2001-04.com.example:storage.disk2.amiens.sys1.xyz
++#		${PWD}/usr/tgtadm --driver istgt --op bind --tid 1 --hostno 1
++#		${PWD}/usr/tgtadm --driver istgt --op new --tid 0 --lun 0 --params Path=/dev/sdb1
++	else
++		${PWD}/usr/tgtadm --driver ibmvstgt --op new --tid 0
++		${PWD}/usr/tgtadm --driver ibmvstgt --op bind --tid 1 --hostno 1
++		${PWD}/usr/tgtadm --driver ibmvstgt --op new --tid 1 --lun 0 --params Path=/dev/sdb1
++	fi
+ }
+ 	
+ stop_server()
+@@ -36,14 +48,15 @@
+ 
+ 	killall -9 tgtd
+ 
++	sleep 1
++
+ 	if [ $TARGET = &quot;istgt&quot; ] ; then
+ 		rmmod istgt
+ 	else
+ 		rmmod ibmvstgt
+ 	fi
+ 
+-	rmmod tgt_scsi
+-	rmmod tgt_core
++	rmmod scsi_tgt_core
+ }
+ 
+ case &quot;$1&quot; in
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000246.html">[Stgt-svn] r259 - branches/use-scsi-ml/usr
+</A></li>
+	<LI>Next message: <A HREF="000248.html">[Stgt-svn] r261 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#247">[ date ]</a>
+              <a href="thread.html#247">[ thread ]</a>
+              <a href="subject.html#247">[ subject ]</a>
+              <a href="author.html#247">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

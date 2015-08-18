@@ -1,0 +1,228 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r301 - branches/use-scsi-ml/patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r301%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200602160855.k1G8tJiN001610%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000287.html">
+   <LINK REL="Next"  HREF="000289.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r301 - branches/use-scsi-ml/patchset</H1>
+    <B>mnc at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r301%20-%20branches/use-scsi-ml/patchset&In-Reply-To=%3C200602160855.k1G8tJiN001610%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r301 - branches/use-scsi-ml/patchset">mnc at berlios.de
+       </A><BR>
+    <I>Thu Feb 16 09:55:19 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000287.html">[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000289.html">[Stgt-svn] r302 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#288">[ date ]</a>
+              <a href="thread.html#288">[ thread ]</a>
+              <a href="subject.html#288">[ subject ]</a>
+              <a href="author.html#288">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: mnc
+Date: 2006-02-16 09:55:08 +0100 (Thu, 16 Feb 2006)
+New Revision: 301
+
+Modified:
+   branches/use-scsi-ml/patchset/0001-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt
+   branches/use-scsi-ml/patchset/0002-block-layer-kill-length-alignment-test-in-bin_map_user.txt
+   branches/use-scsi-ml/patchset/0003-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+   branches/use-scsi-ml/patchset/0004-netlink-add-a-new-netlink-number-for-stgt.txt
+   branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt
+   branches/use-scsi-ml/patchset/0006-scsi-ml-Makefile-and-Kconfig-changes-for-stgt.txt
+   branches/use-scsi-ml/patchset/0007-scsi-ml-add-public-stgt-include-files.txt
+Log:
+add descriptions to patches for sending to linux-scsi
+
+Modified: branches/use-scsi-ml/patchset/0001-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0001-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0001-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,11 @@
+ Subject: [PATCH] scsi-ml: export scsi-ml functions needed by tgt_scsi_lib and its LLDs
+ 
++This patch contains the needed changes to the scsi-ml to support targets.
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
+ ---
+ 
+  drivers/scsi/hosts.c     |    5 +++
+
+Modified: branches/use-scsi-ml/patchset/0002-block-layer-kill-length-alignment-test-in-bin_map_user.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0002-block-layer-kill-length-alignment-test-in-bin_map_user.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0002-block-layer-kill-length-alignment-test-in-bin_map_user.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,24 @@
+ Subject: [PATCH] block layer: kill length alignment test in bin_map_user
+ 
++The tgt project is mapping in bios using bio_map_user. The current targets
++do not need their len to be aligned with a queue limit so this check is
++causing some problems.
++
++The major user, blk_bio_map_user checks for the len before mapping
++and is not affected by this patch.
++
++And the semi-newly added user blk_rq_map_user_iov has been failing
++out when the len is not aligned properly so maybe people have been
++good and not sending misaligned lens or that path is not used very
++often and this change will not be very dangerous. st and sg do not
++check the length and we have not seen any problem reports from those
++wider used paths so this patch should be fairly safe - for mm 
++and wider testing at least.
++
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
+ ---
+ 
+  fs/bio.c |    5 ++---
+
+Modified: branches/use-scsi-ml/patchset/0003-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0003-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0003-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,22 @@
+ Subject: [PATCH] block layer: add partial mappings support to bio_map_user
+ 
++For target mode we could end up with the case where we get very large
++request from the initiator. The request could be so large that we
++cannot transfer all the data in one operation. For example the
++HBA's segment or max_sector limits might limit us to a 1 MB transfer.
++To send a 5 MB command then we need to transfer the command chunk by chunk.
++
++To do this, tgt core will map in as much data as possible into a bio,
++send this off, then when that transfer is completed we send off another
++request/bio. To be able to pack as much data into a bio as possible
++we need bio_map_user to support partially mapped bios. The attached patch
++just adds a new argument to the those functions and if set will not
++return a failure if the bio is partially mapped.
++
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
+ ---
+ 
+  block/ll_rw_blk.c   |    5 +++--
+
+Modified: branches/use-scsi-ml/patchset/0004-netlink-add-a-new-netlink-number-for-stgt.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0004-netlink-add-a-new-netlink-number-for-stgt.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0004-netlink-add-a-new-netlink-number-for-stgt.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,14 @@
+ Subject: [PATCH] netlink: add a new netlink number for stgt
+ 
++Need a netlink number for our interface. Since this stuff is going
++to be cleaned up in tree. I am not ccing netdev. It might some time
++before tgt goes in so might need a new number by then.
++
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
+ ---
+ 
+  include/linux/netlink.h |    1 +
+
+Modified: branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0005-scsi-tgt-core-functions.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,15 @@
+ Subject: [PATCH] scsi tgt core functions
+ 
++Core scsi tgt functionality. We are currently using netlink for
++the interface. We plan on trying to use the packet layer or maybe
++relay fs so we can quickly pipe requests to userspace. We are not
++sure yet though and the packet socket code needs work. So hopefully
++this can be done after merging this but before it goes to mainline.
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
+ ---
+ 
+  drivers/scsi/scsi_tgt_if.c   |  214 ++++++++++++++++
+
+Modified: branches/use-scsi-ml/patchset/0006-scsi-ml-Makefile-and-Kconfig-changes-for-stgt.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0006-scsi-ml-Makefile-and-Kconfig-changes-for-stgt.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0006-scsi-ml-Makefile-and-Kconfig-changes-for-stgt.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,12 @@
+ Subject: [PATCH] scsi-ml: Makefile and Kconfig changes for stgt
+ 
++
++Makefile and Kconfig stuff.
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
+ ---
+ 
+  drivers/scsi/Kconfig  |    7 +++++++
+
+Modified: branches/use-scsi-ml/patchset/0007-scsi-ml-add-public-stgt-include-files.txt
+===================================================================
+--- branches/use-scsi-ml/patchset/0007-scsi-ml-add-public-stgt-include-files.txt	2006-02-15 07:06:40 UTC (rev 300)
++++ branches/use-scsi-ml/patchset/0007-scsi-ml-add-public-stgt-include-files.txt	2006-02-16 08:55:08 UTC (rev 301)
+@@ -1,5 +1,12 @@
+ Subject: [PATCH] scsi-ml: add public stgt include files
+ 
++public header files
++
++
++Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
++
++
+ ---
+ 
+  include/scsi/scsi_tgt.h    |   11 +++++
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000287.html">[Stgt-svn] r300 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000289.html">[Stgt-svn] r302 - branches/use-scsi-ml/patchset
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#288">[ date ]</a>
+              <a href="thread.html#288">[ thread ]</a>
+              <a href="subject.html#288">[ subject ]</a>
+              <a href="author.html#288">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

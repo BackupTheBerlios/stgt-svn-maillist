@@ -1,0 +1,319 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r666 - in trunk/usr: . ibmvio iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r666%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200611220954.kAM9sCes005691%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000652.html">
+   <LINK REL="Next"  HREF="000654.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r666 - in trunk/usr: . ibmvio iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r666%20-%20in%20trunk/usr%3A%20.%20ibmvio%20iscsi&In-Reply-To=%3C200611220954.kAM9sCes005691%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r666 - in trunk/usr: . ibmvio iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Wed Nov 22 10:54:12 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000652.html">[Stgt-svn] r665 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000654.html">[Stgt-svn] r667 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#653">[ date ]</a>
+              <a href="thread.html#653">[ thread ]</a>
+              <a href="subject.html#653">[ subject ]</a>
+              <a href="author.html#653">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-22 10:54:11 +0100 (Wed, 22 Nov 2006)
+New Revision: 666
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/mgmt.c
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/target.h
+   trunk/usr/tgtd.h
+Log:
+Move bdt from driver to target because of raw mode support.
+
+Now we link a LLD to a target, however, it's not right. Different LLDs
+can share a target. Note that it is not always possible. If LLDs need
+to use the same I/O type to share one target.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/driver.h	2006-11-22 09:54:11 UTC (rev 666)
+@@ -22,7 +22,7 @@
+ 			      uint64_t tag);
+ 	int (*mgmt_end_notify)(int host_no, uint64_t mid, int result);
+ 
+-	struct backedio_template *bdt;
++	struct backedio_template *default_bdt;
+ };
+ 
+ extern struct tgt_driver *tgt_drivers[];
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/ibmvio/ibmvio.h	2006-11-22 09:54:11 UTC (rev 666)
+@@ -13,5 +13,5 @@
+ 	.scsi_inquiry		= scsi_inquiry,
+ 	.cmd_end_notify		= kspace_send_cmd_res,
+ 	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
+-	.bdt			= &amp;mmap_bdt,
++	.default_bdt		= &amp;mmap_bdt,
+ };
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/iscsi/iscsi.h	2006-11-22 09:54:11 UTC (rev 666)
+@@ -21,5 +21,5 @@
+ 	.account		= iscsi_mgmt_account,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+-	.bdt			= &amp;aio_bdt,
++	.default_bdt		= &amp;aio_bdt,
+ };
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/mgmt.c	2006-11-22 09:54:11 UTC (rev 666)
+@@ -60,7 +60,7 @@
+ 
+ 	switch (req-&gt;op) {
+ 	case OP_NEW:
+-		err = tgt_target_create(req-&gt;tid);
++		err = tgt_target_create(lld_no, req-&gt;tid);
+ 		if (!err &amp;&amp; tgt_drivers[lld_no]-&gt;target_create)
+ 			tgt_drivers[lld_no]-&gt;target_create(req-&gt;tid, params);
+ 		break;
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/scsi.c	2006-11-22 09:54:11 UTC (rev 666)
+@@ -469,7 +469,7 @@
+ 		     int *len, uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf,
+ 		     struct tgt_device *dev, struct list_head *dev_list, int *async,
+-		     void *key)
++		     void *key, bkio_submit_t *submit)
+ {
+ 	int result = SAM_STAT_GOOD;
+ 	uint8_t *data = NULL, *scb = pdu;
+@@ -536,8 +536,7 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = tgt_drivers[lid]-&gt;bdt-&gt;bd_cmd_submit(dev, *rw, datalen,
+-							      uaddr, *offset, async, key);
++		result = submit(dev, *rw, datalen, uaddr, *offset, async, key);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/target.c	2006-11-22 09:54:11 UTC (rev 666)
+@@ -155,7 +155,7 @@
+ 	if (!p)
+ 		return -ENOMEM;
+ 
+-	device = tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_open(path, &amp;dev_fd, &amp;size);
++	device = target-&gt;bdt-&gt;bd_open(path, &amp;dev_fd, &amp;size);
+ 	if (!device) {
+ 		free(p);
+ 		return -EINVAL;
+@@ -203,7 +203,7 @@
+ 	device_hlist_remove(device);
+ 	device_list_remove(device);
+ 
+-	tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_close(device);
++	target-&gt;bdt-&gt;bd_close(device);
+ 	return 0;
+ }
+ 
+@@ -298,7 +298,8 @@
+ 					  &amp;len, data_len,
+ 					  &amp;uaddr, &amp;rw, &amp;mmapped, &amp;offset,
+ 					  lun, cmd-&gt;dev,
+-					  &amp;target-&gt;device_list, &amp;async, (void *) cmd);
++					  &amp;target-&gt;device_list, &amp;async, (void *) cmd,
++					  target-&gt;bdt-&gt;bd_cmd_submit);
+ 
+ 		cmd_post_perform(q, cmd, uaddr, len, mmapped);
+ 
+@@ -357,7 +358,8 @@
+ 						  &amp;rw, &amp;mmapped, &amp;offset,
+ 						  cmd-&gt;lun, cmd-&gt;dev,
+ 						  &amp;cmd-&gt;c_target-&gt;device_list,
+-						  &amp;async, (void *) cmd);
++						  &amp;async, (void *) cmd,
++						  cmd-&gt;c_target-&gt;bdt-&gt;bd_cmd_submit);
+ 			cmd-&gt;rw = rw;
+ 			cmd_post_perform(q, cmd, cmd-&gt;uaddr, len, mmapped);
+ 			set_cmd_processed(cmd);
+@@ -390,9 +392,9 @@
+ 		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = tgt_drivers[target-&gt;lid]-&gt;bdt-&gt;bd_cmd_done(do_munmap,
+-							 !cmd-&gt;mmapped,
+-							 cmd-&gt;uaddr, cmd-&gt;len);
++	err = target-&gt;bdt-&gt;bd_cmd_done(do_munmap,
++				       !cmd-&gt;mmapped,
++				       cmd-&gt;uaddr, cmd-&gt;len);
+ 
+ 	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len, err);
+ 
+@@ -553,7 +555,6 @@
+ 		eprintf(&quot;target is not found %d\n&quot;, tid);
+ 		return -EINVAL;
+ 	}
+-	target-&gt;lid = lid;
+ 
+ 	if (hostt[host_no]) {
+ 		eprintf(&quot;host is already binded %d %d\n&quot;, tid, host_no);
+@@ -566,7 +567,7 @@
+ 	return 0;
+ }
+ 
+-int tgt_target_create(int tid)
++int tgt_target_create(int lld, int tid)
+ {
+ 	int i;
+ 	struct target *target;
+@@ -591,6 +592,9 @@
+ 
+ 	target-&gt;target_state = SCSI_TARGET_SUSPENDED;
+ 
++	target-&gt;bdt = tgt_drivers[lld]-&gt;default_bdt;
++	target-&gt;lid = lld;
++
+ 	tgt_cmd_queue_init(&amp;target-&gt;cmd_queue);
+ 	target_hlist_insert(target);
+ 
+
+Modified: trunk/usr/target.h
+===================================================================
+--- trunk/usr/target.h	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/target.h	2006-11-22 09:54:11 UTC (rev 666)
+@@ -24,6 +24,7 @@
+ 	int tid;
+ 	int lid;
+ 
++	enum scsi_target_type target_type;
+ 	enum scsi_target_state target_state;
+ 
+ 	struct list_head t_hlist;
+@@ -34,6 +35,8 @@
+ 	struct list_head cmd_hash_list[1 &lt;&lt; HASH_ORDER];
+ 
+ 	struct tgt_cmd_queue cmd_queue;
++
++	struct backedio_template *bdt;
+ };
+ 
+ struct cmd {
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-11-22 07:58:30 UTC (rev 665)
++++ trunk/usr/tgtd.h	2006-11-22 09:54:11 UTC (rev 666)
+@@ -5,6 +5,11 @@
+ 
+ #define	SCSI_ID_LEN	24
+ 
++enum scsi_target_type {
++	SCSI_TARGET_FILE = 1,
++	SCSI_TARGET_RAW,
++};
++
+ enum scsi_target_state {
+ 	SCSI_TARGET_SUSPENDED = 1,
+ 	SCSI_TARGET_RUNNING,
+@@ -32,12 +37,14 @@
+ 	unsigned long bddata[0] __attribute__ ((aligned (sizeof(unsigned long))));
+ };
+ 
++typedef int (bkio_submit_t) (struct tgt_device *dev, int rw, uint32_t datalen,
++			     unsigned long *uaddr, uint64_t offset, int *async,
++			     void *key);
++
+ struct backedio_template {
+ 	struct tgt_device *(*bd_open)(char *path, int *fd, uint64_t *size);
+ 	void (*bd_close)(struct tgt_device *dev);
+-	int (*bd_cmd_submit)(struct tgt_device *dev, int rw, uint32_t datalen,
+-			     unsigned long *uaddr, uint64_t offset, int *async,
+-			     void *key);
++	bkio_submit_t *bd_cmd_submit;
+ 	int (*bd_cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
+ };
+ 
+@@ -56,9 +63,9 @@
+ extern int ipc_init(void);
+ extern int tgt_device_create(int tid, uint64_t lun, char *path);
+ extern int tgt_device_destroy(int tid, uint64_t lun);
+-extern int tgt_target_create(int tid);
++extern int tgt_target_create(int lld, int tid);
+ extern int tgt_target_destroy(int tid);
+-extern int tgt_target_bind(int tid, int host_no, int lid);
++extern int tgt_target_bind(int tid, int host_no, int lld);
+ extern int tgt_target_show_all(char *buf, int rest);
+ 
+ typedef void (event_handler_t)(int fd, int events, void *data);
+@@ -80,7 +87,7 @@
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+ 			    uint8_t *try_map, uint64_t *offset, uint8_t *lun,
+ 			    struct tgt_device *dev, struct list_head *dev_list,
+-			    int *async, void *key);
++			    int *async, void *key, bkio_submit_t *submit);
+ 
+ extern int sense_data_build(uint8_t *data, uint8_t res_code, uint8_t key,
+ 			    uint8_t ascode, uint8_t ascodeq);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000652.html">[Stgt-svn] r665 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000654.html">[Stgt-svn] r667 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#653">[ date ]</a>
+              <a href="thread.html#653">[ thread ]</a>
+              <a href="subject.html#653">[ subject ]</a>
+              <a href="author.html#653">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

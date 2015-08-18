@@ -1,0 +1,365 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r58 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r58%20-%20trunk/kernel&In-Reply-To=%3C200509090656.j896ud14030035%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000050.html">
+   <LINK REL="Next"  HREF="000052.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r58 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r58%20-%20trunk/kernel&In-Reply-To=%3C200509090656.j896ud14030035%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r58 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Fri Sep  9 08:56:39 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000050.html">[Stgt-svn] r57 - trunk/iscsi/usr
+</A></li>
+        <LI>Next message: <A HREF="000052.html">[Stgt-svn] r59 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#51">[ date ]</a>
+              <a href="thread.html#51">[ thread ]</a>
+              <a href="subject.html#51">[ subject ]</a>
+              <a href="author.html#51">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-09 08:56:37 +0200 (Fri, 09 Sep 2005)
+New Revision: 58
+
+Modified:
+   trunk/kernel/stgt.c
+   trunk/kernel/stgt.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+Log:
+Remove protocol specific code from stgt core:
+target driver (queue cmnd /alloc buffer) -&gt; protocol (SCSI stuff) -&gt; STGT
+
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-09-08 02:42:42 UTC (rev 57)
++++ trunk/kernel/stgt.c	2005-09-09 06:56:37 UTC (rev 58)
+@@ -638,14 +638,27 @@
+ 	return 0;
+ }
+ 
+-struct stgt_cmnd *stgt_cmnd_create(struct stgt_session *session)
++struct stgt_cmnd *stgt_cmnd_create(struct stgt_session *session,
++				   uint8_t *proto_data,
++				   uint8_t *id_buff, int buff_size)
+ {
++	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 	struct stgt_cmnd *cmnd;
++	void *pcmnd_data;
+ 	unsigned long flags;
+ 
++	/*
++	 * slab in tgt_protocol structure like struct proto (in net/sock.h) ?
++	 * However, how can we guarantee the specified number of commands ?
++	 */
++	pcmnd_data = kmalloc(proto-&gt;priv_cmd_data_size, GFP_ATOMIC);
++	if (!pcmnd_data)
++		return NULL;
++
+ 	cmnd = mempool_alloc(session-&gt;cmnd_pool, GFP_ATOMIC);
+ 	assert(cmnd);
+ 	memset(cmnd, 0, sizeof(*cmnd));
++	cmnd-&gt;tgt_protocol_private = pcmnd_data;
+ 	cmnd-&gt;session = session;
+ 	cmnd-&gt;cid = (uint64_t) (unsigned long) cmnd;
+ 	INIT_LIST_HEAD(&amp;cmnd-&gt;clist);
+@@ -653,6 +666,8 @@
+ 
+ 	dprintk(&quot;%p %llu\n&quot;, session, cmnd-&gt;cid);
+ 
++	proto-&gt;init_cmnd(cmnd, proto_data, id_buff, buff_size);
++
+ 	spin_lock_irqsave(&amp;cmnd_hash_lock, flags);
+ 	list_add_tail(&amp;cmnd-&gt;hash_list, &amp;cmnd_hash[cmnd_hashfn(cmnd-&gt;cid)]);
+ 	spin_unlock_irqrestore(&amp;cmnd_hash_lock, flags);
+@@ -666,6 +681,8 @@
+ 	unsigned long flags;
+ 	int i;
+ 
++	kfree(cmnd-&gt;tgt_protocol_private);
++
+ 	for (i = 0; i &lt; cmnd-&gt;sg_count; i++)
+ 		__free_page(cmnd-&gt;sg[i].page);
+ 	kfree(cmnd-&gt;sg);
+@@ -709,7 +726,6 @@
+ {
+ 	struct stgt_cmnd *cmnd = data;
+ 
+-	dprintk(&quot;%x %llu %u\n&quot;, cmnd-&gt;scb[0], cmnd-&gt;offset, cmnd-&gt;bufflen);
+ 	__stgt_alloc_buffer(cmnd);
+ 
+ 	if (cmnd-&gt;done) {
+@@ -742,18 +758,19 @@
+ 
+ static int uspace_cmnd_send(struct stgt_cmnd *cmnd)
+ {
++	struct tgt_protocol *proto = cmnd-&gt;session-&gt;target-&gt;proto;
+ 	struct sk_buff *skb;
+ 	struct nlmsghdr *nlh;
+ 	struct stgt_event *ev;
+ 	char *pdu;
+-	int len;
++	int len, proto_pdu_size = proto-&gt;uspace_pdu_size;
+ 
+-	len = NLMSG_SPACE(sizeof(*ev) + sizeof(cmnd-&gt;scb));
++	len = NLMSG_SPACE(sizeof(*ev) + proto_pdu_size);
+ 	skb = alloc_skb(NLMSG_SPACE(len), GFP_KERNEL);
+ 	if (!skb)
+ 		return -ENOMEM;
+ 
+-	dprintk(&quot;%d %Zd %Zd\n&quot;, len, sizeof(*ev), sizeof(cmnd-&gt;scb));
++	dprintk(&quot;%d %Zd %d\n&quot;, len, sizeof(*ev), proto_pdu_size);
+ 	nlh = __nlmsg_put(skb, daemon_pid, 0,
+ 			  STGT_KEVENT_CMND_REQ, len - sizeof(*nlh), 0);
+ 	ev = NLMSG_DATA(nlh);
+@@ -764,7 +781,7 @@
+ 	ev-&gt;k.cmnd_req.dev_id = cmnd-&gt;dev_id;
+ 	ev-&gt;k.cmnd_req.cid = cmnd-&gt;cid;
+ 
+-	memcpy(pdu, cmnd-&gt;scb, sizeof(cmnd-&gt;scb));
++	proto-&gt;build_uspace_pdu(cmnd, pdu);
+ 
+ 	return netlink_unicast(nls, skb, daemon_pid, 0);
+ }
+@@ -793,8 +810,6 @@
+ 	int i;
+ 	assert(cmnd-&gt;done);
+ 
+-	dprintk(&quot;%x %u\n&quot;, cmnd-&gt;scb[0], len);
+-
+ 	if (len) {
+ 		cmnd-&gt;bufflen = len;
+ 		cmnd-&gt;offset = 0;
+@@ -821,8 +836,6 @@
+ 	struct stgt_target *target = cmnd-&gt;session-&gt;target;
+ 	struct stgt_device *device;
+ 
+-	dprintk(&quot;%x\n&quot;, cmnd-&gt;scb[0]);
+-
+ 	/* Should we do this earlier? */
+ 	device = stgt_device_find(target, cmnd-&gt;dev_id);
+ 	if (device)
+@@ -838,20 +851,16 @@
+ 	}
+ 
+ 	if (unlikely(err))
+-		eprintk(&quot;failed cmnd %llu %u %d %d\n&quot;,
+-			cmnd-&gt;cid, cmnd-&gt;scb[0], err, cmnd-&gt;rw);
++		eprintk(&quot;failed cmnd %llu %d %d\n&quot;, cmnd-&gt;cid, err, cmnd-&gt;rw);
++
+ 	kspace_cmnd_done(cmnd, err);
+ }
+ 
+-int stgt_cmnd_queue(struct stgt_cmnd *cmnd, uint8_t *id_buff, int buff_size,
+-		    void (*done)(struct stgt_cmnd *))
++int stgt_cmnd_queue(struct stgt_cmnd *cmnd, void (*done)(struct stgt_cmnd *))
+ {
+ 	struct stgt_work *work;
+ 	struct stgt_session *session = cmnd-&gt;session;
+-	struct tgt_protocol *proto = session-&gt;target-&gt;proto;
+ 
+-	dprintk(&quot;%p %x\n&quot;, cmnd, cmnd-&gt;scb[0]);
+-
+ 	assert(!cmnd-&gt;done);
+ 	cmnd-&gt;done = done;
+ 	if (!done) {
+@@ -863,7 +872,6 @@
+ 	if (!work)
+ 		return -ENOMEM;
+ 
+-	proto-&gt;prep_cmnd(cmnd, id_buff, buff_size);
+ 	stgt_queue_work(session-&gt;target, work);
+ 
+ 	return 0;
+
+Modified: trunk/kernel/stgt.h
+===================================================================
+--- trunk/kernel/stgt.h	2005-09-08 02:42:42 UTC (rev 57)
++++ trunk/kernel/stgt.h	2005-09-09 06:56:37 UTC (rev 58)
+@@ -1,5 +1,6 @@
+ /*
+  * (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+  * This code is licenced under the GPL.
+  */
+ 
+@@ -24,10 +25,6 @@
+ 	uint64_t dev_id;
+ 	uint64_t cid;
+ 
+-	/*
+-	 * TODO allocate this as protocol specific data
+-	 */
+-	uint8_t scb[MAX_COMMAND_SIZE];
+ 	int rw;
+ 
+ 	void (*done) (struct stgt_cmnd *);
+@@ -46,6 +43,7 @@
+ 	 * target driver private
+ 	 */
+ 	void *private;
++	void *tgt_protocol_private;
+ };
+ 
+ extern struct stgt_session *
+@@ -54,13 +52,14 @@
+ 		    void (*done)(void *, struct stgt_session *), void *arg);
+ extern int stgt_session_destroy(struct stgt_session *session);
+ 
+-extern struct stgt_cmnd *stgt_cmnd_create(struct stgt_session *session);
++extern struct stgt_cmnd *stgt_cmnd_create(struct stgt_session *session,
++					  uint8_t *proto_data,
++					  uint8_t *id_buff, int buff_size);
+ extern void stgt_cmnd_destroy(struct stgt_cmnd *cmnd);
+ extern void __stgt_alloc_buffer(struct stgt_cmnd *cmnd);
+ extern void stgt_cmnd_alloc_buffer(struct stgt_cmnd *cmnd,
+ 				  void (*done)(struct stgt_cmnd *));
+ extern int stgt_cmnd_queue(struct stgt_cmnd *cmnd,
+-			   uint8_t *lun, int lun_len,
+ 			   void (*done)(struct stgt_cmnd *));
+ extern int stgt_sysfs_init(void);
+ extern void stgt_sysfs_exit(void);
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-09-08 02:42:42 UTC (rev 57)
++++ trunk/kernel/tgt_protocol.h	2005-09-09 06:56:37 UTC (rev 58)
+@@ -16,12 +16,14 @@
+ 	struct module *module;
+ 
+ 	int priv_cmd_data_size;
++	int uspace_pdu_size;
++
+ 	/*
+ 	 * perform command preparation, such as setting the rw field
+ 	 * and dev_id
+ 	 */
+-	void (* prep_cmnd)(struct stgt_cmnd *cmd, uint8_t *id_buff,
+-			   int buff_size);
++	void (* init_cmnd)(struct stgt_cmnd *cmnd, uint8_t *proto_data,
++			   uint8_t *id_buff, int buff_size);
+ 	/*
+ 	 * setup buffer fields like offset and len
+ 	 */
+@@ -30,6 +32,8 @@
+ 	 * process completion of a command
+ 	 */
+ 	void (* cmnd_done)(struct stgt_cmnd *cmd, int err);
++
++	void (* build_uspace_pdu)(struct stgt_cmnd *cmnd, void *data);
+ };
+ 
+ extern void tgt_protocol_init(void);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-09-08 02:42:42 UTC (rev 57)
++++ trunk/kernel/tgt_scsi.c	2005-09-09 06:56:37 UTC (rev 58)
+@@ -12,6 +12,11 @@
+ #include &lt;stgt.h&gt;
+ #include &lt;tgt_protocol.h&gt;
+ 
++struct scsi_tgt_cmnd {
++	uint8_t scb[MAX_COMMAND_SIZE];
++	int tags;
++};
++
+ /*
+  * we should be able to use scsi-ml's functions for this
+  */
+@@ -37,7 +42,8 @@
+ 
+ static void scsi_tgt_init_cmnd_buffer(struct stgt_cmnd *cmnd)
+ {
+-	uint8_t *scb = cmnd-&gt;scb;
++	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
++	uint8_t *scb = scsi_tgt_cmnd-&gt;scb;
+ 	uint64_t off = 0;
+ 	uint32_t len = 0;
+ 
+@@ -74,11 +80,14 @@
+ 	cmnd-&gt;offset = off;
+ }
+ 
+-static void scsi_tgt_prep_cmnd(struct stgt_cmnd *cmnd, uint8_t *id_buff,
+-			       int buff_size)
++static void scsi_tgt_init_cmnd(struct stgt_cmnd *cmnd, uint8_t *proto_data,
++			       uint8_t *id_buff, int buff_size)
+ {
+-	uint8_t *scb = cmnd-&gt;scb;
++	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
++	uint8_t *scb = scsi_tgt_cmnd-&gt;scb;
+ 
++	memcpy(scb, proto_data, sizeof(scsi_tgt_cmnd-&gt;scb));
++
+ 	/* set operation */
+ 	switch (scb[0]) {
+ 	case READ_6:
+@@ -162,12 +171,22 @@
+ 		cmnd-&gt;result = SAM_STAT_GOOD;
+ }
+ 
++void scsi_tgt_build_uspace_pdu(struct stgt_cmnd *cmnd, void *data)
++{
++	struct scsi_tgt_cmnd *scsi_tgt_cmnd = cmnd-&gt;tgt_protocol_private;
++
++	memcpy(data, scsi_tgt_cmnd-&gt;scb, sizeof(scsi_tgt_cmnd-&gt;scb));
++}
++
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
++	.init_cmnd = scsi_tgt_init_cmnd,
+ 	.init_cmnd_buffer = scsi_tgt_init_cmnd_buffer,
+-	.prep_cmnd = scsi_tgt_prep_cmnd,
+ 	.cmnd_done = scsi_tgt_cmnd_done,
++	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
++	.priv_cmd_data_size = sizeof(struct scsi_tgt_cmnd),
++	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+ 
+ static int __init scsi_tgt_init(void)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000050.html">[Stgt-svn] r57 - trunk/iscsi/usr
+</A></li>
+	<LI>Next message: <A HREF="000052.html">[Stgt-svn] r59 - trunk/iscsi/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#51">[ date ]</a>
+              <a href="thread.html#51">[ thread ]</a>
+              <a href="subject.html#51">[ subject ]</a>
+              <a href="author.html#51">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

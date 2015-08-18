@@ -1,0 +1,203 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r575 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r575%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609010002.k8102oB7019669%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   
+   <LINK REL="Next"  HREF="000563.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r575 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r575%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200609010002.k8102oB7019669%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r575 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Fri Sep  1 02:02:50 CEST 2006</I>
+    <P><UL>
+        
+        <LI>Next message: <A HREF="000563.html">[Stgt-svn] r576 - in trunk: . usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#562">[ date ]</a>
+              <a href="thread.html#562">[ thread ]</a>
+              <a href="subject.html#562">[ subject ]</a>
+              <a href="author.html#562">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-09-01 02:02:04 +0200 (Fri, 01 Sep 2006)
+New Revision: 575
+
+Modified:
+   trunk/usr/bd_aio.c
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/target.c
+Log:
+Minor cleanups.
+
+
+Modified: trunk/usr/bd_aio.c
+===================================================================
+--- trunk/usr/bd_aio.c	2006-08-31 12:53:33 UTC (rev 574)
++++ trunk/usr/bd_aio.c	2006-09-01 00:02:04 UTC (rev 575)
+@@ -103,9 +103,11 @@
+ 	}
+ 
+ 	/*
+-	 * We use edge triggering because we want only one notification per task.
++	 * We use edge triggering because we want only one
++	 * notification per task.
+ 	 */
+-	err = tgt_event_add(bai-&gt;aio_fd, EPOLLIN | EPOLLET, aio_event_handler, dev);
++	err = tgt_event_add(bai-&gt;aio_fd, EPOLLIN | EPOLLET,
++			    aio_event_handler, dev);
+ 	if (err)
+ 		goto aio_cb_destroy;
+ 
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2006-08-31 12:53:33 UTC (rev 574)
++++ trunk/usr/iscsi/iscsid.c	2006-09-01 00:02:04 UTC (rev 575)
+@@ -438,7 +438,7 @@
+ 	memset(rsp, 0, BHS_SIZE);
+ 	if ((req-&gt;opcode &amp; ISCSI_OPCODE_MASK) != ISCSI_OP_LOGIN ||
+ 	    !(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE)) {
+-		//reject
++		/* reject */
+ 	}
+ 
+ 	rsp-&gt;opcode = ISCSI_OP_LOGIN_RSP;
+@@ -446,7 +446,7 @@
+ 	rsp-&gt;active_version = ISCSI_DRAFT20_VERSION;
+ 	rsp-&gt;itt = req-&gt;itt;
+ 
+-	if (/*req-&gt;max_version &lt; ISCSI_VERSION ||*/
++	if (/* req-&gt;max_version &lt; ISCSI_VERSION || */
+ 	    req-&gt;min_version &gt; ISCSI_DRAFT20_VERSION) {
+ 		rsp-&gt;status_class = ISCSI_STATUS_CLS_INITIATOR_ERR;
+ 		rsp-&gt;status_detail = ISCSI_LOGIN_STATUS_NO_VERSION;
+@@ -465,7 +465,7 @@
+ 			login_start(conn);
+ 			if (rsp-&gt;status_class)
+ 				return;
+-			//else fall through
++			/* fall through */
+ 		case STATE_SECURITY:
+ 			text_scan_security(conn);
+ 			if (rsp-&gt;status_class)
+@@ -648,7 +648,7 @@
+ 	}
+ 	rsp-&gt;opcode = ISCSI_OP_TEXT_RSP;
+ 	rsp-&gt;itt = req-&gt;itt;
+-	//rsp-&gt;ttt = rsp-&gt;ttt;
++	/* rsp-&gt;ttt = rsp-&gt;ttt; */
+ 	rsp-&gt;ttt = 0xffffffff;
+ 	conn-&gt;exp_cmd_sn = be32_to_cpu(req-&gt;cmdsn);
+ 	if (!(req-&gt;opcode &amp; ISCSI_OP_IMMEDIATE))
+@@ -689,28 +689,25 @@
+ 
+ 	switch (conn-&gt;req.bhs.opcode &amp; ISCSI_OPCODE_MASK) {
+ 	case ISCSI_OP_LOGIN:
+-		//if conn-&gt;state == STATE_FULL -&gt; reject
+ 		cmnd_exec_login(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	case ISCSI_OP_TEXT:
+-		//if conn-&gt;state != STATE_FULL -&gt; reject
+ 		cmnd_exec_text(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	case ISCSI_OP_LOGOUT:
+-		//if conn-&gt;state != STATE_FULL -&gt; reject
+ 		cmnd_exec_logout(conn);
+ 		conn-&gt;rsp.bhs.hlength = conn-&gt;rsp.ahssize / 4;
+ 		hton24(conn-&gt;rsp.bhs.dlength, conn-&gt;rsp.datasize);
+ 		log_pdu(2, &amp;conn-&gt;rsp);
+ 		break;
+ 	default:
+-		//reject
++		/* reject */
+ 		res = 1;
+ 		break;
+ 	}
+@@ -728,7 +725,7 @@
+ 		conn-&gt;state = STATE_LOGIN;
+ 		break;
+ 	case STATE_SECURITY_FULL:
+-		//fall through
++		/* fall through */
+ 	case STATE_LOGIN_FULL:
+ 		if (conn-&gt;session_type == SESSION_NORMAL)
+ 			conn-&gt;state = STATE_KERNEL;
+@@ -858,7 +855,7 @@
+ 	ctask-&gt;rw = rw;
+ 
+ 	list_add_tail(&amp;ctask-&gt;c_txlist, &amp;ctask-&gt;conn-&gt;tx_clist);
+-	tgt_event_modify(ctask-&gt;conn-&gt;fd, EPOLLIN|EPOLLOUT);
++	tgt_event_modify(ctask-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 
+ 	return 0;
+ }
+@@ -880,7 +877,6 @@
+ 		ctask-&gt;r2t_count,
+ 		ntoh24(req-&gt;dlength), be32_to_cpu(req-&gt;offset));
+ 
+-/* 	conn-&gt;rx_buffer = (void *) (unsigned long) ctask-&gt;addr; */
+ 	conn-&gt;rx_buffer = (void *) (unsigned long) ctask-&gt;c_buffer;
+ 	conn-&gt;rx_buffer += be32_to_cpu(req-&gt;offset);
+ 	conn-&gt;rx_size = ntoh24(req-&gt;dlength);
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-31 12:53:33 UTC (rev 574)
++++ trunk/usr/target.c	2006-09-01 00:02:04 UTC (rev 575)
+@@ -496,7 +496,9 @@
+ 		return;
+ 	}
+ 
+-	mreq = calloc(1, sizeof(*mreq));
++	mreq = zalloc(sizeof(*mreq));
++	if (!mreq)
++		return;
+ 	mreq-&gt;mid = req_id;
+ 	mreq-&gt;function = function;
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	
+	<LI>Next message: <A HREF="000563.html">[Stgt-svn] r576 - in trunk: . usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#562">[ date ]</a>
+              <a href="thread.html#562">[ thread ]</a>
+              <a href="subject.html#562">[ subject ]</a>
+              <a href="author.html#562">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

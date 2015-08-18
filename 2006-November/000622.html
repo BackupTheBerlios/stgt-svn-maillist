@@ -1,0 +1,85 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r635 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r635%20-%20trunk/usr&In-Reply-To=%3C200611110456.kAB4uMH7023423%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000621.html">
+   <LINK REL="Next"  HREF="000623.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r635 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r635%20-%20trunk/usr&In-Reply-To=%3C200611110456.kAB4uMH7023423%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r635 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Nov 11 05:56:22 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000621.html">[Stgt-svn] r634 - trunk/doc
+</A></li>
+        <LI>Next message: <A HREF="000623.html">[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#622">[ date ]</a>
+              <a href="thread.html#622">[ thread ]</a>
+              <a href="subject.html#622">[ subject ]</a>
+              <a href="author.html#622">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-11 05:56:21 +0100 (Sat, 11 Nov 2006)
+New Revision: 635
+
+Modified:
+   trunk/usr/tgtd.c
+Log:
+Remove unused getopt
+
+
+Modified: trunk/usr/tgtd.c
+===================================================================
+--- trunk/usr/tgtd.c	2006-11-11 04:23:10 UTC (rev 634)
++++ trunk/usr/tgtd.c	2006-11-11 04:56:21 UTC (rev 635)
+@@ -266,7 +266,7 @@
+ 	sigaction(SIGPIPE, &amp;sa_new, &amp;sa_old );
+ 	sigaction(SIGTERM, &amp;sa_new, &amp;sa_old );
+ 
+-	while ((ch = getopt_long(argc, argv, &quot;l:fd:vh&quot;, long_options,
++	while ((ch = getopt_long(argc, argv, &quot;fd:vh&quot;, long_options,
+ 				 &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'f':
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000621.html">[Stgt-svn] r634 - trunk/doc
+</A></li>
+	<LI>Next message: <A HREF="000623.html">[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#622">[ date ]</a>
+              <a href="thread.html#622">[ thread ]</a>
+              <a href="subject.html#622">[ subject ]</a>
+              <a href="author.html#622">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

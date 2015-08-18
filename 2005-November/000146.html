@@ -1,0 +1,123 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r152 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r152%20-%20trunk/usr&In-Reply-To=%3C200511042304.jA4N4nXn028408%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000145.html">
+   <LINK REL="Next"  HREF="000147.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r152 - trunk/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r152%20-%20trunk/usr&In-Reply-To=%3C200511042304.jA4N4nXn028408%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r152 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sat Nov  5 00:04:49 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000145.html">[Stgt-svn] r151 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000147.html">[Stgt-svn] r153 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#146">[ date ]</a>
+              <a href="thread.html#146">[ thread ]</a>
+              <a href="subject.html#146">[ subject ]</a>
+              <a href="author.html#146">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-05 00:04:49 +0100 (Sat, 05 Nov 2005)
+New Revision: 152
+
+Modified:
+   trunk/usr/dl.c
+Log:
+Fix dl_init() for a driver that doesn't have a driver-specific library.
+
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-04 22:52:58 UTC (rev 151)
++++ trunk/usr/dl.c	2005-11-04 23:04:49 UTC (rev 152)
+@@ -84,35 +84,29 @@
+ 			;
+ 		idx = atoi(p);
+ 		if (idx &gt; MAX_DL_HANDLES) {
+-			eprintf(&quot;Cannot load %s %d\n&quot;,
++			eprintf(&quot;Too large dl idx %s %d\n&quot;,
+ 				namelist[i]-&gt;d_name, idx);
+ 			continue;
+ 		}
++		di = &amp;dinfo[idx];
+ 
+-		p = dlname(namelist[i]-&gt;d_name, &quot;name&quot;);
+-		if (!p)
++		di-&gt;name = dlname(namelist[i]-&gt;d_name, &quot;name&quot;);
++		if (!di-&gt;name)
+ 			continue;
+ 
+-		di = &amp;dinfo[idx];
+-
+-		di-&gt;name = p;
+-		snprintf(path, sizeof(path), &quot;%s.so&quot;, p);
++		snprintf(path, sizeof(path), &quot;%s.so&quot;, di-&gt;name);
+ 		di-&gt;dl = dlopen(path, RTLD_LAZY);
+-		if (!di-&gt;dl) {
++		if (!di-&gt;dl)
+ 			eprintf(&quot;%s %s\n&quot;, path, dlerror());
+-			continue;
+-		}
+ 
+-		p = dlname(namelist[i]-&gt;d_name, &quot;protocol&quot;);
+-		if (!p)
++		di-&gt;proto = dlname(namelist[i]-&gt;d_name, &quot;protocol&quot;);
++		if (!di-&gt;proto)
+ 			continue;
+-		di-&gt;proto = p;
+-		snprintf(path, sizeof(path), &quot;%s.so&quot;, p);
++
++		snprintf(path, sizeof(path), &quot;%s.so&quot;, di-&gt;proto);
+ 		di-&gt;pdl = dlopen(path, RTLD_LAZY);
+-		if (!di-&gt;pdl) {
++		if (!di-&gt;pdl)
+ 			eprintf(&quot;%s %s\n&quot;, path, dlerror());
+-			continue;
+-		}
+ 	}
+ 
+ 	for (i = 0; i &lt; nr; i++)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000145.html">[Stgt-svn] r151 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000147.html">[Stgt-svn] r153 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#146">[ date ]</a>
+              <a href="thread.html#146">[ thread ]</a>
+              <a href="subject.html#146">[ subject ]</a>
+              <a href="author.html#146">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

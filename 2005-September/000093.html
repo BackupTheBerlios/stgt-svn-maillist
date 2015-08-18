@@ -1,0 +1,166 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r99 - trunk/iscsi/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-September/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r99%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509250842.j8P8g2eY032734%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000092.html">
+   <LINK REL="Next"  HREF="000094.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r99 - trunk/iscsi/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r99%20-%20trunk/iscsi/usr&In-Reply-To=%3C200509250842.j8P8g2eY032734%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r99 - trunk/iscsi/usr">tomo at berlios.de
+       </A><BR>
+    <I>Sun Sep 25 10:42:02 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000092.html">[Stgt-svn] r98 - in trunk/iscsi: include kernel usr
+</A></li>
+        <LI>Next message: <A HREF="000094.html">[Stgt-svn] r100 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#93">[ date ]</a>
+              <a href="thread.html#93">[ thread ]</a>
+              <a href="subject.html#93">[ subject ]</a>
+              <a href="author.html#93">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-09-25 10:42:02 +0200 (Sun, 25 Sep 2005)
+New Revision: 99
+
+Modified:
+   trunk/iscsi/usr/session.c
+Log:
+Kill session_test requring kernel service.
+
+Modified: trunk/iscsi/usr/session.c
+===================================================================
+--- trunk/iscsi/usr/session.c	2005-09-24 13:29:42 UTC (rev 98)
++++ trunk/iscsi/usr/session.c	2005-09-25 08:42:02 UTC (rev 99)
+@@ -70,78 +70,27 @@
+ 	return NULL;
+ }
+ 
+-static int session_test(u32 t_tid, u64 t_sid)
+-{
+-	FILE *f;
+-	char buf[8192], *p;
+-	u32 tid;
+-	u64 sid;
+-	int err = -ENOENT, find = 0;
+-
+-	if ((f = fopen(PROC_SESSION, &quot;r&quot;)) == NULL) {
+-		fprintf(stderr, &quot;Can't open %s\n&quot;, PROC_SESSION);
+-		return -errno;
+-	}
+-
+-	while (fgets(buf, sizeof(buf), f)) {
+-		p = buf;
+-		while (isspace((int) *p))
+-			p++;
+-
+-		if (!strncmp(p, &quot;tid:&quot;, 4)) {
+-			if (sscanf(p, &quot;tid:%u&quot;, &amp;tid) != 1) {
+-				err = -EIO;
+-				goto out;
+-			}
+-			if (tid == t_tid)
+-				find = 1;
+-			else
+-				find = 0;
+-		} else if (!strncmp(p, &quot;sid:&quot;, 4)) {
+-			if (!find)
+-				continue;
+-			if (sscanf(p, &quot;sid:%&quot; SCNu64, &amp;sid) != 1) {
+-				err = -EIO;
+-				goto out;
+-			}
+-
+-			if (sid == t_sid) {
+-				err = 0;
+-				goto out;
+-			}
+-		}
+-	}
+-
+-out:
+-	fclose(f);
+-
+-	return err;
+-}
+-
+ void session_create(struct connection *conn)
+ {
+ 	struct session *session;
+ 	uint64_t sid;
+-	static u16 tsih = 1;
++	static uint16_t tsih = 1;
+ 
+-	if (!(session = session_alloc(conn-&gt;tid)))
+-		return;
+-
+-	memcpy(session-&gt;isid, conn-&gt;isid, sizeof(session-&gt;isid));
+-	session-&gt;tsih = tsih;
+-
++	/* First, we need to get an available sid. */
+ 	while (1) {
+-		sid = sid64(session-&gt;isid, session-&gt;tsih);
+-		int err = session_test(conn-&gt;tid, sid);
+-
+-		if (err == -ENOENT)
++		sid = sid64(conn-&gt;isid, tsih);
++		if (!session_find_id(conn-&gt;tid, sid))
+ 			break;
+-		else if (err &lt; 0)
+-			return;
+-		session-&gt;tsih++;
++		tsih++;
+ 	}
+-	tsih = session-&gt;tsih + 1;
+ 
++	session = session_alloc(conn-&gt;tid);
++	if (!session)
++		return;
++
++	memcpy(session-&gt;isid, conn-&gt;isid, sizeof(session-&gt;isid));
++	session-&gt;tsih = tsih++;
++
+ 	conn-&gt;session = session;
+ 	conn-&gt;session-&gt;initiator = strdup(conn-&gt;initiator);
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000092.html">[Stgt-svn] r98 - in trunk/iscsi: include kernel usr
+</A></li>
+	<LI>Next message: <A HREF="000094.html">[Stgt-svn] r100 - trunk/iscsi/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#93">[ date ]</a>
+              <a href="thread.html#93">[ thread ]</a>
+              <a href="subject.html#93">[ subject ]</a>
+              <a href="author.html#93">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,399 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r841 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r841%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703171416.l2HEG9NO029836%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000827.html">
+   <LINK REL="Next"  HREF="000829.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r841 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r841%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703171416.l2HEG9NO029836%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r841 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 17 15:16:09 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000827.html">[Stgt-svn] r840 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000829.html">[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#828">[ date ]</a>
+              <a href="thread.html#828">[ thread ]</a>
+              <a href="subject.html#828">[ subject ]</a>
+              <a href="author.html#828">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-17 15:16:09 +0100 (Sat, 17 Mar 2007)
+New Revision: 841
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+   trunk/usr/iscsi/iscsid.h
+Log:
+iSCSI bidirectional support
+
+Make iSCSI bidirectional transfers work.
+
+Signed-off-by: Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-17 12:32:32 UTC (rev 840)
++++ trunk/usr/iscsi/iscsid.c	2007-03-17 14:16:09 UTC (rev 841)
+@@ -743,6 +743,7 @@
+ {
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
++	uint32_t residual;
+ 
+ 	dprintf(&quot;%p %x\n&quot;, task, task-&gt;scmd.scb[0]);
+ 
+@@ -756,6 +757,31 @@
+ 	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
+ 	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
+ 
++	/* we never have write under/over flow, no way to signal that
++	 * back from the target currently. */
++
++	residual = 0;
++	if (task-&gt;dir == BIDIRECTIONAL) {
++		if (task-&gt;len &lt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_BIDI_UNDERFLOW;
++			residual = task-&gt;read_len - task-&gt;len;
++		} else if (task-&gt;len &gt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_BIDI_OVERFLOW;
++			residual = task-&gt;len - task-&gt;read_len;
++		}
++		rsp-&gt;bi_residual_count = cpu_to_be32(residual);
++		rsp-&gt;residual_count = 0;
++	} else {
++		if (task-&gt;len &lt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
++			residual = task-&gt;read_len - task-&gt;len;
++		} else if (task-&gt;len &gt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
++			residual = task-&gt;len - task-&gt;read_len;
++		}
++		rsp-&gt;residual_count = cpu_to_be32(residual);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -770,6 +796,7 @@
+ 	struct iscsi_cmd_rsp *rsp = (struct iscsi_cmd_rsp *) &amp;conn-&gt;rsp.bhs;
+ 	struct iscsi_sense_data *sense;
+ 	unsigned char sense_len;
++ 	uint32_t residual;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_CMD_RSP;
+@@ -777,7 +804,33 @@
+ 	rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
+ 	rsp-&gt;response = ISCSI_STATUS_CMD_COMPLETED;
+ 	rsp-&gt;cmd_status = SAM_STAT_CHECK_CONDITION;
++	rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
++	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
+ 
++	/* XXX: copied from above, consider merging these functions */
++	residual = 0;
++	if (task-&gt;dir == BIDIRECTIONAL) {
++		if (task-&gt;len &lt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_BIDI_UNDERFLOW;
++			residual = task-&gt;read_len - task-&gt;len;
++		} else if (task-&gt;len &gt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_BIDI_OVERFLOW;
++			residual = task-&gt;len - task-&gt;read_len;
++		}
++		rsp-&gt;bi_residual_count = cpu_to_be32(residual);
++		rsp-&gt;residual_count = 0;
++	} else {
++		if (task-&gt;len &lt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
++			residual = task-&gt;read_len - task-&gt;len;
++		} else if (task-&gt;len &gt; task-&gt;read_len) {
++			rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
++			residual = task-&gt;len - task-&gt;read_len;
++		}
++		rsp-&gt;residual_count = cpu_to_be32(residual);
++	}
++
+ 	sense = (struct iscsi_sense_data *)task-&gt;scmd.sense_buffer;
+ 	sense_len = task-&gt;scmd.sense_len;
+ 
+@@ -795,19 +848,17 @@
+ {
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_data_rsp *rsp = (struct iscsi_data_rsp *) &amp;conn-&gt;rsp.bhs;
+-	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+-	int residual, datalen, exp_datalen = ntohl(req-&gt;data_length);
++	int datalen, exp_datalen = task-&gt;read_len;
+ 	int max_burst = conn-&gt;session_param[ISCSI_PARAM_MAX_XMIT_DLENGTH].val;
++ 	uint32_t residual;
+ 
+ 	memset(rsp, 0, sizeof(*rsp));
+ 	rsp-&gt;opcode = ISCSI_OP_SCSI_DATA_IN;
+ 	rsp-&gt;itt = task-&gt;tag;
+ 	rsp-&gt;ttt = cpu_to_be32(ISCSI_RESERVED_TAG);
+-	rsp-&gt;cmd_status = ISCSI_STATUS_CMD_COMPLETED;
+ 
+ 	rsp-&gt;offset = cpu_to_be32(task-&gt;offset);
+-	rsp-&gt;datasn = cpu_to_be32(task-&gt;data_sn++);
+-	rsp-&gt;cmd_status = task-&gt;result;
++	rsp-&gt;datasn = cpu_to_be32(task-&gt;exp_r2tsn++);
+ 
+ 	datalen = min(exp_datalen, task-&gt;len);
+ 	datalen -= task-&gt;offset;
+@@ -815,21 +866,26 @@
+ 	dprintf(&quot;%d %d %d %d %x\n&quot;, datalen, exp_datalen, task-&gt;len, max_burst, rsp-&gt;itt);
+ 
+ 	if (datalen &lt;= max_burst) {
+-		rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL | ISCSI_FLAG_DATA_STATUS;
+-		if (task-&gt;len &lt; exp_datalen) {
+-			rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
+-			residual = exp_datalen - task-&gt;len;
+-		} else if (task-&gt;len &gt; exp_datalen) {
+-			rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
+-			residual = task-&gt;len - exp_datalen;
+-		} else
+-			residual = 0;
+-		rsp-&gt;residual_count = cpu_to_be32(residual);
++		rsp-&gt;flags = ISCSI_FLAG_CMD_FINAL;
++
++		/* collapse status into final packet if successful */
++		if (task-&gt;result == 0 &amp;&amp; task-&gt;dir != BIDIRECTIONAL) {
++			rsp-&gt;flags |= ISCSI_FLAG_DATA_STATUS;
++			if (task-&gt;len &lt; exp_datalen) {
++				rsp-&gt;flags |= ISCSI_FLAG_CMD_UNDERFLOW;
++				residual = exp_datalen - task-&gt;len;
++			} else if (task-&gt;len &gt; exp_datalen) {
++				rsp-&gt;flags |= ISCSI_FLAG_CMD_OVERFLOW;
++				residual = task-&gt;len - exp_datalen;
++			} else
++				residual = 0;
++			rsp-&gt;cmd_status = task-&gt;result;
++			rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
++			rsp-&gt;residual_count = cpu_to_be32(residual);
++		}
+ 	} else
+ 		datalen = max_burst;
+ 
+-	if (rsp-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)
+-		rsp-&gt;statsn = cpu_to_be32(conn-&gt;stat_sn++);
+ 	rsp-&gt;exp_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn);
+ 	rsp-&gt;max_cmdsn = cpu_to_be32(conn-&gt;session-&gt;exp_cmd_sn + MAX_QUEUE_CMD);
+ 
+@@ -933,6 +989,12 @@
+ 	task-&gt;len = scmd-&gt;len;
+ 	task-&gt;rw = scmd-&gt;rw;
+ 
++	if (task-&gt;len &gt; task-&gt;read_len) {
++		dprintf(&quot;shrinking target len %d to initiator len %d\n&quot;,
++		        task-&gt;len, task-&gt;read_len);
++		task-&gt;len = task-&gt;read_len;
++	}
++
+ 	list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 	tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 
+@@ -965,19 +1027,29 @@
+ 	struct iscsi_connection *conn = task-&gt;conn;
+ 	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 	unsigned long uaddr = (unsigned long) task-&gt;data;
++	uint32_t data_len;
++	uint8_t *ahs;
++	int ahslen;
+ 
+ 	scmd-&gt;cmd_nexus_id = conn-&gt;session-&gt;iscsi_nexus_id;
+ 
+ 	scmd-&gt;scb = req-&gt;cdb;
+ 	scmd-&gt;scb_len = sizeof(req-&gt;cdb);
+ 
+-	if (task-&gt;ahs) {
+-		struct iscsi_ecdb_ahdr *ahs_extcdb = task-&gt;ahs;
++	ahs = task-&gt;ahs;
++	ahslen = req-&gt;hlength * 4;
++	if (ahslen &gt;= 4) {
++		struct iscsi_ecdb_ahdr *ahs_extcdb = (void *) ahs;
+ 
+ 		if (ahs_extcdb-&gt;ahstype == ISCSI_AHSTYPE_CDB) {
+ 			int extcdb_len = ntohs(ahs_extcdb-&gt;ahslength) - 1;
+ 			char *p = (void *)task-&gt;extdata;
+ 
++			if (4 + extcdb_len &gt; ahslen) {
++				eprintf(&quot;AHS len %d too short for extcdb %d\n&quot;,
++					ahslen, extcdb_len);
++				return -EINVAL;
++			}
+ 			if (extcdb_len + sizeof(req-&gt;cdb) &gt; 260) {
+ 				eprintf(&quot;invalid extcdb len %d\n&quot;, extcdb_len);
+ 
+@@ -990,9 +1062,32 @@
+ 
+ 			scmd-&gt;scb = p;
+ 			scmd-&gt;scb_len = sizeof(req-&gt;cdb) + extcdb_len;
++
++			ahs += 4 + extcdb_len;
++			ahslen -= 4 + extcdb_len;
+ 		}
+ 	}
+ 
++	/* figure out incoming (write) and outgoing (read) sizes */
++	data_len = 0;
++	task-&gt;write_len = 0;
++	if (task-&gt;dir == WRITE || task-&gt;dir == BIDIRECTIONAL) {
++		task-&gt;write_len = ntohl(req-&gt;data_length);
++		data_len = task-&gt;write_len;
++	}
++	task-&gt;read_len = 0;
++	if (task-&gt;dir == BIDIRECTIONAL &amp;&amp; ahslen &gt;= 8) {
++		struct iscsi_rlength_ahdr *ahs_bidi = (void *) ahs;
++		if (ahs_bidi-&gt;ahstype == ISCSI_AHSTYPE_RLENGTH) {
++			task-&gt;read_len = ntohl(ahs_bidi-&gt;read_length);
++			dprintf(&quot;bidi read len %u\n&quot;, task-&gt;read_len);
++		}
++	}
++	if (task-&gt;dir == READ) {
++		task-&gt;read_len = ntohl(req-&gt;data_length);
++		data_len = task-&gt;read_len;
++	}
++
+ 	memcpy(scmd-&gt;lun, task-&gt;req.lun, sizeof(scmd-&gt;lun));
+ 	scmd-&gt;rw = req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE;
+ 	scmd-&gt;len = ntohl(req-&gt;data_length);
+@@ -1016,6 +1111,7 @@
+ 		goto no_queuing;
+ 	}
+ 
++	task-&gt;offset = 0;  /* for use as transmit pointer for data-ins */
+ 	err = iscsi_target_cmd_queue(task);
+ no_queuing:
+ 	tgt_event_modify(conn-&gt;fd, EPOLLIN|EPOLLOUT);
+@@ -1105,6 +1201,17 @@
+ 		tgt_event_modify(task-&gt;conn-&gt;fd, EPOLLIN | EPOLLOUT);
+ 		break;
+ 	case ISCSI_OP_SCSI_CMD:
++		/* convenient directionality for our internal use */
++		if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_READ) {
++			if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
++				task-&gt;dir = BIDIRECTIONAL;
++			else
++				task-&gt;dir = READ;
++		} else if (hdr-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE) {
++			task-&gt;dir = WRITE;
++		} else
++			task-&gt;dir = NONE;
++
+ 		err = iscsi_scsi_cmd_execute(task);
+ 		break;
+ 	case ISCSI_OP_SCSI_TMFUNC:
+@@ -1393,28 +1500,16 @@
+ static int iscsi_scsi_cmd_tx_start(struct iscsi_task *task)
+ {
+ 	int err = 0;
+-	struct iscsi_cmd *req = (struct iscsi_cmd *) &amp;task-&gt;req;
+ 
+ 	if (task-&gt;r2t_count)
+ 		err = iscsi_r2t_build(task);
+-	else {
+-		/* Needs to clean up this mess. */
++	else if (task-&gt;offset &lt; task-&gt;len)
++		err = iscsi_data_rsp_build(task);
++	else if (task-&gt;result)
++		err = iscsi_sense_rsp_build(task);
++	else
++		err = iscsi_cmd_rsp_build(task);
+ 
+-		if (req-&gt;flags &amp; ISCSI_FLAG_CMD_WRITE)
+-			if (task-&gt;result)
+-				err = iscsi_sense_rsp_build(task);
+-			else
+-				err = iscsi_cmd_rsp_build(task);
+-		else {
+-			if (task-&gt;result)
+-				err = iscsi_sense_rsp_build(task);
+-			else if (task-&gt;len)
+-				err = iscsi_data_rsp_build(task);
+-			else
+-				err = iscsi_cmd_rsp_build(task);
+-		}
+-	}
+-
+ 	return err;
+ }
+ 
+@@ -1490,8 +1585,9 @@
+ 	case ISCSI_OP_R2T:
+ 		break;
+ 	case ISCSI_OP_SCSI_DATA_IN:
+-		if (!(hdr-&gt;flags &amp; ISCSI_FLAG_CMD_FINAL)) {
+-			dprintf(&quot;more data %x\n&quot;, hdr-&gt;itt);
++		if (task-&gt;offset &lt; task-&gt;len || task-&gt;result != 0
++		   || task-&gt;dir == BIDIRECTIONAL) {
++			dprintf(&quot;more data or sense or bidir %x\n&quot;, hdr-&gt;itt);
+ 			list_add_tail(&amp;task-&gt;c_list, &amp;task-&gt;conn-&gt;tx_clist);
+ 			return 0;
+ 		}
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2007-03-17 12:32:32 UTC (rev 840)
++++ trunk/usr/iscsi/iscsid.h	2007-03-17 14:16:09 UTC (rev 841)
+@@ -99,6 +99,9 @@
+ 	struct list_head c_list;
+ 
+ 	unsigned long flags;
++	enum { NONE, WRITE, READ, BIDIRECTIONAL } dir;
++	uint32_t write_len;  /* from command pdu, write and read lengths */
++	uint32_t read_len;
+ 
+ 	uint64_t addr;
+ 	int result;
+@@ -106,7 +109,6 @@
+ 	int rw;
+ 
+ 	int offset;
+-	int data_sn;
+ 
+ 	int r2t_count;
+ 	int unsol_count;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000827.html">[Stgt-svn] r840 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000829.html">[Stgt-svn] r842 - in trunk/usr: . ibmvio iscsi xen
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#828">[ date ]</a>
+              <a href="thread.html#828">[ thread ]</a>
+              <a href="subject.html#828">[ subject ]</a>
+              <a href="author.html#828">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

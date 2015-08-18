@@ -1,0 +1,184 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-April/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r412%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604142321.k3ENL9HQ001389%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000398.html">
+   <LINK REL="Next"  HREF="000400.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r412%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200604142321.k3ENL9HQ001389%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r412 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Apr 15 01:21:09 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000398.html">[Stgt-svn] r411 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000400.html">[Stgt-svn] r413 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#399">[ date ]</a>
+              <a href="thread.html#399">[ thread ]</a>
+              <a href="subject.html#399">[ subject ]</a>
+              <a href="author.html#399">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-04-15 01:20:00 +0200 (Sat, 15 Apr 2006)
+New Revision: 412
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Clean up iu_entry.
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 23:16:25 UTC (rev 411)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-04-14 23:20:00 UTC (rev 412)
+@@ -109,17 +109,14 @@
+  */
+ struct iu_entry {
+ 	struct server_adapter *adapter;
+-	struct list_head ilist;
+-	dma_addr_t iu_token;
+ 	struct scsi_cmnd *scmd;
+ 
+-	struct {
+-		dma_addr_t remote_token;
+-		unsigned long flags;
+-	} req;
++	struct list_head ilist;
++	dma_addr_t iu_token;
++	dma_addr_t remote_token;
++	unsigned long flags;
+ };
+ 
+-
+ static struct workqueue_struct *vtgtd;
+ static kmem_cache_t *iu_cache;
+ 
+@@ -141,7 +138,7 @@
+ 
+ 	/* First copy the SRP */
+ 	rc = h_copy_rdma(length, iue-&gt;adapter-&gt;liobn, iue-&gt;iu_token,
+-			 iue-&gt;adapter-&gt;riobn, iue-&gt;req.remote_token);
++			 iue-&gt;adapter-&gt;riobn, iue-&gt;remote_token);
+ 
+ 	if (rc)
+ 		eprintk(&quot;Error %ld transferring data\n&quot;, rc);
+@@ -179,7 +176,7 @@
+ 	unsigned long flags;
+ 
+ 	/* If the linked bit is on and status is good */
+-	if (test_bit(V_LINKED, &amp;iue-&gt;req.flags) &amp;&amp; (status == NO_SENSE))
++	if (test_bit(V_LINKED, &amp;iue-&gt;flags) &amp;&amp; (status == NO_SENSE))
+ 		status = 0x10;
+ 
+ 	memset(iu, 0, sizeof(struct srp_rsp));
+@@ -189,7 +186,7 @@
+ 	spin_unlock_irqrestore(&amp;iue-&gt;adapter-&gt;lock, flags);
+ 	iu-&gt;srp.rsp.tag = tag;
+ 
+-	if (test_bit(V_DIOVER, &amp;iue-&gt;req.flags))
++	if (test_bit(V_DIOVER, &amp;iue-&gt;flags))
+ 		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_DIOVER;
+ 
+ 	iu-&gt;srp.rsp.data_in_res_cnt = 0;
+@@ -304,7 +301,7 @@
+ 	dprintk(&quot;%p %p\n&quot;, iue-&gt;adapter, iue);
+ 
+ 	if (getlink(iue))
+-		__set_bit(V_LINKED, &amp;iue-&gt;req.flags);
++		__set_bit(V_LINKED, &amp;iue-&gt;flags);
+ 
+ 	tag = MSG_SIMPLE_TAG;
+ 
+@@ -330,7 +327,7 @@
+ 	case WRITE_VERIFY:
+ 	case WRITE_12:
+ 	case WRITE_VERIFY_12:
+-		__set_bit(V_WRITE, &amp;iue-&gt;req.flags);
++		__set_bit(V_WRITE, &amp;iue-&gt;flags);
+ 	}
+ 
+ 	if (iu-&gt;srp.cmd.buf_fmt &gt;&gt; 4)
+@@ -369,7 +366,7 @@
+ 	spin_lock_irqsave(&amp;adapter-&gt;lock, flags);
+ 
+ 	list_for_each_entry(iue, &amp;adapter-&gt;cmd_queue, ilist) {
+-		if (!test_and_set_bit(V_FLYING, &amp;iue-&gt;req.flags)) {
++		if (!test_and_set_bit(V_FLYING, &amp;iue-&gt;flags)) {
+ 			spin_unlock_irqrestore(&amp;adapter-&gt;lock, flags);
+ 			process_cmd(iue);
+ 			goto retry;
+@@ -582,7 +579,7 @@
+ 	struct iu_entry	*iue = (struct iu_entry *) scmd-&gt;SCp.ptr;
+ 	enum dma_data_direction dir;
+ 
+-	if (test_bit(V_WRITE, &amp;iue-&gt;req.flags))
++	if (test_bit(V_WRITE, &amp;iue-&gt;flags))
+ 		dir = DMA_TO_DEVICE;
+ 	else
+ 		dir = DMA_FROM_DEVICE;
+@@ -599,9 +596,8 @@
+ 	if (!iue)
+ 		return NULL;
+ 
+-	memset(&amp;iue-&gt;req, 0, sizeof(iue-&gt;req));
++	memset(iue, 0, sizeof(struct iu_entry));
+ 	iue-&gt;adapter = adapter;
+-	iue-&gt;scmd = NULL;
+ 	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
+ 
+ 	iue-&gt;iu_token = dma_map_single(adapter-&gt;dev, vio_iu(iue),
+@@ -857,10 +853,10 @@
+ 
+ 	dprintk(&quot;%p %p\n&quot;, adapter, iue);
+ 
+-	iue-&gt;req.remote_token = crq-&gt;IU_data_ptr;
++	iue-&gt;remote_token = crq-&gt;IU_data_ptr;
+ 
+ 	err = h_copy_rdma(crq-&gt;IU_length, iue-&gt;adapter-&gt;riobn,
+-			  iue-&gt;req.remote_token, adapter-&gt;liobn, iue-&gt;iu_token);
++			  iue-&gt;remote_token, adapter-&gt;liobn, iue-&gt;iu_token);
+ 
+ 	if (err != H_Success)
+ 		eprintk(&quot;%ld transferring data error %p\n&quot;, err, iue);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000398.html">[Stgt-svn] r411 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000400.html">[Stgt-svn] r413 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#399">[ date ]</a>
+              <a href="thread.html#399">[ thread ]</a>
+              <a href="subject.html#399">[ subject ]</a>
+              <a href="author.html#399">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

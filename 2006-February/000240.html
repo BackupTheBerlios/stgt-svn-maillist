@@ -1,0 +1,101 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r253%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602021136.k12BaQoQ018642%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000239.html">
+   <LINK REL="Next"  HREF="000241.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r253%20-%20branches/use-scsi-ml/ibmvstgt/kernel&In-Reply-To=%3C200602021136.k12BaQoQ018642%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r253 - branches/use-scsi-ml/ibmvstgt/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb  2 12:36:26 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000239.html">[Stgt-svn] r252 - branches/use-scsi-ml
+</A></li>
+        <LI>Next message: <A HREF="000241.html">[Stgt-svn] r254 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#240">[ date ]</a>
+              <a href="thread.html#240">[ thread ]</a>
+              <a href="subject.html#240">[ subject ]</a>
+              <a href="author.html#240">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-02 12:36:24 +0100 (Thu, 02 Feb 2006)
+New Revision: 253
+
+Modified:
+   branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+Log:
+Add proc_name and eh_abort_handler (just for cheating scsi_host_alloc now).
+
+
+Modified: branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c
+===================================================================
+--- branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-02 10:24:05 UTC (rev 252)
++++ branches/use-scsi-ml/ibmvstgt/kernel/ibmvstgt.c	2006-02-02 11:36:24 UTC (rev 253)
+@@ -1078,6 +1078,15 @@
+ 	handle_cmd_queue(adapter);
+ }
+ 
++/*
++ * TODO: just for cheating scsi_host_alloc now.
++ */
++static int ibmvstgt_eh_abort_handler(struct scsi_cmnd *cmd)
++{
++	BUG();
++	return 0;
++}
++
+ static struct scsi_host_template ibmvstgt_sht = {
+ 	.name			= TGT_NAME,
+ 	.module			= THIS_MODULE,
+@@ -1087,6 +1096,8 @@
+ 	.max_sectors		= DEFAULT_MAX_SECTORS,
+ 	.transfer_response	= ibmvstgt_cmd_done,
+ 	.transfer_data		= recv_cmd_data,
++	.eh_abort_handler	= ibmvstgt_eh_abort_handler,
++	.proc_name		= TGT_NAME,
+ };
+ 
+ static int ibmvstgt_probe(struct vio_dev *dev, const struct vio_device_id *id)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000239.html">[Stgt-svn] r252 - branches/use-scsi-ml
+</A></li>
+	<LI>Next message: <A HREF="000241.html">[Stgt-svn] r254 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#240">[ date ]</a>
+              <a href="thread.html#240">[ thread ]</a>
+              <a href="subject.html#240">[ subject ]</a>
+              <a href="author.html#240">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

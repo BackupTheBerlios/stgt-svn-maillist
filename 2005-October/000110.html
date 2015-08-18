@@ -1,0 +1,563 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r116 - in trunk: istgt/kernel kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-October/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r116%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510040508.j9458F7u022653%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000109.html">
+   <LINK REL="Next"  HREF="000111.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r116 - in trunk: istgt/kernel kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r116%20-%20in%20trunk%3A%20istgt/kernel%20kernel&In-Reply-To=%3C200510040508.j9458F7u022653%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r116 - in trunk: istgt/kernel kernel">tomo at berlios.de
+       </A><BR>
+    <I>Tue Oct  4 07:08:15 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000109.html">[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr
+</A></li>
+        <LI>Next message: <A HREF="000111.html">[Stgt-svn] r117 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#110">[ date ]</a>
+              <a href="thread.html#110">[ thread ]</a>
+              <a href="subject.html#110">[ subject ]</a>
+              <a href="author.html#110">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-10-04 07:08:03 +0200 (Tue, 04 Oct 2005)
+New Revision: 116
+
+Modified:
+   trunk/istgt/kernel/iscsi.c
+   trunk/kernel/tgt.c
+   trunk/kernel/tgt_device.h
+   trunk/kernel/tgt_protocol.h
+   trunk/kernel/tgt_scsi.c
+   trunk/kernel/tgt_sysfs.c
+Log:
+Add task attributes support. queuecommand -&gt; proto-&gt;queue_cmd -&gt;
+device-&gt;dt-&gt;queue_cmd. proto-&gt;queue_cmd does protocol specific task
+attributes. struct tgt_device has protocol specific data. Can we call
+task attributes support generic for all protocols? If so, we should
+move some of data structures into struct tgt_device.
+
+
+Modified: trunk/istgt/kernel/iscsi.c
+===================================================================
+--- trunk/istgt/kernel/iscsi.c	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/istgt/kernel/iscsi.c	2005-10-04 05:08:03 UTC (rev 116)
+@@ -8,6 +8,7 @@
+ #include &lt;linux/hash.h&gt;
+ #include &lt;net/tcp.h&gt;
+ #include &lt;scsi/scsi.h&gt;
++#include &lt;scsi/scsi_tcq.h&gt;
+ #include &lt;linux/mempool.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+@@ -769,6 +770,7 @@
+ 	struct iscsi_conn *conn = req-&gt;conn;
+ 	struct tgt_protocol *proto = conn-&gt;session-&gt;ts-&gt;target-&gt;proto;
+ 	enum dma_data_direction data_dir;
++	int tags = MSG_SIMPLE_TAG;;
+ 
+ 	/*
+ 	 * handle bidi later
+@@ -780,11 +782,26 @@
+ 	else
+ 		data_dir = DMA_NONE;
+ 
++	switch (req-&gt;pdu.bhs.flags &amp; ISCSI_FLAG_CMD_ATTR_MASK) {
++	case ISCSI_ATTR_UNTAGGED:
++	case ISCSI_ATTR_SIMPLE:
++		tags = MSG_SIMPLE_TAG;
++		break;
++	case ISCSI_ATTR_ORDERED:
++		tags = MSG_ORDERED_TAG;
++		break;
++	case ISCSI_ATTR_HEAD_OF_QUEUE:
++		tags = MSG_HEAD_TAG;
++		break;
++	case ISCSI_ATTR_ACA:
++		break;
++	}
++
+ 	req-&gt;tc = proto-&gt;create_cmd(conn-&gt;session-&gt;ts, req, req_hdr-&gt;cdb,
+ 				    be32_to_cpu(req_hdr-&gt;data_length),
+ 				    data_dir, req_hdr-&gt;lun,
+ 				    sizeof(req_hdr-&gt;lun),
+-				    req-&gt;pdu.bhs.flags &amp; ISCSI_FLAG_CMD_ATTR_MASK);
++				    tags);
+ 	BUG_ON(!req-&gt;tc);
+ 
+ 	if (data_dir == DMA_TO_DEVICE &amp;&amp; be32_to_cpu(req_hdr-&gt;data_length)) {
+
+Modified: trunk/kernel/tgt.c
+===================================================================
+--- trunk/kernel/tgt.c	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/kernel/tgt.c	2005-10-04 05:08:03 UTC (rev 116)
+@@ -474,10 +474,18 @@
+ 	if (!device-&gt;dt_data)
+ 		goto put_template;
+ 
++	device-&gt;pt_data =
++		kzalloc(target-&gt;proto-&gt;priv_dev_data_size, GFP_KERNEL);
++	if (!device-&gt;pt_data)
++		goto free_priv_dt_data;
++
+ 	if (device-&gt;dt-&gt;create)
+ 		if (device-&gt;dt-&gt;create(device))
+-			goto free_priv_dt_data;
++			goto free_priv_pt_data;
+ 
++	if (target-&gt;proto-&gt;attach_device)
++		target-&gt;proto-&gt;attach_device(device-&gt;pt_data);
++
+ 	if (tgt_sysfs_register_device(device))
+ 		goto dt_destroy;
+ 
+@@ -490,6 +498,8 @@
+ dt_destroy:
+ 	if (device-&gt;dt-&gt;destroy)
+ 		device-&gt;dt-&gt;destroy(device);
++free_priv_pt_data:
++	kfree(device-&gt;pt_data);
+ free_priv_dt_data:
+ 	kfree(device-&gt;dt_data);
+ put_template:
+@@ -501,12 +511,45 @@
+ 	return -EINVAL;
+ }
+ 
++static int tgt_device_destroy(int tid, uint64_t dev_id)
++{
++	struct tgt_device *device;
++	struct tgt_target *target;
++	unsigned long flags;
++
++	target = target_find(tid);
++	if (!target)
++		return -ENOENT;
++
++	spin_lock_irqsave(&amp;target-&gt;lock, flags);
++	device = tgt_device_find_nolock(target, dev_id);
++	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
++	if (!device)
++		return -EINVAL;
++
++	list_del(&amp;device-&gt;dlist);
++	if (device-&gt;dt-&gt;destroy)
++		device-&gt;dt-&gt;destroy(device);
++
++	if (target-&gt;proto-&gt;detach_device)
++		target-&gt;proto-&gt;detach_device(device-&gt;pt_data);
++
++	fput(device-&gt;file);
++	device_template_put(device-&gt;dt);
++	tgt_sysfs_unregister_device(device);
++
++	return 0;
++}
++
+ void tgt_transfer_response(void *data)
+ {
+ 	struct tgt_cmd *cmd = data;
+ 	struct tgt_target *target = cmd-&gt;session-&gt;target;
+ 	int err;
+ 
++	if (target-&gt;proto-&gt;dequeue_cmd)
++		target-&gt;proto-&gt;dequeue_cmd(cmd);
++
+ 	cmd-&gt;done = tgt_cmd_destroy;
+ 	err = target-&gt;tt-&gt;transfer_response(cmd);
+ 	switch (err) {
+@@ -539,7 +582,7 @@
+ 	if (device)
+ 		dprintk(&quot;found %llu\n&quot;, cmd-&gt;dev_id);
+ 
+-	err = device-&gt;dt-&gt;queue_cmd(cmd);
++	err = target-&gt;proto-&gt;queue_cmd(cmd);
+ 
+ 	switch (err) {
+ 	case TGT_CMD_FAILED:
+@@ -551,33 +594,6 @@
+ 	};
+ }
+ 
+-static int tgt_device_destroy(int tid, uint64_t dev_id)
+-{
+-	struct tgt_device *device;
+-	struct tgt_target *target;
+-	unsigned long flags;
+-
+-	target = target_find(tid);
+-	if (!target)
+-		return -ENOENT;
+-
+-	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-	device = tgt_device_find_nolock(target, dev_id);
+-	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-	if (!device)
+-		return -EINVAL;
+-
+-	list_del(&amp;device-&gt;dlist);
+-	if (device-&gt;dt-&gt;destroy)
+-		device-&gt;dt-&gt;destroy(device);
+-
+-	fput(device-&gt;file);
+-	device_template_put(device-&gt;dt);
+-	tgt_sysfs_unregister_device(device);
+-
+-	return 0;
+-}
+-
+ struct tgt_cmd *tgt_cmd_create(struct tgt_session *session, void *tgt_priv)
+ {
+ 	struct tgt_cmd *cmd;
+
+Modified: trunk/kernel/tgt_device.h
+===================================================================
+--- trunk/kernel/tgt_device.h	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/kernel/tgt_device.h	2005-10-04 05:08:03 UTC (rev 116)
+@@ -44,13 +44,13 @@
+ 	/*
+ 	 * complete a userspace command
+ 	 */
+-	void ( *complete_uspace_cmd)(struct tgt_cmd *cmd);
++	void (* complete_uspace_cmd)(struct tgt_cmd *cmd);
+ 	/*
+ 	 * complete a kernel command if your queue_command was async
+ 	 * and the device used one of the tgt threads to process the
+ 	 * command
+ 	 */
+-	void (*complete_kern_cmd)(struct tgt_cmd *cmd);
++	void (* complete_kern_cmd)(struct tgt_cmd *cmd);
+ 	/*
+ 	 * setup buffer or device fields if needed
+ 	 */
+@@ -65,6 +65,7 @@
+ struct tgt_device {
+ 	struct tgt_device_template *dt;
+ 	void *dt_data;
++	void *pt_data;
+ 
+ 	struct class_device cdev;
+ 
+
+Modified: trunk/kernel/tgt_protocol.h
+===================================================================
+--- trunk/kernel/tgt_protocol.h	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/kernel/tgt_protocol.h	2005-10-04 05:08:03 UTC (rev 116)
+@@ -25,7 +25,8 @@
+ 	struct module *module;
+ 
+ 	kmem_cache_t *cmd_cache;
+-	int uspace_pdu_size;
++	unsigned uspace_pdu_size;
++	unsigned priv_dev_data_size;
+ 
+ 	/*
+ 	 * Create a command and allocate a buffer of size data_len for
+@@ -40,10 +41,19 @@
+ 				       enum dma_data_direction data_dir,
+ 				       uint8_t *dev_id_buff, int id_buff_size,
+ 				       int flags);
++
++	int (* queue_cmd) (struct tgt_cmd *cmd);
++	void (* dequeue_cmd) (struct tgt_cmd *cmd);
+ 	/*
+ 	 * Build userspace packet
+ 	 */
+ 	void (* build_uspace_pdu)(struct tgt_cmd *cmd, void *data);
++
++	/*
++	 * Initialize protocol specific data per device
++	 */
++	void (* attach_device)(void *data);
++	void (* detach_device)(void *data);
+ };
+ 
+ extern void tgt_protocol_init(void);
+
+Modified: trunk/kernel/tgt_scsi.c
+===================================================================
+--- trunk/kernel/tgt_scsi.c	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/kernel/tgt_scsi.c	2005-10-04 05:08:03 UTC (rev 116)
+@@ -9,13 +9,30 @@
+ #include &lt;linux/mm.h&gt;
+ #include &lt;linux/highmem.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+-#include &lt;scsi/scsi_cmnd.h&gt;
++#include &lt;scsi/scsi_tcq.h&gt;
+ 
+ #include &lt;tgt.h&gt;
+ #include &lt;tgt_scsi.h&gt;
+ #include &lt;tgt_device.h&gt;
+ #include &lt;tgt_protocol.h&gt;
++#include &lt;tgt_target.h&gt;
+ 
++enum scsi_tgt_device_state_bit {
++	STDEV_ORDERED,
++	STDEV_HEAD,
++};
++
++/*
++ * The ordering stuff can be generic for all protocols. If so, should
++ * these be moved into struct tgt_device?
++ */
++struct scsi_tgt_device {
++	spinlock_t lock;
++	struct list_head pending_cmds;
++	unsigned long state;
++	unsigned active_cmds;
++};
++
+ static kmem_cache_t *scsi_tgt_cmd_cache;
+ 
+ /*
+@@ -128,27 +145,185 @@
+ }
+ EXPORT_SYMBOL_GPL(scsi_tgt_sense_copy);
+ 
+-void scsi_tgt_build_uspace_pdu(struct tgt_cmd *cmd, void *data)
++#define	device_blocked(x)	((x)-&gt;state &amp; (1 &lt;&lt; STDEV_ORDERED | 1 &lt;&lt; STDEV_HEAD))
++
++static int scsi_tgt_task_state(struct tgt_cmd *cmd, int queue, int *more)
+ {
++	struct tgt_device *device = cmd-&gt;device;
++	struct scsi_tgt_device *stdev = device-&gt;pt_data;
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
++	int enabled = 0;
++
++	*more = 0;
++	switch (scmd-&gt;tags) {
++	case MSG_SIMPLE_TAG:
++		if (!device_blocked(stdev) &amp;&amp;
++		    queue ? list_empty(&amp;stdev-&gt;pending_cmds) : 1) {
++			enabled = 1;
++			*more = 1;
++		}
++
++		break;
++	case MSG_ORDERED_TAG:
++		if (!device_blocked(stdev) &amp;&amp;
++		    !stdev-&gt;active_cmds &amp;&amp;
++		    queue ? list_empty(&amp;stdev-&gt;pending_cmds) : 1) {
++			enabled = 1;
++			stdev-&gt;state |= 1 &lt;&lt; STDEV_ORDERED;
++		}
++		break;
++	case MSG_HEAD_TAG:
++		BUG_ON(!queue);
++		stdev-&gt;state |= 1 &lt;&lt; STDEV_HEAD;
++		enabled = 1;
++		break;
++	default:
++		printk(&quot;unknown scsi tag %x\n&quot;, scmd-&gt;tags);
++		enabled = 1;
++		*more = 1;
++		break;
++	}
++
++	return enabled;
++}
++
++static void device_queue_cmd(void *data)
++{
++	struct tgt_cmd *cmd = data;
++	cmd-&gt;device-&gt;dt-&gt;queue_cmd(cmd);
++}
++
++static void scsi_tgt_dequeue_pending_cmd(struct tgt_device *device)
++{
++	struct scsi_tgt_device *stdev = device-&gt;pt_data;
++	struct tgt_cmd *cmd, *tmp;
++	struct scsi_tgt_cmd *scmd;
++	int enabled, more;
++
++	list_for_each_entry_safe(cmd, tmp, &amp;stdev-&gt;pending_cmds, clist) {
++		scmd = tgt_cmd_to_scsi(cmd);
++
++		enabled = scsi_tgt_task_state(cmd, 0, &amp;more);
++		BUG_ON(!enabled &amp;&amp; more);
++
++		if (enabled) {
++			list_del(&amp;cmd-&gt;clist);
++			stdev-&gt;active_cmds++;
++			INIT_WORK(&amp;cmd-&gt;work, device_queue_cmd, cmd);
++			queue_work(cmd-&gt;session-&gt;target-&gt;twq, &amp;cmd-&gt;work);
++		}
++
++		if (!more)
++			break;
++	}
++}
++
++static void scsi_tgt_dequeue_cmd(struct tgt_cmd *cmd)
++{
++	struct scsi_tgt_cmd *scmd = tgt_cmd_to_scsi(cmd);
++	struct tgt_device *device = cmd-&gt;device;
++	struct scsi_tgt_device *stdev = device-&gt;pt_data;
++	unsigned long flags;
++
++	spin_lock_irqsave(&amp;stdev-&gt;lock, flags);
++
++	stdev-&gt;active_cmds--;
++
++	switch (scmd-&gt;tags) {
++	case MSG_SIMPLE_TAG:
++		break;
++	case MSG_ORDERED_TAG:
++		stdev-&gt;state &amp;= ~(1 &lt;&lt; STDEV_ORDERED);
++		break;
++	case MSG_HEAD_TAG:
++		stdev-&gt;state &amp;= ~(1 &lt;&lt; STDEV_HEAD);
++		break;
++	default:
++		break;
++	}
++
++	if (!list_empty(&amp;stdev-&gt;pending_cmds))
++		scsi_tgt_dequeue_pending_cmd(device);
++
++	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
++}
++
++static int scsi_tgt_queue_cmd(struct tgt_cmd *cmd)
++{
++	struct tgt_device *device = cmd-&gt;device;
++	struct scsi_tgt_device *stdev = device-&gt;pt_data;
++	unsigned long flags;
++	int err, enabled, more;
++
++	/* FIXME: we need some tricks here. */
++	BUG_ON(!device);
++
++	spin_lock_irqsave(&amp;stdev-&gt;lock, flags);
++
++	/* Do we need our own list_head? */
++	BUG_ON(!list_empty(&amp;cmd-&gt;clist));
++
++	enabled = scsi_tgt_task_state(cmd, 1, &amp;more);
++	if (enabled)
++		stdev-&gt;active_cmds++;
++	else
++		list_add_tail(&amp;cmd-&gt;clist, &amp;stdev-&gt;pending_cmds);
++
++	spin_unlock_irqrestore(&amp;stdev-&gt;lock, flags);
++
++	if (enabled)
++		err = device-&gt;dt-&gt;queue_cmd(cmd);
++	else
++		err = TGT_CMD_KERN_QUEUED;
++
++	return err;
++}
++
++static void scsi_tgt_build_uspace_pdu(struct tgt_cmd *cmd, void *data)
++{
+ 	struct scsi_tgt_cmd *scmd = (struct scsi_tgt_cmd *)cmd-&gt;proto_priv;
+ 	memcpy(data, scmd-&gt;scb, sizeof(scmd-&gt;scb));
+ }
+ 
++static void scsi_tgt_attach_device(void *data)
++{
++	struct scsi_tgt_device *stdev = data;
++
++	spin_lock_init(&amp;stdev-&gt;lock);
++	INIT_LIST_HEAD(&amp;stdev-&gt;pending_cmds);
++	stdev-&gt;active_cmds = 0;
++}
++
++static void scsi_tgt_detach_device(void *data)
++{
++	struct scsi_tgt_device *stdev = data;
++
++	/* TODO */
++	BUG_ON(!list_empty(&amp;stdev-&gt;pending_cmds));
++}
++
+ static struct tgt_protocol scsi_tgt_proto = {
+ 	.name = &quot;scsi&quot;,
+ 	.module = THIS_MODULE,
+ 	.create_cmd = scsi_tgt_create_cmd,
+ 	.build_uspace_pdu = scsi_tgt_build_uspace_pdu,
++	.queue_cmd = scsi_tgt_queue_cmd,
++	.dequeue_cmd = scsi_tgt_dequeue_cmd,
++	.attach_device = scsi_tgt_attach_device,
++	.detach_device = scsi_tgt_detach_device,
++	.priv_dev_data_size = sizeof(struct scsi_tgt_device),
+ 	.uspace_pdu_size = MAX_COMMAND_SIZE,
+ };
+ 
+ static int __init scsi_tgt_init(void)
+ {
+ 	int err;
++	size_t size = sizeof(struct tgt_cmd) + sizeof(struct scsi_tgt_cmd);
+ 
+ 	scsi_tgt_cmd_cache = kmem_cache_create(&quot;scsi_tgt_cmd&quot;,
+-			sizeof(struct tgt_cmd) + sizeof(struct scsi_tgt_cmd),
+-			0, SLAB_HWCACHE_ALIGN | SLAB_NO_REAP, NULL, NULL);
++					       size, 0,
++					       SLAB_HWCACHE_ALIGN | SLAB_NO_REAP,
++					       NULL, NULL);
+ 	if (!scsi_tgt_cmd_cache)
+ 		return -ENOMEM;
+ 	scsi_tgt_proto.cmd_cache = scsi_tgt_cmd_cache;
+
+Modified: trunk/kernel/tgt_sysfs.c
+===================================================================
+--- trunk/kernel/tgt_sysfs.c	2005-10-01 23:01:32 UTC (rev 115)
++++ trunk/kernel/tgt_sysfs.c	2005-10-04 05:08:03 UTC (rev 116)
+@@ -163,7 +163,6 @@
+ 	NULL,
+ };
+ 
+-
+ static void tgt_device_class_release(struct class_device *cdev)
+ {
+ 	struct tgt_device *device = cdev_to_tgt_device(cdev);
+@@ -171,6 +170,7 @@
+ 
+ 	class_device_put(&amp;target-&gt;cdev);
+ 	kfree(device-&gt;dt_data);
++	kfree(device-&gt;pt_data);
+ 	kfree(device);
+ }
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000109.html">[Stgt-svn] r115 - in trunk: . istgt/include istgt/kernel istgt/usr usr
+</A></li>
+	<LI>Next message: <A HREF="000111.html">[Stgt-svn] r117 - trunk/istgt/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#110">[ date ]</a>
+              <a href="thread.html#110">[ thread ]</a>
+              <a href="subject.html#110">[ subject ]</a>
+              <a href="author.html#110">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

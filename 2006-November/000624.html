@@ -1,0 +1,718 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r637 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r637%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611120916.kAC9GLkL005765%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000623.html">
+   <LINK REL="Next"  HREF="000625.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r637 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r637%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200611120916.kAC9GLkL005765%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r637 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Nov 12 10:16:21 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000623.html">[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi
+</A></li>
+        <LI>Next message: <A HREF="000625.html">[Stgt-svn] r638 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#624">[ date ]</a>
+              <a href="thread.html#624">[ thread ]</a>
+              <a href="subject.html#624">[ subject ]</a>
+              <a href="author.html#624">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-11-12 10:16:20 +0100 (Sun, 12 Nov 2006)
+New Revision: 637
+
+Modified:
+   trunk/usr/driver.h
+   trunk/usr/iscsi/iscsi.h
+   trunk/usr/iscsi/iscsi_tcp.c
+   trunk/usr/iscsi/iscsid.h
+   trunk/usr/iscsi/session.c
+   trunk/usr/iscsi/target.c
+   trunk/usr/iscsi/transport.c
+   trunk/usr/iscsi/transport.h
+   trunk/usr/mgmt.c
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtd.h
+Log:
+Add various show options to iSCSI driver.
+
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/driver.h	2006-11-12 09:16:20 UTC (rev 637)
+@@ -8,9 +8,10 @@
+ 
+ 	int (*target_create) (int, char *);
+ 	int (*target_destroy) (int);
+-	int (*target_show) (int, char *, int);
+ 	int (*target_update) (int, char *);
+ 
++	int (*show) (int, int, uint64_t, uint32_t, uint64_t, char *, int);
++
+ 	uint64_t (*scsi_get_lun)(uint8_t *);
+ 	int (*scsi_report_luns)(struct list_head *, uint8_t *, uint8_t *,
+ 				uint8_t *, int *);
+
+Modified: trunk/usr/iscsi/iscsi.h
+===================================================================
+--- trunk/usr/iscsi/iscsi.h	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/iscsi.h	2006-11-12 09:16:20 UTC (rev 637)
+@@ -1,7 +1,8 @@
+ extern int iscsi_init(void);
+ extern int iscsi_target_create(int, char *);
+ extern int iscsi_target_destroy(int);
+-extern int iscsi_target_show(int, char *, int);
++extern int iscsi_target_show(int mode, int tid, uint64_t sid, uint32_t cid,
++			     uint64_t lun, char *buf, int rest);
+ extern int iscsi_target_update(int, char *);
+ extern int iscsi_scsi_cmd_done(int host_no, int len, int result, int rw,
+ 			       uint64_t addr, uint64_t tag);
+@@ -13,8 +14,8 @@
+ 	.init			= iscsi_init,
+ 	.target_create		= iscsi_target_create,
+ 	.target_destroy		= iscsi_target_destroy,
+-	.target_show		= iscsi_target_show,
+ 	.target_update		= iscsi_target_update,
++	.show			= iscsi_target_show,
+ 	.cmd_end_notify		= iscsi_scsi_cmd_done,
+ 	.mgmt_end_notify	= iscsi_tm_done,
+ 	.bdt			= &amp;aio_bdt,
+
+Modified: trunk/usr/iscsi/iscsi_tcp.c
+===================================================================
+--- trunk/usr/iscsi/iscsi_tcp.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/iscsi_tcp.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -26,6 +26,7 @@
+ #include &lt;stdlib.h&gt;
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;arpa/inet.h&gt;
+ #include &lt;netinet/in.h&gt;
+ #include &lt;netinet/tcp.h&gt;
+ #include &lt;sys/epoll.h&gt;
+@@ -188,12 +189,39 @@
+ 	return close(ep);
+ }
+ 
++static int iscsi_tcp_show(int ep, char *buf, int rest)
++{
++	int err, total = 0;
++	socklen_t slen;
++	char dst[INET6_ADDRSTRLEN];
++	struct sockaddr_storage from;
++
++	slen = sizeof(from);
++	err = getpeername(ep, (struct sockaddr *) &amp;from, &amp;slen);
++	if (err &lt; 0) {
++		eprintf(&quot;%m\n&quot;);
++		return 0;
++	}
++
++	err = getnameinfo((struct sockaddr *)&amp;from, sizeof(from), dst,
++			  sizeof(dst), NULL, 0, NI_NUMERICHOST);
++	if (err &lt; 0) {
++		eprintf(&quot;%m\n&quot;);
++		return 0;
++	}
++
++	total = snprintf(buf, rest, &quot; ip:%s\n&quot;, dst);
++
++	return total &gt; 0 ? total : 0;
++}
++
+ struct iscsi_transport iscsi_tcp = {
+ 	.name		= &quot;iscsi&quot;,
+ 	.rdma		= 0,
+-	.init		= iscsi_tcp_init,
++	.ep_init	= iscsi_tcp_init,
+ 	.ep_read	= iscsi_tcp_read,
+ 	.ep_write_begin	= iscsi_tcp_write_begin,
+ 	.ep_write_end	= iscsi_tcp_write_end,
+ 	.ep_close	= iscsi_tcp_close,
++	.ep_show	= iscsi_tcp_show,
+ };
+
+Modified: trunk/usr/iscsi/iscsid.h
+===================================================================
+--- trunk/usr/iscsi/iscsid.h	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/iscsid.h	2006-11-12 09:16:20 UTC (rev 637)
+@@ -39,6 +39,8 @@
+ 	(uint64_t) tsih &lt;&lt; 48;					\
+ })
+ 
++#define sid_to_tsih(sid) ((sid) &gt;&gt; 48)
++
+ struct PDU {
+ 	struct iscsi_hdr bhs;
+ 	void *ahs;
+@@ -76,6 +78,8 @@
+ 	struct list_head pending_cmd_list;
+ 
+ 	uint32_t exp_cmd_sn;
++
++	struct param session_param[ISCSI_PARAM_MAX];
+ };
+ 
+ struct iscsi_task {
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/session.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -72,6 +72,12 @@
+ 	if (!session)
+ 		return -ENOMEM;
+ 
++	session-&gt;initiator = strdup(conn-&gt;initiator);
++	if (!session-&gt;initiator) {
++		free(session);
++		return -ENOMEM;
++	}
++
+ 	session-&gt;target = target;
+ 	INIT_LIST_HEAD(&amp;session-&gt;slist);
+ 	list_add(&amp;session-&gt;slist, &amp;target-&gt;sessions_list);
+@@ -84,13 +90,15 @@
+ 	session-&gt;tsih = last_tsih = tsih;
+ 
+ 	conn_add_to_session(conn, session);
+-	conn-&gt;session-&gt;initiator = strdup(conn-&gt;initiator);
+ 
+ 	dprintf(&quot;session_create: %#&quot; PRIx64 &quot;\n&quot;, sid64(conn-&gt;isid, session-&gt;tsih));
+ 
+ 	list_add(&amp;session-&gt;hlist, &amp;sessions_list);
+ 	session-&gt;exp_cmd_sn = conn-&gt;exp_cmd_sn;
+ 
++	memcpy(session-&gt;session_param, conn-&gt;session_param,
++	       sizeof(session-&gt;session_param));
++
+ 	return 0;
+ }
+ 
+
+Modified: trunk/usr/iscsi/target.c
+===================================================================
+--- trunk/usr/iscsi/target.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/target.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -161,6 +161,15 @@
+ 	return 0;
+ }
+ 
++#define buffer_check(buf, total, len, rest)	\
++({						\
++	buf += len;				\
++	total += len;				\
++	rest -= len;				\
++	if (!rest)				\
++		break;				\
++})
++
+ static int show_iscsi_param(char *buf, struct param *param, int rest)
+ {
+ 	int i, len, total;
+@@ -169,31 +178,102 @@
+ 
+ 	for (i = total = 0; session_keys[i].name; i++) {
+ 		param_val_to_str(keys, i, param[i].val, value);
+-		len = snprintf(buf + total, rest, &quot;%s=%s\n&quot;, keys[i].name, value);
+-		total += len;
+-		rest -= len;
+-		if (!rest)
+-			break;
++		len = snprintf(buf, rest, &quot;%s=%s\n&quot;, keys[i].name, value);
++		buffer_check(buf, total, len, rest);
+ 	}
+ 
+ 	return total;
+ }
+ 
+-int iscsi_target_show(int tid, char *buf, int rest)
++static int iscsi_target_show_connection(struct target* target, uint64_t sid,
++					uint32_t cid, char *buf, int rest)
+ {
++	int len, total = 0;
++	struct session *session;
++	struct connection *conn;
++
++	session = session_lookup(sid_to_tsih(sid));
++	if (!session)
++		return 0;
++
++	len = 0;
++	list_for_each_entry(conn, &amp;session-&gt;conn_list, clist) {
++		if (conn-&gt;cid == cid || !cid) {
++			if (cid) {
++			} else {
++				len = snprintf(buf, rest, &quot;cid:%u&quot;, conn-&gt;cid);
++				buffer_check(buf, total, len, rest);
++
++				len = 0;
++				if (conn-&gt;tp-&gt;ep_show) {
++					len = conn-&gt;tp-&gt;ep_show(conn-&gt;fd, buf, rest);
++					buffer_check(buf, total, len, rest);
++				}
++
++				if (!len) {
++					len = snprintf(buf, rest, &quot;\n&quot;);
++					buffer_check(buf, total, len, rest);
++				}
++			}
++		}
++	}
++
++	return total;
++}
++
++static int iscsi_target_show_session(struct target* target, uint64_t sid,
++				     char *buf, int rest)
++{
++	int len, total = 0;
++	struct session *session;
++
++	list_for_each_entry(session, &amp;target-&gt;sessions_list, slist) {
++		if (sid64(session-&gt;isid, session-&gt;tsih) == sid || !sid) {
++			if (sid)
++				len = show_iscsi_param(buf, session-&gt;session_param, rest);
++			else
++				len = snprintf(buf, rest, &quot;sid:%&quot; PRIu64 &quot; initiator:%s\n&quot;,
++					       sid64(session-&gt;isid, session-&gt;tsih),
++					       session-&gt;initiator);
++			buffer_check(buf, total, len, rest);
++		}
++	}
++
++	return total;
++}
++
++int iscsi_target_show(int mode, int tid, uint64_t sid, uint32_t cid, uint64_t lun,
++		      char *buf, int rest)
++{
+ 	struct target* target;
+-	int len;
++	int len, total = 0;
+ 
+ 	target = target_find_by_id(tid);
+ 	if (!target)
+ 		return 0;
+ 
+-	len = snprintf(buf, rest, &quot;tid: %d %s\n&quot;, target-&gt;tid, target-&gt;name);
+-	rest -= len;
+-	if (!rest)
+-		goto out;
+-
+-	len += show_iscsi_param(buf + len, target-&gt;session_param, rest);
++	switch (mode) {
++	case MODE_TARGET:
++		len = snprintf(buf, rest, &quot;iqn=%s\n&quot;, target-&gt;name);
++		buf += len;
++		total += len;
++		rest -= len;
++		if (!rest)
++			goto out;
++		len = show_iscsi_param(buf, target-&gt;session_param, rest);
++		total += len;
++		break;
++	case MODE_SESSION:
++		len = iscsi_target_show_session(target, sid, buf, rest);
++		total += len;
++		break;
++	case MODE_CONNECTION:
++		len = iscsi_target_show_connection(target, sid, cid, buf, rest);
++		total += len;
++		break;
++	default:
++		break;
++	}
+ out:
+-	return len;
++	return total;
+ }
+
+Modified: trunk/usr/iscsi/transport.c
+===================================================================
+--- trunk/usr/iscsi/transport.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/transport.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -15,7 +15,7 @@
+ 	int i, err, nr = 0;
+ 
+ 	for (i = 0; iscsi_transports[i]; i++) {
+-		err = iscsi_transports[i]-&gt;init();
++		err = iscsi_transports[i]-&gt;ep_init();
+ 		if (!err)
+ 			nr++;
+ 	}
+
+Modified: trunk/usr/iscsi/transport.h
+===================================================================
+--- trunk/usr/iscsi/transport.h	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/iscsi/transport.h	2006-11-12 09:16:20 UTC (rev 637)
+@@ -5,11 +5,12 @@
+ 	const char *name;
+ 	int rdma;
+ 
+-	int (*init) (void);
++	int (*ep_init) (void);
+ 	size_t (*ep_read) (int ep, void *buf, size_t nbytes);
+ 	size_t (*ep_write_begin) (int ep, void *buf, size_t nbytes);
+ 	void (*ep_write_end)(int ep);
+ 	size_t (*ep_close) (int ep);
++	int (*ep_show) (int ep, char *buf, int rest);
+ };
+ 
+ extern struct iscsi_transport iscsi_tcp;
+
+Modified: trunk/usr/mgmt.c
+===================================================================
+--- trunk/usr/mgmt.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/mgmt.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -42,27 +42,13 @@
+ 
+ #define BUFSIZE 4096
+ 
+-static void device_create_parser(char *args, char **path, char **devtype)
++static void set_show_results(struct tgtadm_res *res, int err)
+ {
+-	char *p, *q;
+-
+-	if (isspace(*args))
+-		args++;
+-	if ((p = strchr(args, '\n')))
+-		*p = '\0';
+-
+-	while ((p = strsep(&amp;args, &quot;,&quot;))) {
+-		if (!p)
+-			continue;
+-
+-		if (!(q = strchr(p, '=')))
+-			continue;
+-		*q++ = '\0';
+-
+-		if (!strcmp(p, &quot;Path&quot;))
+-			*path = q;
+-		else if (!strcmp(p, &quot;Type&quot;))
+-			*devtype = q;
++	if (err &lt; 0)
++		res-&gt;err = err;
++	else {
++		res-&gt;err = 0;
++		res-&gt;len = err + sizeof(*res);
+ 	}
+ }
+ 
+@@ -96,10 +82,33 @@
+ 
+ 	res-&gt;err = err;
+ 	res-&gt;len = (char *) res-&gt;data - (char *) res;
+-
+ 	return err;
+ }
+ 
++static void device_create_parser(char *args, char **path, char **devtype)
++{
++	char *p, *q;
++
++	if (isspace(*args))
++		args++;
++	if ((p = strchr(args, '\n')))
++		*p = '\0';
++
++	while ((p = strsep(&amp;args, &quot;,&quot;))) {
++		if (!p)
++			continue;
++
++		if (!(q = strchr(p, '=')))
++			continue;
++		*q++ = '\0';
++
++		if (!strcmp(p, &quot;Path&quot;))
++			*path = q;
++		else if (!strcmp(p, &quot;Type&quot;))
++			*devtype = q;
++	}
++}
++
+ static int device_mgmt(int lld_no, struct tgtadm_req *req, char *params,
+ 		       struct tgtadm_res *res, int *rlen)
+ {
+@@ -123,7 +132,7 @@
+ 	}
+ 
+ 	res-&gt;err = err;
+-	res-&gt;len = (char *) res-&gt;data - (char *) res;
++	res-&gt;len = sizeof(*res);
+ 
+ 	return err;
+ }
+@@ -139,23 +148,25 @@
+ 		req-&gt;tid, req-&gt;sid, req-&gt;lun, params, getpid());
+ 
+ 	if (req-&gt;op == OP_SHOW) {
+-		if (req-&gt;tid &gt; 0)
+-			err = tgt_target_show(req-&gt;tid, (char *)res-&gt;data,
+-					      len - sizeof(*res));
+-		else
++		if (req-&gt;mode == MODE_TARGET &amp;&amp; req-&gt;tid &lt; 0)
+ 			err = tgt_target_show_all((char *)res-&gt;data,
+ 						  len - sizeof(*res));
+-		if (err &lt; 0)
+-			res-&gt;err = err;
+ 		else {
+-			res-&gt;err = 0;
+-			res-&gt;len = err + sizeof(*res);
++			if (tgt_drivers[lld_no]-&gt;show)
++			err = tgt_drivers[lld_no]-&gt;show(req-&gt;mode,
++							req-&gt;tid, req-&gt;sid,
++							req-&gt;cid, req-&gt;lun,
++							(char *)res-&gt;data,
++							len - sizeof(*res));
+ 		}
+-		dprintf(&quot;%d %d\n&quot;, len, err);
++
++		set_show_results(res, err);
+ 		return 0;
+ 	}
+ 
+ 	switch (req-&gt;mode) {
++	case MODE_SYSTEM:
++		break;
+ 	case MODE_TARGET:
+ 		err = target_mgmt(lld_no, req, params, res, &amp;len);
+ 		break;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/target.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -620,21 +620,6 @@
+ 	return 0;
+ }
+ 
+-int tgt_target_show(int tid, char *buf, int rest)
+-{
+-	int len = 0;
+-	struct target *target;
+-
+-	target  = target_lookup(tid);
+-	if (!target)
+-		goto out;
+-
+-	if (tgt_drivers[target-&gt;lid]-&gt;target_show)
+-		len = tgt_drivers[target-&gt;lid]-&gt;target_show(target-&gt;tid, buf, rest);
+-out:
+-	return len;
+-}
+-
+ int tgt_target_show_all(char *buf, int rest)
+ {
+ 	int i, len, total;
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/tgtadm.c	2006-11-12 09:16:20 UTC (rev 637)
+@@ -62,23 +62,25 @@
+ 
+ static struct option const long_options[] =
+ {
+-	{&quot;lld&quot;, required_argument, NULL, 'n'},
++	{&quot;lld&quot;, required_argument, NULL, 'l'},
+ 	{&quot;op&quot;, required_argument, NULL, 'o'},
++	{&quot;mode&quot;, required_argument, NULL, 'm'},
+ 	{&quot;tid&quot;, required_argument, NULL, 't'},
+ 	{&quot;sid&quot;, required_argument, NULL, 's'},
+ 	{&quot;cid&quot;, required_argument, NULL, 'c'},
+-	{&quot;lun&quot;, required_argument, NULL, 'l'},
+-	{&quot;params&quot;, required_argument, NULL, 'p'},
+-	{&quot;user&quot;, no_argument, NULL, 'u'},
++	{&quot;lun&quot;, required_argument, NULL, 'u'},
+ 	{&quot;hostno&quot;, required_argument, NULL, 'i'},
+-	{&quot;name&quot;, required_argument, NULL, 'm'},
+-	{&quot;value&quot;, required_argument, NULL, 'a'},
++	{&quot;bus&quot;, required_argument, NULL, 'b'},
++	{&quot;params&quot;, required_argument, NULL, 'p'},
++	{&quot;name&quot;, required_argument, NULL, 'n'},
++	{&quot;value&quot;, required_argument, NULL, 'v'},
+ 	{&quot;debug&quot;, no_argument, NULL, 'd'},
+-	{&quot;version&quot;, no_argument, NULL, 'v'},
+ 	{&quot;help&quot;, no_argument, NULL, 'h'},
+ 	{NULL, 0, NULL, 0},
+ };
+ 
++static char *short_options = &quot;l:o:m:t:s:c:u:i:b:p:n:v:dh&quot;;
++
+ static void usage(int status)
+ {
+ 	if (status != 0)
+@@ -217,20 +219,20 @@
+ 	return err;
+ }
+ 
+-static int set_to_mode(uint32_t set)
++static int str_to_mode(char *str)
+ {
+-	int mode = MODE_SYSTEM;
++	int mode = -1;
+ 
+-	if (set &amp; (1 &lt;&lt; MODE_USER))
+-		mode = MODE_USER;
+-	else if (set &amp; (1 &lt;&lt; MODE_DEVICE))
++	if (!strcmp(&quot;target&quot;, str) || !strcmp(&quot;tgt&quot;, str))
++		mode = MODE_TARGET;
++	else if (!strcmp(&quot;logicalunit&quot;, str) || !strcmp(&quot;lu&quot;, str))
+ 		mode = MODE_DEVICE;
+-	else if (set &amp; (1 &lt;&lt; MODE_CONNECTION))
+-		mode = MODE_CONNECTION;
+-	else if (set &amp; (1 &lt;&lt; MODE_SESSION))
++	else if (!strcmp(&quot;session&quot;, str) || !strcmp(&quot;sess&quot;, str))
+ 		mode = MODE_SESSION;
+-	else if (set &amp; (1 &lt;&lt; MODE_TARGET))
+-		mode = MODE_TARGET;
++	else if (!strcmp(&quot;connection&quot;, str) || !strcmp(&quot;conn&quot;, str))
++		mode = MODE_CONNECTION;
++	else if (!strcmp(&quot;user&quot;, str))
++		mode = MODE_USER;
+ 
+ 	return mode;
+ }
+@@ -260,40 +262,40 @@
+ 	int ch, longindex;
+ 	int err = -EINVAL, op = -1, len = 0;
+ 	int tid = -1;
+-	uint32_t cid = 0, set = 0, hostno = 0;
++	uint32_t cid = 0, hostno = 0;
+ 	uint64_t sid = 0, lun = 0;
+ 	char *params, *lldname;
+ 	struct tgtadm_req *req;
+ 	char buf[BUFSIZE];
+ 	char *name, *value;
++	int mode = MODE_SYSTEM;
+ 
+ 	params = lldname = name = value = NULL;
+ 
+ 	optind = 1;
+-	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvdh&quot;,
++	while ((ch = getopt_long(argc, argv, short_options,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+-		case 'n':
++		case 'l':
+ 			lldname = optarg;
+ 			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+ 			break;
++		case 'm':
++			mode = str_to_mode(optarg);
++			break;
+ 		case 't':
+ 			tid = strtol(optarg, NULL, 10);
+-			set |= (1 &lt;&lt; MODE_TARGET);
+ 			break;
+ 		case 's':
+ 			sid = strtoull(optarg, NULL, 10);
+-			set |= (1 &lt;&lt; MODE_SESSION);
+ 			break;
+ 		case 'c':
+ 			cid = strtoul(optarg, NULL, 10);
+-			set |= (1 &lt;&lt; MODE_CONNECTION);
+ 			break;
+-		case 'l':
++		case 'u':
+ 			lun = strtoull(optarg, NULL, 10);
+-			set |= (1 &lt;&lt; MODE_DEVICE);
+ 			break;
+ 		case 'i':
+ 			hostno = strtol(optarg, NULL, 10);
+@@ -303,22 +305,15 @@
+ 		case 'p':
+ 			params = optarg;
+ 			break;
+-		case 'u':
+-			set |= (1 &lt;&lt; MODE_USER);
++		case 'n':
++			name = optarg;
+ 			break;
+-		case 'a':
++		case 'v':
+ 			value = optarg;
+ 			break;
+-		case 'm':
+-			name = optarg;
+-			break;
+ 		case 'd':
+ 			debug = 1;
+ 			break;
+-		case 'v':
+-			printf(&quot;%s\n&quot;, program_name);
+-			exit(0);
+-			break;
+ 		case 'h':
+ 			usage(0);
+ 			break;
+@@ -344,7 +339,7 @@
+ 	req = (struct tgtadm_req *) buf;
+ 	if (lldname)
+ 		strncpy(req-&gt;lld, lldname, sizeof(req-&gt;lld));
+-	req-&gt;mode = set_to_mode(set);
++	req-&gt;mode = mode;
+ 	req-&gt;op = op;
+ 	req-&gt;tid = tid;
+ 	req-&gt;sid = sid;
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-11-11 05:02:13 UTC (rev 636)
++++ trunk/usr/tgtd.h	2006-11-12 09:16:20 UTC (rev 637)
+@@ -49,7 +49,6 @@
+ extern int tgt_target_destroy(int tid);
+ extern int tgt_target_bind(int tid, int host_no, int lid);
+ extern int tgt_target_show_all(char *buf, int rest);
+-extern int tgt_target_show(int tid, char *buf, int rest);
+ 
+ typedef void (event_handler_t)(int fd, int events, void *data);
+ extern int tgt_event_add(int fd, int events, event_handler_t handler, void *data);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000623.html">[Stgt-svn] r636 - in trunk/usr: . ibmvio iscsi
+</A></li>
+	<LI>Next message: <A HREF="000625.html">[Stgt-svn] r638 - trunk/doc
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#624">[ date ]</a>
+              <a href="thread.html#624">[ thread ]</a>
+              <a href="subject.html#624">[ subject ]</a>
+              <a href="author.html#624">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

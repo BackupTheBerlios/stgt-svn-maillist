@@ -1,0 +1,633 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r820 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r820%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200703101647.l2AGl76w020484%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000806.html">
+   <LINK REL="Next"  HREF="000808.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r820 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r820%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200703101647.l2AGl76w020484%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r820 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 10 17:47:07 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000806.html">[Stgt-svn] r819 - in trunk: . doc
+</A></li>
+        <LI>Next message: <A HREF="000808.html">[Stgt-svn] r821 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#807">[ date ]</a>
+              <a href="thread.html#807">[ thread ]</a>
+              <a href="subject.html#807">[ subject ]</a>
+              <a href="author.html#807">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-10 17:47:07 +0100 (Sat, 10 Mar 2007)
+New Revision: 820
+
+Modified:
+   trunk/usr/ibmvio/ibmvio.c
+   trunk/usr/mmc.c
+   trunk/usr/osd.c
+   trunk/usr/sbc.c
+   trunk/usr/spc.c
+   trunk/usr/spc.h
+   trunk/usr/tgtd.h
+Log:
+Clean up inquiry code.
+
+
+Modified: trunk/usr/ibmvio/ibmvio.c
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.c	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/ibmvio/ibmvio.c	2007-03-10 16:47:07 UTC (rev 820)
+@@ -42,6 +42,7 @@
+ #include &quot;util.h&quot;
+ #include &quot;tgtd.h&quot;
+ #include &quot;target.h&quot;
++#include &quot;spc.h&quot;
+ 
+ #define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+ #define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+@@ -68,12 +69,14 @@
+ 
+ #define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
+ 
+-static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
++static int ibmvstgt_inquiry(int host_no, struct scsi_cmd *cmd, uint8_t *data)
+ {
+ 	struct inquiry_data *id = (struct inquiry_data *) data;
+ 	char system_id[256], path[256], buf[32];
+ 	int fd, err, partition_number;
+ 	unsigned int unit_address;
++	unsigned char device_type = cmd-&gt;c_target-&gt;dev_type_template-&gt;type;
++	uint64_t lun = *((uint64_t *) cmd-&gt;lun);
+ 
+ 	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
+ 	fd = open(path, O_RDONLY);
+@@ -98,7 +101,7 @@
+ 	dprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
+ 		host_no, system_id, partition_number, unit_address, lun);
+ 
+-	id-&gt;qual_type = TYPE_DISK;
++	id-&gt;qual_type = device_type;
+ 	id-&gt;rmb_reserve = 0x00;
+ 	id-&gt;version = 0x84;	/* ISO/IE		  */
+ 	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
+@@ -127,9 +130,8 @@
+ 
+ int scsi_inquiry(int host_no, struct scsi_cmd *cmd)
+ {
+-	int result = SAM_STAT_CHECK_CONDITION;
++	int ret = SAM_STAT_CHECK_CONDITION;
+ 	uint8_t *data, *scb = cmd-&gt;scb;
+-	int *len = &amp;cmd-&gt;len;
+ 	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+ 
+ 	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+@@ -146,61 +148,23 @@
+ 	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+ 
+ 	if (!(scb[1] &amp; 0x3)) {
+-		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) cmd-&gt;lun), data);
+-		result = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x2) {
+-		/* CmdDt bit is set */
+-		/* We do not support it now. */
+-		data[1] = 0x1;
+-		data[5] = 0;
+-		*len = 6;
+-		result = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x1) {
+-		/* EVPD bit set */
+-		if (scb[2] == 0x0) {
+-			data[1] = 0x0;
+-			data[3] = 3;
+-			data[4] = 0x0;
+-			data[5] = 0x80;
+-			data[6] = 0x83;
+-			*len = 7;
+-			result = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x80) {
+-			data[1] = 0x80;
+-			data[3] = 4;
+-			memset(data + 4, 0x20, 4);
+-			*len = 8;
+-			result = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x83) {
+-			uint32_t tmp = SCSI_ID_LEN * sizeof(uint8_t);
++		cmd-&gt;len = ibmvstgt_inquiry(host_no, cmd, data);
++		ret = SAM_STAT_GOOD;
++	} else
++		return spc_inquiry(host_no, cmd);
+ 
+-			data[1] = 0x83;
+-			data[3] = tmp + 4;
+-			data[4] = 0x1;
+-			data[5] = 0x1;
+-			data[7] = tmp;
+-			if (cmd-&gt;dev)
+-				strncpy(data + 8, cmd-&gt;dev-&gt;scsi_id, SCSI_ID_LEN);
+-			*len = tmp + 8;
+-			result = SAM_STAT_GOOD;
+-		}
+-	}
+-
+-	if (result != SAM_STAT_GOOD) {
+-		free(data);
++	if (ret != SAM_STAT_GOOD)
+ 		goto sense;
+-	}
+ 
+-	*len = min_t(int, *len, scb[4]);
+-	cmd-&gt;uaddr = (unsigned long)data;
++	cmd-&gt;len = min_t(int, cmd-&gt;len, scb[4]);
++	cmd-&gt;uaddr = (unsigned long) data;
+ 
+ 	if (!cmd-&gt;dev)
+ 		data[0] = TYPE_NO_LUN;
+ 
+ 	return SAM_STAT_GOOD;
+-
+ sense:
+-	*len = 0;
++	cmd-&gt;len = 0;
+ 	sense_data_build(cmd, key, asc, 0);
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+
+Modified: trunk/usr/mmc.c
+===================================================================
+--- trunk/usr/mmc.c	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/mmc.c	2007-03-10 16:47:07 UTC (rev 820)
+@@ -27,106 +27,6 @@
+ 
+ #define MMC_BLK_SHIFT 11
+ 
+-#define PRODUCT_ID	&quot;Virtual CD/DVD ROM&quot;
+-#define PRODUCT_REV	&quot;0&quot;
+-
+-static int mmc_inquiry(int host_no, struct scsi_cmd *cmd)
+-{
+-	int len, ret = SAM_STAT_CHECK_CONDITION;
+-	uint8_t *data;
+-	uint8_t *scb = cmd-&gt;scb;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+-
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto sense;
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	memset(data, 0, pagesize);
+-
+-	if (!(scb[1] &amp; 0x3)) {
+-		data[0] = TYPE_ROM;
+-		data[1] = 0x80;
+-		data[2] = 0x03;
+-		data[3] = 0x02;
+-		data[4] = 0x1f;
+-		data[7] = 0x02;
+-		memcpy(data + 8, VENDOR_ID,
+-		       min_t(size_t, strlen(VENDOR_ID), 8));
+-		memcpy(data + 16, PRODUCT_ID,
+-		       min_t(size_t, strlen(PRODUCT_ID), 16));
+-		memcpy(data + 32, PRODUCT_REV,
+-			min_t(size_t, strlen(PRODUCT_REV), 4));
+-		len = data[4] + 5;
+-		ret = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x2) {
+-		/* CmdDt bit is set */
+-		/* We do not support it now. */
+-	} else if (scb[1] &amp; 0x1) {
+-		if (scb[2] == 0x0) {
+-			data[0] = TYPE_ROM;
+-			data[1] = 0x0;
+-			data[3] = 3;
+-			data[4] = 0x0;
+-			data[5] = 0x80;
+-			data[6] = 0x83;
+-			len = 7;
+-			ret = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x80) {
+-			int tmp = SCSI_SN_LEN;
+-
+-			data[1] = 0x80;
+-			data[3] = SCSI_SN_LEN;
+-			memset(data + 4, 0x20, 4);
+-			len = SCSI_SN_LEN + 4;
+-			ret = SAM_STAT_GOOD;
+-
+-			if (cmd-&gt;dev &amp;&amp; strlen(cmd-&gt;dev-&gt;scsi_sn)) {
+-				uint8_t *p;
+-				char *q;
+-
+-				p = data + 4 + tmp - 1;
+-				q = cmd-&gt;dev-&gt;scsi_sn + SCSI_SN_LEN - 1;
+-
+-				for (; tmp &gt; 0; tmp--, q)
+-					*(p--) = *q;
+-			}
+-		} else if (scb[2] == 0x83) {
+-			int tmp = SCSI_ID_LEN;
+-
+-			data[1] = 0x83;
+-			data[3] = tmp + 4;
+-			data[4] = 0x1;
+-			data[5] = 0x1;
+-			data[7] = tmp;
+-			if (cmd-&gt;dev)
+-				strncpy((char *) data + 8, cmd-&gt;dev-&gt;scsi_id,
+-				        SCSI_ID_LEN);
+-			len = tmp + 8;
+-			ret = SAM_STAT_GOOD;
+-		}
+-	}
+-
+-	if (ret != SAM_STAT_GOOD)
+-		goto sense;
+-
+-	cmd-&gt;len = min_t(int, len, scb[4]);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+-	if (!cmd-&gt;dev)
+-		data[0] = TYPE_NO_LUN;
+-
+-	return SAM_STAT_GOOD;
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+ static int mmc_rw(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret;
+@@ -205,7 +105,9 @@
+ }
+ 
+ struct device_type_template mmc_template = {
++	.type	= TYPE_ROM,
+ 	.name	= &quot;cdrom/dvd&quot;,
++	.pid	= &quot;VIRTUAL-CDROM&quot;,
+ 	.ops	= {
+ 		{spc_test_unit,},
+ 		{spc_illegal_op,},
+@@ -228,7 +130,7 @@
+ 		/* 0x10 */
+ 		{spc_illegal_op,},
+ 		{spc_illegal_op,},
+-		{mmc_inquiry,},
++		{spc_inquiry,},
+ 		{spc_illegal_op,},
+ 		{spc_illegal_op,},
+ 		{spc_illegal_op,},
+
+Modified: trunk/usr/osd.c
+===================================================================
+--- trunk/usr/osd.c	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/osd.c	2007-03-10 16:47:07 UTC (rev 820)
+@@ -177,6 +177,7 @@
+ }
+ 
+ struct device_type_template osd_template = {
++	.type	= TYPE_OSD,
+ 	.name	= &quot;osd&quot;,
+ 	.ops	= {
+ 		[0x00 ... 0x0f] = {spc_illegal_op},
+
+Modified: trunk/usr/sbc.c
+===================================================================
+--- trunk/usr/sbc.c	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/sbc.c	2007-03-10 16:47:07 UTC (rev 820)
+@@ -69,117 +69,6 @@
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-#define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+-#define PRODUCT_REV	&quot;0&quot;
+-
+-static int __sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+-{
+-	int len, ret = SAM_STAT_CHECK_CONDITION;
+-	uint8_t *data;
+-	uint8_t *scb = cmd-&gt;scb;
+-	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
+-
+-	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+-		goto sense;
+-
+-	data = valloc(pagesize);
+-	if (!data) {
+-		key = HARDWARE_ERROR;
+-		asc = 0;
+-		goto sense;
+-	}
+-	memset(data, 0, pagesize);
+-
+-	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
+-
+-	if (!(scb[1] &amp; 0x3)) {
+-		data[2] = 4;
+-		data[3] = 0x42;
+-		data[4] = 59;
+-		data[7] = 0x02;
+-		memset(data + 8, 0x20, 28);
+-		memcpy(data + 8,
+-		       VENDOR_ID, min_t(size_t, strlen(VENDOR_ID), 8));
+-		memcpy(data + 16,
+-		       PRODUCT_ID, min_t(size_t, strlen(PRODUCT_ID), 16));
+-		memcpy(data + 32,
+-		       PRODUCT_REV, min_t(size_t, strlen(PRODUCT_REV), 4));
+-		data[58] = 0x03;
+-		data[59] = 0x20;
+-		data[60] = 0x09;
+-		data[61] = 0x60;
+-		data[62] = 0x03;
+-		data[63] = 0x00;
+-		len = 64;
+-		ret = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x2) {
+-		/* CmdDt bit is set */
+-		/* We do not support it now. */
+-		data[1] = 0x1;
+-		data[5] = 0;
+-		len = 6;
+-		ret = SAM_STAT_GOOD;
+-	} else if (scb[1] &amp; 0x1) {
+-		/* EVPD bit set */
+-		if (scb[2] == 0x0) {
+-			data[1] = 0x0;
+-			data[3] = 3;
+-			data[4] = 0x0;
+-			data[5] = 0x80;
+-			data[6] = 0x83;
+-			len = 7;
+-			ret = SAM_STAT_GOOD;
+-		} else if (scb[2] == 0x80) {
+-			int tmp = SCSI_SN_LEN;
+-
+-			data[1] = 0x80;
+-			data[3] = SCSI_SN_LEN;
+-			memset(data + 4, 0x20, 4);
+-			len = 4 + SCSI_SN_LEN;
+-			ret = SAM_STAT_GOOD;
+-
+-			if (cmd-&gt;dev &amp;&amp; strlen(cmd-&gt;dev-&gt;scsi_sn)) {
+-				uint8_t *p;
+-				char *q;
+-
+-				p = data + 4 + tmp - 1;
+-				q = cmd-&gt;dev-&gt;scsi_sn + SCSI_SN_LEN - 1;
+-
+-				for (; tmp &gt; 0; tmp--, q)
+-					*(p--) = *q;
+-			}
+-		} else if (scb[2] == 0x83) {
+-			int tmp = SCSI_ID_LEN;
+-
+-			data[1] = 0x83;
+-			data[3] = tmp + 4;
+-			data[4] = 0x1;
+-			data[5] = 0x1;
+-			data[7] = tmp;
+-			if (cmd-&gt;dev)
+-				strncpy((char *) data + 8, cmd-&gt;dev-&gt;scsi_id,
+-				        SCSI_ID_LEN);
+-			len = tmp + 8;
+-			ret = SAM_STAT_GOOD;
+-		}
+-	}
+-
+-	if (ret != SAM_STAT_GOOD)
+-		goto sense;
+-
+-	cmd-&gt;len = min_t(int, len, scb[4]);
+-	cmd-&gt;uaddr = (unsigned long) data;
+-
+-	if (!cmd-&gt;dev)
+-		data[0] = TYPE_NO_LUN;
+-
+-	return SAM_STAT_GOOD;
+-sense:
+-	cmd-&gt;len = 0;
+-	sense_data_build(cmd, key, asc, 0);
+-	return SAM_STAT_CHECK_CONDITION;
+-}
+-
+ static int sbc_inquiry(int host_no, struct scsi_cmd *cmd)
+ {
+ 	int ret, lid = cmd-&gt;c_target-&gt;lid;
+@@ -187,7 +76,7 @@
+ 	if (tgt_drivers[lid]-&gt;scsi_inquiry)
+ 		ret = tgt_drivers[lid]-&gt;scsi_inquiry(host_no, cmd);
+ 	else
+-		ret = __sbc_inquiry(host_no, cmd);
++		ret = spc_inquiry(host_no, cmd);
+ 	return ret;
+ }
+ 
+@@ -446,7 +335,9 @@
+ }
+ 
+ struct device_type_template sbc_template = {
++	.type	= TYPE_DISK,
+ 	.name	= &quot;disk&quot;,
++	.pid	= &quot;VIRTUAL-DISK&quot;,
+ 	.ops	= {
+ 		{spc_test_unit,},
+ 		{spc_illegal_op,},
+
+Modified: trunk/usr/spc.c
+===================================================================
+--- trunk/usr/spc.c	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/spc.c	2007-03-10 16:47:07 UTC (rev 820)
+@@ -32,6 +32,117 @@
+ #include &quot;scsi.h&quot;
+ #include &quot;spc.h&quot;
+ 
++#define PRODUCT_REV	&quot;0&quot;
++
++int spc_inquiry(int host_no, struct scsi_cmd *cmd)
++{
++	int len, ret = SAM_STAT_CHECK_CONDITION;
++	uint8_t *data;
++	uint8_t *scb = cmd-&gt;scb;
++	unsigned char device_type = cmd-&gt;c_target-&gt;dev_type_template-&gt;type;
++	char *product_id = cmd-&gt;c_target-&gt;dev_type_template-&gt;pid;
++	unsigned char key = ILLEGAL_REQUEST, asc = 0x24;
++
++	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
++		goto sense;
++
++	data = valloc(pagesize);
++	if (!data) {
++		key = HARDWARE_ERROR;
++		asc = 0;
++		goto sense;
++	}
++	memset(data, 0, pagesize);
++
++	dprintf(&quot;%x %x\n&quot;, scb[1], scb[2]);
++
++	if (!(scb[1] &amp; 0x3)) {
++		data[0] = device_type;
++		data[2] = 4;
++		data[3] = 0x42;
++		data[4] = 59;
++		data[7] = 0x02;
++		memset(data + 8, 0x20, 28);
++		strncpy(data + 8, VENDOR_ID, 8);
++		strncpy(data + 16, product_id, 16);
++		strncpy(data + 32, PRODUCT_REV, 4);
++		data[58] = 0x03;
++		data[59] = 0x20;
++		data[60] = 0x09;
++		data[61] = 0x60;
++		data[62] = 0x03;
++		data[63] = 0x00;
++		len = 64;
++		ret = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x2) {
++		/* CmdDt bit is set */
++		/* We do not support it now. */
++		data[1] = 0x1;
++		data[5] = 0;
++		len = 6;
++		ret = SAM_STAT_GOOD;
++	} else if (scb[1] &amp; 0x1) {
++		/* EVPD bit set */
++		if (scb[2] == 0x0) {
++			data[0] = device_type;
++			data[1] = 0x0;
++			data[3] = 3;
++			data[4] = 0x0;
++			data[5] = 0x80;
++			data[6] = 0x83;
++			len = 7;
++			ret = SAM_STAT_GOOD;
++		} else if (scb[2] == 0x80) {
++			int tmp = SCSI_SN_LEN;
++
++			data[1] = 0x80;
++			data[3] = SCSI_SN_LEN;
++			memset(data + 4, 0x20, 4);
++			len = 4 + SCSI_SN_LEN;
++			ret = SAM_STAT_GOOD;
++
++			if (cmd-&gt;dev &amp;&amp; strlen(cmd-&gt;dev-&gt;scsi_sn)) {
++				uint8_t *p;
++				char *q;
++
++				p = data + 4 + tmp - 1;
++				q = cmd-&gt;dev-&gt;scsi_sn + SCSI_SN_LEN - 1;
++
++				for (; tmp &gt; 0; tmp--, q)
++					*(p--) = *q;
++			}
++		} else if (scb[2] == 0x83) {
++			int tmp = SCSI_ID_LEN;
++
++			data[1] = 0x83;
++			data[3] = tmp + 4;
++			data[4] = 0x1;
++			data[5] = 0x1;
++			data[7] = tmp;
++			if (cmd-&gt;dev)
++				strncpy((char *) data + 8, cmd-&gt;dev-&gt;scsi_id,
++				        SCSI_ID_LEN);
++			len = tmp + 8;
++			ret = SAM_STAT_GOOD;
++		}
++	}
++
++	if (ret != SAM_STAT_GOOD)
++		goto sense;
++
++	cmd-&gt;len = min_t(int, len, scb[4]);
++	cmd-&gt;uaddr = (unsigned long) data;
++
++	if (!cmd-&gt;dev)
++		data[0] = TYPE_NO_LUN;
++
++	return SAM_STAT_GOOD;
++sense:
++	cmd-&gt;len = 0;
++	sense_data_build(cmd, key, asc, 0);
++	return SAM_STAT_CHECK_CONDITION;
++}
++
+ static int __spc_report_luns(int host_no, struct scsi_cmd *cmd)
+ {
+ 	struct tgt_device *dev;
+
+Modified: trunk/usr/spc.h
+===================================================================
+--- trunk/usr/spc.h	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/spc.h	2007-03-10 16:47:07 UTC (rev 820)
+@@ -1,6 +1,7 @@
+ #ifndef __SPC_H
+ #define __SPC_H
+ 
++extern int spc_inquiry(int host_no, struct scsi_cmd *cmd);
+ extern int spc_report_luns(int host_no, struct scsi_cmd *cmd);
+ extern int spc_start_stop(int host_no, struct scsi_cmd *cmd);
+ extern int spc_test_unit(int host_no, struct scsi_cmd *cmd);
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-10 12:32:47 UTC (rev 819)
++++ trunk/usr/tgtd.h	2007-03-10 16:47:07 UTC (rev 820)
+@@ -97,7 +97,9 @@
+ };
+ 
+ struct device_type_template {
++	unsigned char type;
+ 	char *name;
++	char *pid;
+ 	struct device_type_operations ops[256];
+ };
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000806.html">[Stgt-svn] r819 - in trunk: . doc
+</A></li>
+	<LI>Next message: <A HREF="000808.html">[Stgt-svn] r821 - in trunk/usr: . ibmvio iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#807">[ date ]</a>
+              <a href="thread.html#807">[ thread ]</a>
+              <a href="subject.html#807">[ subject ]</a>
+              <a href="author.html#807">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

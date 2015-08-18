@@ -1,0 +1,359 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r546 - in trunk/usr: . ibmvio
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r546%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608271455.k7REtGjA004650%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000532.html">
+   <LINK REL="Next"  HREF="000534.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r546 - in trunk/usr: . ibmvio</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r546%20-%20in%20trunk/usr%3A%20.%20ibmvio&In-Reply-To=%3C200608271455.k7REtGjA004650%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r546 - in trunk/usr: . ibmvio">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Aug 27 16:55:16 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000532.html">[Stgt-svn] r545 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000534.html">[Stgt-svn] r547 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#533">[ date ]</a>
+              <a href="thread.html#533">[ thread ]</a>
+              <a href="subject.html#533">[ subject ]</a>
+              <a href="author.html#533">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-27 16:55:06 +0200 (Sun, 27 Aug 2006)
+New Revision: 546
+
+Added:
+   trunk/usr/mmapio.c
+Modified:
+   trunk/usr/Makefile
+   trunk/usr/driver.h
+   trunk/usr/ibmvio/ibmvio.h
+   trunk/usr/scsi.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+   trunk/usr/util.h
+Log:
+Create backedio_operations for various I/O models, mmap, AIO, etc.
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/Makefile	2006-08-27 14:55:06 UTC (rev 546)
+@@ -1,6 +1,6 @@
+ CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -fPIC -I$(KERNELSRC)/include -I../istgt/include -I../include -I. -D_LARGEFILE64_SOURCE
+ PROGRAMS = tgtd tgtadm
+-TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o
++TGTD_OBJS = tgtd.o tgtif.o mgmt.o target.o scsi.o log.o driver.o util.o mmapio.o
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO
+
+Modified: trunk/usr/driver.h
+===================================================================
+--- trunk/usr/driver.h	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/driver.h	2006-08-27 14:55:06 UTC (rev 546)
+@@ -1,3 +1,5 @@
++extern struct backedio_operations mmapio;
++
+ struct tgt_driver {
+ 	const char *name;
+ 
+@@ -14,6 +16,8 @@
+ 			    uint8_t *, int *);
+ 	int enable;
+ 	int pfd_index;
++
++	struct backedio_operations *io_ops;
+ };
+ 
+ extern struct tgt_driver *tgt_drivers[];
+
+Modified: trunk/usr/ibmvio/ibmvio.h
+===================================================================
+--- trunk/usr/ibmvio/ibmvio.h	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/ibmvio/ibmvio.h	2006-08-27 14:55:06 UTC (rev 546)
+@@ -10,4 +10,5 @@
+ 	.scsi_get_lun		= scsi_lun_to_int,
+ 	.scsi_report_luns	= scsi_report_luns,
+ 	.scsi_inquiry		= scsi_inquiry,
++	.io_ops			= &amp;mmapio,
+ };
+
+Added: trunk/usr/mmapio.c
+===================================================================
+--- trunk/usr/mmapio.c	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/mmapio.c	2006-08-27 14:55:06 UTC (rev 546)
+@@ -0,0 +1,74 @@
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;sys/mman.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++
++static void *mmapio_cmd_buffer_alloc(int devio, uint32_t datalen)
++{
++	void *data = NULL;
++	if (!devio) {
++		datalen = ALIGN(datalen, PAGE_SIZE);
++		data = valloc(datalen);
++		if (data)
++			memset(data, 0, datalen);
++	}
++	return data;
++}
++
++static int mmapio_cmd_prepare(struct tgt_device *dev, uint32_t datalen,
++			      unsigned long *uaddr, uint64_t offset)
++{
++	int fd = dev-&gt;fd;
++	void *p;
++	int err = 0;
++
++	if (*uaddr)
++		*uaddr = *uaddr + offset;
++	else {
++		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; PAGE_SHIFT,
++			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
++			   offset &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
++
++		*uaddr = (unsigned long) p + (offset &amp; ~PAGE_MASK);
++		if (p == MAP_FAILED) {
++			err = -EINVAL;
++			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
++		}
++	}
++
++	printf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
++
++	return err;
++}
++
++static int mmapio_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	int err = 0;
++
++	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
++
++	if (do_munmap) {
++		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
++		uaddr &amp;= PAGE_MASK;
++		err = munmap((void *) (unsigned long) uaddr, len);
++		if (err)
++			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
++	} else if (do_free)
++		free((void *) (unsigned long) uaddr);
++
++	return err;
++}
++
++struct backedio_operations mmapio = {
++	.cmd_prepare = mmapio_cmd_prepare,
++	.cmd_buffer_alloc = mmapio_cmd_buffer_alloc,
++	.cmd_done = mmapio_cmd_done,
++};
+
+Modified: trunk/usr/scsi.c
+===================================================================
+--- trunk/usr/scsi.c	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/scsi.c	2006-08-27 14:55:06 UTC (rev 546)
+@@ -22,7 +22,6 @@
+ #include &lt;asm/byteorder.h&gt;
+ #include &lt;linux/fs.h&gt;
+ #include &lt;scsi/scsi.h&gt;
+-#include &lt;sys/mman.h&gt;
+ 
+ #include &quot;list.h&quot;
+ #include &quot;util.h&quot;
+@@ -411,32 +410,6 @@
+ 	return off &lt;&lt; BLK_SHIFT;
+ }
+ 
+-static int mmap_device(struct tgt_device *dev, uint32_t datalen,
+-		       unsigned long *uaddr, uint64_t offset)
+-{
+-	int fd = dev-&gt;fd;
+-	void *p;
+-	int err = SAM_STAT_GOOD;
+-
+-	if (*uaddr)
+-		*uaddr = *uaddr + offset;
+-	else {
+-		p = mmap64(NULL, pgcnt(datalen, offset) &lt;&lt; PAGE_SHIFT,
+-			   PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+-			   offset &amp; ~((1ULL &lt;&lt; PAGE_SHIFT) - 1));
+-
+-		*uaddr = (unsigned long) p + (offset &amp; ~PAGE_MASK);
+-		if (p == MAP_FAILED) {
+-			err = SAM_STAT_CHECK_CONDITION;
+-			eprintf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+-		}
+-	}
+-
+-	printf(&quot;%lx %u %&quot; PRIu64 &quot;\n&quot;, *uaddr, datalen, offset);
+-
+-	return err;
+-}
+-
+ static int scsi_cmd_rw(uint8_t *scb, uint8_t *rw)
+ {
+ 	int is_data = 1;
+@@ -494,15 +467,13 @@
+ 		     struct tgt_device *dev, struct list_head *dev_list)
+ {
+ 	int result = SAM_STAT_GOOD;
+-	uint8_t *data = NULL, *scb = pdu;
++	uint8_t *data, *scb = pdu;
+ 
+ 	dprintf(&quot;%x %u\n&quot;, scb[0], datalen);
+ 
+ 	*offset = 0;
+-	if (!scsi_cmd_rw(scb, rw)) {
+-		data = valloc(PAGE_SIZE);
+-		memset(data, 0, PAGE_SIZE);
+-	}
++	data = tgt_drivers[lid]-&gt;io_ops-&gt;cmd_buffer_alloc(scsi_cmd_rw(scb, rw),
++							  datalen);
+ 
+ 	if (!dev)
+ 		switch (scb[0]) {
+@@ -557,7 +528,8 @@
+ 	case WRITE_16:
+ 	case WRITE_VERIFY:
+ 		*offset = scsi_cmd_data_offset(scb);
+-		result = mmap_device(dev, datalen, uaddr, *offset);
++		result = tgt_drivers[lid]-&gt;io_ops-&gt;cmd_prepare(dev, datalen,
++							       uaddr, *offset);
+ 		if (result == SAM_STAT_GOOD) {
+ 			*len = datalen;
+ 			*try_map = 1;
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/target.c	2006-08-27 14:55:06 UTC (rev 546)
+@@ -27,7 +27,6 @@
+ #include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+ #include &lt;sys/ioctl.h&gt;
+-#include &lt;sys/mman.h&gt;
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+ 
+@@ -401,24 +400,6 @@
+ 	}
+ }
+ 
+-static int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
+-{
+-	int err = 0;
+-
+-	dprintf(&quot;%d %d %&quot; PRIx64 &quot; %d\n&quot;, do_munmap, do_free, uaddr, len);
+-
+-	if (do_munmap) {
+-		len = pgcnt(len, (uaddr &amp; ~PAGE_MASK)) &lt;&lt; PAGE_SHIFT;
+-		uaddr &amp;= PAGE_MASK;
+-		err = munmap((void *) (unsigned long) uaddr, len);
+-		if (err)
+-			eprintf(&quot;%&quot; PRIx64 &quot; %d\n&quot;, uaddr, len);
+-	} else if (do_free)
+-		free((void *) (unsigned long) uaddr);
+-
+-	return err;
+-}
+-
+ static void __cmd_done(struct target *target, struct cmd *cmd)
+ {
+ 	struct tgt_cmd_queue *q;
+@@ -436,7 +417,9 @@
+ 		if (cmd-&gt;dev-&gt;addr)
+ 			do_munmap = 0;
+ 	}
+-	err = scsi_cmd_done(do_munmap, !cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len);
++	err = tgt_drivers[target-&gt;lid]-&gt;io_ops-&gt;cmd_done(do_munmap,
++							 !cmd-&gt;mmapped,
++							 cmd-&gt;uaddr, cmd-&gt;len);
+ 
+ 	dprintf(&quot;%d %&quot; PRIx64 &quot; %u %d\n&quot;, cmd-&gt;mmapped, cmd-&gt;uaddr, cmd-&gt;len, err);
+ 
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/tgtd.h	2006-08-27 14:55:06 UTC (rev 546)
+@@ -24,6 +24,13 @@
+ 	struct tgt_cmd_queue cmd_queue;
+ };
+ 
++struct backedio_operations {
++	void * (*cmd_buffer_alloc)(int devio, uint32_t datalen);
++	int (*cmd_prepare)(struct tgt_device *dev, uint32_t datalen,
++			   unsigned long *uaddr, uint64_t offset);
++	int (*cmd_done) (int do_munmap, int do_free, uint64_t uaddr, int len);
++};
++
+ extern int kreq_init(int *fd);
+ extern void kern_event_handler(int, void *data);
+ 
+
+Modified: trunk/usr/util.h
+===================================================================
+--- trunk/usr/util.h	2006-08-27 08:38:02 UTC (rev 545)
++++ trunk/usr/util.h	2006-08-27 14:55:06 UTC (rev 546)
+@@ -4,6 +4,7 @@
+ #include &lt;sys/user.h&gt;
+ 
+ #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
++#define ALIGN(x,a) (((x)+(a)-1)&amp;~((a)-1))
+ 
+ #ifndef PAGE_SHIFT
+ #define	PAGE_SHIFT	12
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000532.html">[Stgt-svn] r545 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000534.html">[Stgt-svn] r547 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#533">[ date ]</a>
+              <a href="thread.html#533">[ thread ]</a>
+              <a href="subject.html#533">[ subject ]</a>
+              <a href="author.html#533">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

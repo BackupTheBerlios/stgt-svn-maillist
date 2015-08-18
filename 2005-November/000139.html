@@ -1,0 +1,205 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r145 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-November/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r145%20-%20trunk/usr&In-Reply-To=%3C200511030630.jA36UlN7005123%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000138.html">
+   <LINK REL="Next"  HREF="000140.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r145 - trunk/usr</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r145%20-%20trunk/usr&In-Reply-To=%3C200511030630.jA36UlN7005123%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r145 - trunk/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Nov  3 07:30:47 CET 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000138.html">[Stgt-svn] r144 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000140.html">[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#139">[ date ]</a>
+              <a href="thread.html#139">[ thread ]</a>
+              <a href="subject.html#139">[ subject ]</a>
+              <a href="author.html#139">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-11-03 07:30:24 +0100 (Thu, 03 Nov 2005)
+New Revision: 145
+
+Modified:
+   trunk/usr/dl.c
+   trunk/usr/tgtadm.c
+Log:
+tgtadm loads protocol libraries first, and then operates the rest
+options because protocol libraries needs to operates some options.
+
+
+Modified: trunk/usr/dl.c
+===================================================================
+--- trunk/usr/dl.c	2005-11-03 02:37:15 UTC (rev 144)
++++ trunk/usr/dl.c	2005-11-03 06:30:24 UTC (rev 145)
+@@ -23,7 +23,6 @@
+ 
+ #include &quot;log.h&quot;
+ #include &quot;dl.h&quot;
+-#include &quot;tgtd.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+ 
+ struct driver_info {
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2005-11-03 02:37:15 UTC (rev 144)
++++ trunk/usr/tgtadm.c	2005-11-03 06:30:24 UTC (rev 145)
+@@ -12,16 +12,16 @@
+  */
+ 
+ #include &lt;ctype.h&gt;
++#include &lt;dirent.h&gt;
++#include &lt;dlfcn.h&gt;
+ #include &lt;errno.h&gt;
+ #include &lt;fcntl.h&gt;
+ #include &lt;getopt.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
+ #include &lt;stdlib.h&gt;
+-#include &lt;stdio.h&gt;
++#include &lt;string.h&gt;
+ #include &lt;unistd.h&gt;
+-#include &lt;dirent.h&gt;
+-#include &lt;string.h&gt;
+-#include &lt;dlfcn.h&gt;
+-#include &lt;inttypes.h&gt;
+ 
+ #include &lt;sys/socket.h&gt;
+ #include &lt;sys/stat.h&gt;
+@@ -152,6 +152,36 @@
+ 	return id;
+ }
+ 
++static int driver_dl_init(int argc, char **argv)
++{
++	int ch, longindex, id;
++	char *name = NULL;
++
++	while ((ch = getopt_long(argc, argv, &quot;n:&quot;, long_options,
++				 &amp;longindex)) &gt;= 0) {
++		switch (ch) {
++		case 'n':
++			name = optarg;
++			break;
++		}
++	}
++
++	if (!name) {
++		eprintf(&quot;You must specify the driver name\n&quot;);
++		goto out;
++	}
++
++	id = driver_to_typeid(name);
++	if (id &lt; 0) {
++		eprintf(&quot;Invalid driver name %s\n&quot;, name);
++		goto out;
++	}
++
++	return id;
++out:
++	exit(0);
++}
++
+ static int ipc_mgmt_connect(void)
+ {
+ 	int fd, err;
+@@ -259,15 +289,19 @@
+ 	int tid = -1, typeid;
+ 	uint32_t cid = 0, set = 0;
+ 	uint64_t sid = 0, lun = 0;
+-	char *params = NULL, *driver = NULL;
++	char *params = NULL;
+ 	struct tgtadm_req *req;
+ 	char sbuf[8192], rbuf[8912];
+ 
++	typeid = driver_dl_init(argc, argv);
++	if (typeid &lt; 0)
++		goto out;
++
++	optind = 1;
+ 	while ((ch = getopt_long(argc, argv, &quot;n:o:t:s:c:l:p:uvh&quot;,
+ 				 long_options, &amp;longindex)) &gt;= 0) {
+ 		switch (ch) {
+ 		case 'n':
+-			driver = optarg;
+ 			break;
+ 		case 'o':
+ 			op = str_to_op(optarg);
+@@ -295,7 +329,7 @@
+ 			set |= SET_USER;
+ 			break;
+ 		case 'v':
+-/* 			printf(&quot;%s version %s\n&quot;, program_name, IET_VERSION_STRING); */
++			printf(&quot;%s\n&quot;, program_name);
+ 			exit(0);
+ 			break;
+ 		case 'h':
+@@ -305,23 +339,11 @@
+ 			usage(-1);
+ 		}
+ 	}
+-
+ 	if (op &lt; 0) {
+ 		eprintf(&quot;You must specify the operation type\n&quot;);
+ 		goto out;
+ 	}
+ 
+-	if (!driver) {
+-		eprintf(&quot;You must specify the driver name\n&quot;);
+-		goto out;
+-	}
+-
+-	typeid = driver_to_typeid(driver);
+-	if (typeid &lt; 0) {
+-		eprintf(&quot;Invalid driver name %s\n&quot;, driver);
+-		goto out;
+-	}
+-
+ 	if (optind &lt; argc) {
+ 		fprintf(stderr, &quot;unrecognized: &quot;);
+ 		while (optind &lt; argc)
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000138.html">[Stgt-svn] r144 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000140.html">[Stgt-svn] r146 - in trunk: ibmvstgt/kernel istgt/kernel kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#139">[ date ]</a>
+              <a href="thread.html#139">[ thread ]</a>
+              <a href="subject.html#139">[ subject ]</a>
+              <a href="author.html#139">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

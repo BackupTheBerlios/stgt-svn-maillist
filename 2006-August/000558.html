@@ -1,0 +1,3677 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r571 - trunk/patchset
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r571%20-%20trunk/patchset&In-Reply-To=%3C200608311248.k7VCmWka020986%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000557.html">
+   <LINK REL="Next"  HREF="000559.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r571 - trunk/patchset</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r571%20-%20trunk/patchset&In-Reply-To=%3C200608311248.k7VCmWka020986%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r571 - trunk/patchset">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Aug 31 14:48:32 CEST 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000557.html">[Stgt-svn] r570 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000559.html">[Stgt-svn] r572 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#558">[ date ]</a>
+              <a href="thread.html#558">[ thread ]</a>
+              <a href="subject.html#558">[ subject ]</a>
+              <a href="author.html#558">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-08-31 14:48:02 +0200 (Thu, 31 Aug 2006)
+New Revision: 571
+
+Removed:
+   trunk/patchset/0001-block-layer-kill-length-alignment-test-in-bin_map_user.txt
+   trunk/patchset/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+   trunk/patchset/0003-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt
+   trunk/patchset/0004-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt
+   trunk/patchset/0005-scsi-tgt-scsi-target-lib-functionality.txt
+   trunk/patchset/0006-scsi-tgt-scsi-target-user-and-kernel-communication-interface.txt
+   trunk/patchset/0007-scsi-ml-Makefile-and-Kconfig-changes-for-tgt.txt
+   trunk/patchset/0008-scsi-tgt-SCSI-RDMA-Protocol-library-functions.txt
+   trunk/patchset/0009-scsi-tgt-IBM-eServer-i-pSeries-virtual-SCSI-target-driver.txt
+   trunk/patchset/README
+Log:
+Remove the old patchset because they are in the git tree.
+
+Deleted: trunk/patchset/0001-block-layer-kill-length-alignment-test-in-bin_map_user.txt
+===================================================================
+--- trunk/patchset/0001-block-layer-kill-length-alignment-test-in-bin_map_user.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0001-block-layer-kill-length-alignment-test-in-bin_map_user.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,48 +0,0 @@
+-From 44951054af3722883087e928979f1c89fdee918b Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Thu, 17 Aug 2006 23:47:00 +0900
+-Subject: [PATCH 1/9] block layer: kill length alignment test in bin_map_user
+-
+-The tgt project is mapping in bios using bio_map_user. The current targets
+-do not need their len to be aligned with a queue limit so this check is
+-causing some problems. Note: pointers passed into the kernel are properly
+-aligned by usersapace tgt code so the uaddr check in bio_map_user is ok.
+-
+-The major user, blk_bio_map_user checks for the len before mapping
+-so it is not affected by this patch.
+-
+-And the semi-newly added user blk_rq_map_user_iov has been failing
+-out when the len is not aligned properly so maybe people have been
+-good and not sending misaligned lens or that path is not used very
+-often and this change will not be very dangerous. st and sg do not
+-check the length and we have not seen any problem reports from those
+-wider used paths so this patch should be fairly safe - for mm
+-and wider testing at least.
+-
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- fs/bio.c |    5 ++---
+- 1 files changed, 2 insertions(+), 3 deletions(-)
+-
+-diff --git a/fs/bio.c b/fs/bio.c
+-index 6a0b9ad..6fe47ce 100644
+---- a/fs/bio.c
+-+++ b/fs/bio.c
+-@@ -621,10 +621,9 @@ static struct bio *__bio_map_user_iov(re
+- 
+- 		nr_pages += end - start;
+- 		/*
+--		 * transfer and buffer must be aligned to at least hardsector
+--		 * size for now, in the future we can relax this restriction
+-+		 * buffer must be aligned to at least hardsector size for now
+- 		 */
+--		if ((uaddr &amp; queue_dma_alignment(q)) || (len &amp; queue_dma_alignment(q)))
+-+		if (uaddr &amp; queue_dma_alignment(q))
+- 			return ERR_PTR(-EINVAL);
+- 	}
+- 
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt
+===================================================================
+--- trunk/patchset/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0002-block-layer-add-partial-mappings-support-to-bio_map_user.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,154 +0,0 @@
+-From 79acdaa1243aecedcd035c3219375a7cb9c9f786 Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Thu, 17 Aug 2006 23:48:58 +0900
+-Subject: [PATCH 2/9] block layer: add partial mappings support to bio_map_user
+-
+-For target mode we could end up with the case where we get very large
+-request from the initiator. The request could be so large that we
+-cannot transfer all the data in one operation. For example the
+-HBA's segment or max_sector limits might limit us to a 1 MB transfer.
+-To send a 5 MB command then we need to transfer the command chunk by chunk.
+-
+-To do this, tgt core will map in as much data as possible into a bio,
+-send this off, then when that transfer is completed we send off another
+-request/bio. To be able to pack as much data into a bio as possible
+-we need bio_map_user to support partially mapped bios.
+-
+-- bio_map_user_iov always allows partial mappings.
+-
+-- The two users (blk_rq_map_user and blk_rq_map_user_iov) will fails
+-if the bio is partially mapped.
+-
+-- Added a length argument to blk_rq_map_user_iov in order to avoid
+-including sg.h in ll_rw_blk.c for struct sg_iovec.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- block/ll_rw_blk.c      |   29 ++++++++++++++++++-----------
+- block/scsi_ioctl.c     |    3 ++-
+- fs/bio.c               |   14 +-------------
+- include/linux/blkdev.h |    3 ++-
+- 4 files changed, 23 insertions(+), 26 deletions(-)
+-
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index 61d6b3c..aee4f4b 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2353,19 +2353,20 @@ int blk_rq_map_user(request_queue_t *q, 
+- 	else
+- 		bio = bio_copy_user(q, uaddr, len, reading);
+- 
+--	if (!IS_ERR(bio)) {
+--		rq-&gt;bio = rq-&gt;biotail = bio;
+--		blk_rq_bio_prep(q, rq, bio);
+-+	if (IS_ERR(bio))
+-+		return PTR_ERR(bio);
+- 
+--		rq-&gt;buffer = rq-&gt;data = NULL;
+--		rq-&gt;data_len = len;
+--		return 0;
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+- 	}
+- 
+--	/*
+--	 * bio is the err-ptr
+--	 */
+--	return PTR_ERR(bio);
+-+	rq-&gt;bio = rq-&gt;biotail = bio;
+-+	blk_rq_bio_prep(q, rq, bio);
+-+	rq-&gt;buffer = rq-&gt;data = NULL;
+-+	rq-&gt;data_len = len;
+-+	return 0;
+- }
+- 
+- EXPORT_SYMBOL(blk_rq_map_user);
+-@@ -2391,7 +2392,7 @@ EXPORT_SYMBOL(blk_rq_map_user);
+-  *    unmapping.
+-  */
+- int blk_rq_map_user_iov(request_queue_t *q, struct request *rq,
+--			struct sg_iovec *iov, int iov_count)
+-+			struct sg_iovec *iov, int iov_count, unsigned int len)
+- {
+- 	struct bio *bio;
+- 
+-@@ -2405,6 +2406,12 @@ int blk_rq_map_user_iov(request_queue_t 
+- 	if (IS_ERR(bio))
+- 		return PTR_ERR(bio);
+- 
+-+	if (bio-&gt;bi_size != len) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+		return -EINVAL;
+-+	}
+-+
+- 	rq-&gt;bio = rq-&gt;biotail = bio;
+- 	blk_rq_bio_prep(q, rq, bio);
+- 	rq-&gt;buffer = rq-&gt;data = NULL;
+-diff --git a/block/scsi_ioctl.c b/block/scsi_ioctl.c
+-index b33eda2..b77e185 100644
+---- a/block/scsi_ioctl.c
+-+++ b/block/scsi_ioctl.c
+-@@ -274,7 +274,8 @@ static int sg_io(struct file *file, requ
+- 			goto out;
+- 		}
+- 
+--		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count);
+-+		ret = blk_rq_map_user_iov(q, rq, iov, hdr-&gt;iovec_count,
+-+					  hdr-&gt;dxfer_len);
+- 		kfree(iov);
+- 	} else if (hdr-&gt;dxfer_len)
+- 		ret = blk_rq_map_user(q, rq, hdr-&gt;dxferp, hdr-&gt;dxfer_len);
+-diff --git a/fs/bio.c b/fs/bio.c
+-index 6fe47ce..ade77bf 100644
+---- a/fs/bio.c
+-+++ b/fs/bio.c
+-@@ -749,7 +749,6 @@ struct bio *bio_map_user_iov(request_que
+- 			     int write_to_vm)
+- {
+- 	struct bio *bio;
+--	int len = 0, i;
+- 
+- 	bio = __bio_map_user_iov(q, bdev, iov, iov_count, write_to_vm);
+- 
+-@@ -764,18 +763,7 @@ struct bio *bio_map_user_iov(request_que
+- 	 */
+- 	bio_get(bio);
+- 
+--	for (i = 0; i &lt; iov_count; i++)
+--		len += iov[i].iov_len;
+--
+--	if (bio-&gt;bi_size == len)
+--		return bio;
+--
+--	/*
+--	 * don't support partial mappings
+--	 */
+--	bio_endio(bio, bio-&gt;bi_size, 0);
+--	bio_unmap_user(bio);
+--	return ERR_PTR(-EINVAL);
+-+	return bio;
+- }
+- 
+- static void __bio_unmap_user(struct bio *bio)
+-diff --git a/include/linux/blkdev.h b/include/linux/blkdev.h
+-index aafe827..613a441 100644
+---- a/include/linux/blkdev.h
+-+++ b/include/linux/blkdev.h
+-@@ -616,7 +616,8 @@ extern void blk_queue_activity_fn(reques
+- extern int blk_rq_map_user(request_queue_t *, struct request *, void __user *, unsigned int);
+- extern int blk_rq_unmap_user(struct bio *, unsigned int);
+- extern int blk_rq_map_kern(request_queue_t *, struct request *, void *, unsigned int, gfp_t);
+--extern int blk_rq_map_user_iov(request_queue_t *, struct request *, struct sg_iovec *, int);
+-+extern int blk_rq_map_user_iov(request_queue_t *, struct request *,
+-+			       struct sg_iovec *, int, unsigned int);
+- extern int blk_execute_rq(request_queue_t *, struct gendisk *,
+- 			  struct request *, int);
+- extern void blk_execute_rq_nowait(request_queue_t *, struct gendisk *,
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0003-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt
+===================================================================
+--- trunk/patchset/0003-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0003-block-layer-use-blk_rq_bio_prep-in-init_request_from_bio.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,54 +0,0 @@
+-From 3f63e5e44b012927b6054f7025d3a5e7be6f7f09 Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Thu, 17 Aug 2006 23:52:17 +0900
+-Subject: [PATCH 3/9] block layer: use blk_rq_bio_prep in init_request_from_bio
+-
+-Patch to use blk_rq_bio_prep in init_request_from_bio. And remove
+-blk_rq_bio_prep's flags copying. The first three bits have not been
+-the same for some time so that has been broken. The user of
+-blk_rq_bio_prep will setup the request flags so if it wanted failfast
+-or to be a barrier it will set the correct flag itself.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- block/ll_rw_blk.c |   11 ++---------
+- 1 files changed, 2 insertions(+), 9 deletions(-)
+-
+-diff --git a/block/ll_rw_blk.c b/block/ll_rw_blk.c
+-index aee4f4b..3f46356 100644
+---- a/block/ll_rw_blk.c
+-+++ b/block/ll_rw_blk.c
+-@@ -2838,16 +2838,12 @@ static void init_request_from_bio(struct
+- 
+- 	req-&gt;errors = 0;
+- 	req-&gt;hard_sector = req-&gt;sector = bio-&gt;bi_sector;
+--	req-&gt;hard_nr_sectors = req-&gt;nr_sectors = bio_sectors(bio);
+--	req-&gt;current_nr_sectors = req-&gt;hard_cur_sectors = bio_cur_sectors(bio);
+--	req-&gt;nr_phys_segments = bio_phys_segments(req-&gt;q, bio);
+--	req-&gt;nr_hw_segments = bio_hw_segments(req-&gt;q, bio);
+--	req-&gt;buffer = bio_data(bio);	/* see -&gt;buffer comment above */
+- 	req-&gt;waiting = NULL;
+--	req-&gt;bio = req-&gt;biotail = bio;
+- 	req-&gt;ioprio = bio_prio(bio);
+- 	req-&gt;rq_disk = bio-&gt;bi_bdev-&gt;bd_disk;
+- 	req-&gt;start_time = jiffies;
+-+
+-+	blk_rq_bio_prep(req-&gt;q, req, bio);
+- }
+- 
+- static int __make_request(request_queue_t *q, struct bio *bio)
+-@@ -3498,9 +3494,6 @@ EXPORT_SYMBOL(end_request);
+- 
+- void blk_rq_bio_prep(request_queue_t *q, struct request *rq, struct bio *bio)
+- {
+--	/* first two bits are identical in rq-&gt;flags and bio-&gt;bi_rw */
+--	rq-&gt;flags |= (bio-&gt;bi_rw &amp; 3);
+--
+- 	rq-&gt;nr_phys_segments = bio_phys_segments(q, bio);
+- 	rq-&gt;nr_hw_segments = bio_hw_segments(q, bio);
+- 	rq-&gt;current_nr_sectors = bio_cur_sectors(bio);
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0004-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt
+===================================================================
+--- trunk/patchset/0004-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0004-scsi-ml-export-scsi-ml-functions-needed-by-tgt_scsi_lib-and-its-LLDs.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,330 +0,0 @@
+-From 8f167fea740f5d82c70a2e9938e983b704baae67 Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Thu, 17 Aug 2006 23:56:41 +0900
+-Subject: [PATCH 4/9] scsi-ml: export scsi-ml functions needed by tgt_scsi_lib and its LLDs
+-
+-This patch contains the needed changes to the scsi-ml to support targets.
+-
+-Note, per the last review we moved almost all the fields we added
+-to the scsi_cmnd to our internal data structure which we are going
+-to try and kill off when we can replace it with support from other
+-parts of the kernel.
+-
+-The one field we left on was the offset variable. This is needed to handle
+-the case where the target gets request that is so large that it cannot
+-execute it in one dma operation. So max_secotors or a segment limit may
+-limit the size of the transfer. In this case our tgt core code will
+-break up the command into managable transfers and send them to the
+-LLD one at a time. The offset is then used to tell the LLD where in
+-the command we are at. Is there another field on the scsi_cmd for
+-that?
+-
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- drivers/scsi/hosts.c     |    4 ++++
+- drivers/scsi/scsi.c      |   43 ++++++++++++++++++++++++++-----------------
+- drivers/scsi/scsi_lib.c  |   33 ++++++++++++++++++++++++---------
+- include/scsi/scsi_cmnd.h |   10 ++++++++++
+- include/scsi/scsi_host.h |   43 +++++++++++++++++++++++++++++++++++++++++++
+- 5 files changed, 107 insertions(+), 26 deletions(-)
+-
+-diff --git a/drivers/scsi/hosts.c b/drivers/scsi/hosts.c
+-index dfcb96f..341c1ee 100644
+---- a/drivers/scsi/hosts.c
+-+++ b/drivers/scsi/hosts.c
+-@@ -263,6 +263,10 @@ static void scsi_host_dev_release(struct
+- 		kthread_stop(shost-&gt;ehandler);
+- 	if (shost-&gt;work_q)
+- 		destroy_workqueue(shost-&gt;work_q);
+-+	if (shost-&gt;uspace_req_q) {
+-+		kfree(shost-&gt;uspace_req_q-&gt;queuedata);
+-+		scsi_free_queue(shost-&gt;uspace_req_q);
+-+	}
+- 
+- 	scsi_destroy_command_freelist(shost);
+- 	kfree(shost-&gt;shost_data);
+-diff --git a/drivers/scsi/scsi.c b/drivers/scsi/scsi.c
+-index b332cad..08f8597 100644
+---- a/drivers/scsi/scsi.c
+-+++ b/drivers/scsi/scsi.c
+-@@ -136,8 +136,7 @@ static struct scsi_host_cmd_pool scsi_cm
+- 
+- static DEFINE_MUTEX(host_cmd_pool_mutex);
+- 
+--static struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *shost,
+--					    gfp_t gfp_mask)
+-+struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *shost, gfp_t gfp_mask)
+- {
+- 	struct scsi_cmnd *cmd;
+- 
+-@@ -158,6 +157,7 @@ static struct scsi_cmnd *__scsi_get_comm
+- 
+- 	return cmd;
+- }
+-+EXPORT_SYMBOL_GPL(__scsi_get_command);
+- 
+- /*
+-  * Function:	scsi_get_command()
+-@@ -194,9 +194,29 @@ struct scsi_cmnd *scsi_get_command(struc
+- 		put_device(&amp;dev-&gt;sdev_gendev);
+- 
+- 	return cmd;
+--}				
+-+}
+- EXPORT_SYMBOL(scsi_get_command);
+- 
+-+void __scsi_put_command(struct Scsi_Host *shost, struct scsi_cmnd *cmd,
+-+			struct device *dev)
+-+{
+-+	unsigned long flags;
+-+
+-+	/* changing locks here, don't need to restore the irq state */
+-+	spin_lock_irqsave(&amp;shost-&gt;free_list_lock, flags);
+-+	if (unlikely(list_empty(&amp;shost-&gt;free_list))) {
+-+		list_add(&amp;cmd-&gt;list, &amp;shost-&gt;free_list);
+-+		cmd = NULL;
+-+	}
+-+	spin_unlock_irqrestore(&amp;shost-&gt;free_list_lock, flags);
+-+
+-+	if (likely(cmd != NULL))
+-+		kmem_cache_free(shost-&gt;cmd_pool-&gt;slab, cmd);
+-+
+-+	put_device(dev);
+-+}
+-+EXPORT_SYMBOL(__scsi_put_command);
+-+
+- /*
+-  * Function:	scsi_put_command()
+-  *
+-@@ -211,26 +231,15 @@ EXPORT_SYMBOL(scsi_get_command);
+- void scsi_put_command(struct scsi_cmnd *cmd)
+- {
+- 	struct scsi_device *sdev = cmd-&gt;device;
+--	struct Scsi_Host *shost = sdev-&gt;host;
+- 	unsigned long flags;
+--	
+-+
+- 	/* serious error if the command hasn't come from a device list */
+- 	spin_lock_irqsave(&amp;cmd-&gt;device-&gt;list_lock, flags);
+- 	BUG_ON(list_empty(&amp;cmd-&gt;list));
+- 	list_del_init(&amp;cmd-&gt;list);
+--	spin_unlock(&amp;cmd-&gt;device-&gt;list_lock);
+--	/* changing locks here, don't need to restore the irq state */
+--	spin_lock(&amp;shost-&gt;free_list_lock);
+--	if (unlikely(list_empty(&amp;shost-&gt;free_list))) {
+--		list_add(&amp;cmd-&gt;list, &amp;shost-&gt;free_list);
+--		cmd = NULL;
+--	}
+--	spin_unlock_irqrestore(&amp;shost-&gt;free_list_lock, flags);
+-+	spin_unlock_irqrestore(&amp;cmd-&gt;device-&gt;list_lock, flags);
+- 
+--	if (likely(cmd != NULL))
+--		kmem_cache_free(shost-&gt;cmd_pool-&gt;slab, cmd);
+--
+--	put_device(&amp;sdev-&gt;sdev_gendev);
+-+	__scsi_put_command(cmd-&gt;device-&gt;host, cmd, &amp;sdev-&gt;sdev_gendev);
+- }
+- EXPORT_SYMBOL(scsi_put_command);
+- 
+-diff --git a/drivers/scsi/scsi_lib.c b/drivers/scsi/scsi_lib.c
+-index 077c1c6..ea22612 100644
+---- a/drivers/scsi/scsi_lib.c
+-+++ b/drivers/scsi/scsi_lib.c
+-@@ -693,7 +693,7 @@ static struct scsi_cmnd *scsi_end_reques
+- 	return NULL;
+- }
+- 
+--static struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+-+struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+- {
+- 	struct scsi_host_sg_pool *sgp;
+- 	struct scatterlist *sgl;
+-@@ -734,7 +734,9 @@ #endif
+- 	return sgl;
+- }
+- 
+--static void scsi_free_sgtable(struct scatterlist *sgl, int index)
+-+EXPORT_SYMBOL(scsi_alloc_sgtable);
+-+
+-+void scsi_free_sgtable(struct scatterlist *sgl, int index)
+- {
+- 	struct scsi_host_sg_pool *sgp;
+- 
+-@@ -744,6 +746,8 @@ static void scsi_free_sgtable(struct sca
+- 	mempool_free(sgl, sgp-&gt;pool);
+- }
+- 
+-+EXPORT_SYMBOL(scsi_free_sgtable);
+-+
+- /*
+-  * Function:    scsi_release_buffers()
+-  *
+-@@ -1538,29 +1542,40 @@ u64 scsi_calculate_bounce_limit(struct S
+- }
+- EXPORT_SYMBOL(scsi_calculate_bounce_limit);
+- 
+--struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+-+struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+-+					 request_fn_proc *request_fn)
+- {
+--	struct Scsi_Host *shost = sdev-&gt;host;
+- 	struct request_queue *q;
+- 
+--	q = blk_init_queue(scsi_request_fn, NULL);
+-+	q = blk_init_queue(request_fn, NULL);
+- 	if (!q)
+- 		return NULL;
+- 
+--	blk_queue_prep_rq(q, scsi_prep_fn);
+--
+- 	blk_queue_max_hw_segments(q, shost-&gt;sg_tablesize);
+- 	blk_queue_max_phys_segments(q, SCSI_MAX_PHYS_SEGMENTS);
+- 	blk_queue_max_sectors(q, shost-&gt;max_sectors);
+- 	blk_queue_bounce_limit(q, scsi_calculate_bounce_limit(shost));
+- 	blk_queue_segment_boundary(q, shost-&gt;dma_boundary);
+--	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+--	blk_queue_softirq_done(q, scsi_softirq_done);
+- 
+- 	if (!shost-&gt;use_clustering)
+- 		clear_bit(QUEUE_FLAG_CLUSTER, &amp;q-&gt;queue_flags);
+- 	return q;
+- }
+-+EXPORT_SYMBOL(__scsi_alloc_queue);
+-+
+-+struct request_queue *scsi_alloc_queue(struct scsi_device *sdev)
+-+{
+-+	struct request_queue *q;
+-+
+-+	q = __scsi_alloc_queue(sdev-&gt;host, scsi_request_fn);
+-+	if (!q)
+-+		return NULL;
+-+
+-+	blk_queue_prep_rq(q, scsi_prep_fn);
+-+	blk_queue_issue_flush_fn(q, scsi_issue_flush_fn);
+-+	blk_queue_softirq_done(q, scsi_softirq_done);
+-+	return q;
+-+}
+- 
+- void scsi_free_queue(struct request_queue *q)
+- {
+-diff --git a/include/scsi/scsi_cmnd.h b/include/scsi/scsi_cmnd.h
+-index 58e6444..fe4455c 100644
+---- a/include/scsi/scsi_cmnd.h
+-+++ b/include/scsi/scsi_cmnd.h
+-@@ -8,6 +8,7 @@ #include &lt;linux/timer.h&gt;
+- 
+- struct request;
+- struct scatterlist;
+-+struct Scsi_Host;
+- struct scsi_device;
+- 
+- 
+-@@ -72,6 +73,9 @@ #define MAX_COMMAND_SIZE	16
+- 	unsigned short use_sg;	/* Number of pieces of scatter-gather */
+- 	unsigned short sglist_len;	/* size of malloc'd scatter-gather list */
+- 
+-+	/* offset in cmd we are at (for multi-transfer tgt cmds) */
+-+	unsigned offset;
+-+
+- 	unsigned underflow;	/* Return error if less than
+- 				   this amount is transferred */
+- 
+-@@ -133,7 +137,10 @@ #define SCSI_STATE_MLQUEUE         0x100
+- 
+- 
+- extern struct scsi_cmnd *scsi_get_command(struct scsi_device *, gfp_t);
+-+extern struct scsi_cmnd *__scsi_get_command(struct Scsi_Host *, gfp_t);
+- extern void scsi_put_command(struct scsi_cmnd *);
+-+extern void __scsi_put_command(struct Scsi_Host *, struct scsi_cmnd *,
+-+			       struct device *);
+- extern void scsi_io_completion(struct scsi_cmnd *, unsigned int);
+- extern void scsi_finish_command(struct scsi_cmnd *cmd);
+- extern void scsi_req_abort_cmd(struct scsi_cmnd *cmd);
+-@@ -142,4 +149,7 @@ extern void *scsi_kmap_atomic_sg(struct 
+- 				 size_t *offset, size_t *len);
+- extern void scsi_kunmap_atomic_sg(void *virt);
+- 
+-+extern struct scatterlist *scsi_alloc_sgtable(struct scsi_cmnd *, gfp_t);
+-+extern void scsi_free_sgtable(struct scatterlist *, int);
+-+
+- #endif /* _SCSI_SCSI_CMND_H */
+-diff --git a/include/scsi/scsi_host.h b/include/scsi/scsi_host.h
+-index b3dd90f..1a393b6 100644
+---- a/include/scsi/scsi_host.h
+-+++ b/include/scsi/scsi_host.h
+-@@ -7,6 +7,7 @@ #include &lt;linux/types.h&gt;
+- #include &lt;linux/workqueue.h&gt;
+- #include &lt;linux/mutex.h&gt;
+- 
+-+struct request_queue;
+- struct block_device;
+- struct completion;
+- struct module;
+-@@ -122,6 +123,39 @@ #endif
+- 	int (* queuecommand)(struct scsi_cmnd *,
+- 			     void (*done)(struct scsi_cmnd *));
+- 
+-+ 	/*
+-+	 * The transfer functions are used to queue a scsi command to
+-+	 * the LLD. When the driver is finished processing the command
+-+	 * the done callback is invoked.
+-+	 *
+-+	 * return values: see queuecommand
+-+	 *
+-+	 * If the LLD accepts the cmd, it should set the result to an
+-+	 * appropriate value when completed before calling the done function.
+-+	 *
+-+	 * STATUS: REQUIRED FOR TARGET DRIVERS
+-+	 */
+-+	/* TODO: rename */
+-+	int (* transfer_response)(struct scsi_cmnd *,
+-+				  void (*done)(struct scsi_cmnd *));
+-+	/*
+-+	 * This is called to inform the LLD to transfer cmd-&gt;request_bufflen
+-+	 * bytes of the cmd at cmd-&gt;offset in the cmd. The cmd-&gt;use_sg
+-+	 * speciefies the number of scatterlist entried in the command
+-+	 * and cmd-&gt;request_buffer contains the scatterlist.
+-+	 *
+-+	 * If the command cannot be processed in one transfer_data call
+-+	 * becuase a scatterlist within the LLD's limits cannot be
+-+	 * created then transfer_data will be called multiple times.
+-+	 * It is initially called from process context, and later
+-+	 * calls are from the interrup context.
+-+	 */
+-+	int (* transfer_data)(struct scsi_cmnd *,
+-+			      void (*done)(struct scsi_cmnd *));
+-+
+-+	/* Used as callback for the completion of task management request. */
+-+	int (* tsk_mgmt_response)(u64 mid, int result);
+-+
+- 	/*
+- 	 * This is an error handling strategy routine.  You don't need to
+- 	 * define one of these if you don't want to - there is a default
+-@@ -561,6 +595,12 @@ struct Scsi_Host {
+- 	 */
+- 	unsigned int max_host_blocked;
+- 
+-+	/*
+-+	 * q used for scsi_tgt msgs, async events or any other requests that
+-+	 * need to be processed in userspace
+-+ 	 */
+-+	struct request_queue *uspace_req_q;
+-+
+- 	/* legacy crap */
+- 	unsigned long base;
+- 	unsigned long io_port;
+-@@ -664,6 +704,9 @@ extern void scsi_unblock_requests(struct
+- extern void scsi_block_requests(struct Scsi_Host *);
+- 
+- struct class_container;
+-+
+-+extern struct request_queue *__scsi_alloc_queue(struct Scsi_Host *shost,
+-+						void (*) (struct request_queue *));
+- /*
+-  * These two functions are used to allocate and free a pseudo device
+-  * which will connect to the host adapter itself rather than any
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0005-scsi-tgt-scsi-target-lib-functionality.txt
+===================================================================
+--- trunk/patchset/0005-scsi-tgt-scsi-target-lib-functionality.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0005-scsi-tgt-scsi-target-lib-functionality.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,789 +0,0 @@
+-From 116f6f576a16fd7a2685916e4146930f90204d46 Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Fri, 18 Aug 2006 11:55:41 +0900
+-Subject: [PATCH 5/9] scsi tgt: scsi target lib functionality
+-
+-The core scsi target lib functions.
+-
+-TODO:
+-- mv md/dm-bio-list.h to linux/bio-list.h so md and us do not have to
+-do that weird include.
+-- convert scsi_tgt_cmd's work struct to James's execute code. And try
+-to kill our scsi_tgt_cmd.
+-- add host state checking. We do refcouting so hotplug is partially
+-supported, but we need to add state checking to make it easier on
+-the LLD.
+-
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- drivers/scsi/scsi_tgt_lib.c  |  700 ++++++++++++++++++++++++++++++++++++++++++
+- drivers/scsi/scsi_tgt_priv.h |   25 ++
+- include/scsi/scsi_tgt.h      |   18 +
+- 3 files changed, 743 insertions(+), 0 deletions(-)
+-
+-diff --git a/drivers/scsi/scsi_tgt_lib.c b/drivers/scsi/scsi_tgt_lib.c
+-new file mode 100644
+-index 0000000..c515c27
+---- /dev/null
+-+++ b/drivers/scsi/scsi_tgt_lib.c
+-@@ -0,0 +1,700 @@
+-+/*
+-+ * SCSI target lib functions
+-+ *
+-+ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-+ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+-+ *
+-+ * This program is free software; you can redistribute it and/or
+-+ * modify it under the terms of the GNU General Public License as
+-+ * published by the Free Software Foundation; either version 2 of the
+-+ * License, or (at your option) any later version.
+-+ *
+-+ * This program is distributed in the hope that it will be useful, but
+-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-+ * General Public License for more details.
+-+ *
+-+ * You should have received a copy of the GNU General Public License
+-+ * along with this program; if not, write to the Free Software
+-+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+-+ * 02110-1301 USA
+-+ */
+-+#include &lt;linux/blkdev.h&gt;
+-+#include &lt;linux/hash.h&gt;
+-+#include &lt;linux/module.h&gt;
+-+#include &lt;linux/pagemap.h&gt;
+-+#include &lt;scsi/scsi.h&gt;
+-+#include &lt;scsi/scsi_cmnd.h&gt;
+-+#include &lt;scsi/scsi_device.h&gt;
+-+#include &lt;scsi/scsi_host.h&gt;
+-+#include &lt;scsi/scsi_tgt.h&gt;
+-+#include &lt;../drivers/md/dm-bio-list.h&gt;
+-+
+-+#include &quot;scsi_tgt_priv.h&quot;
+-+
+-+static struct workqueue_struct *scsi_tgtd;
+-+static kmem_cache_t *scsi_tgt_cmd_cache;
+-+
+-+/*
+-+ * TODO: this struct will be killed when the block layer supports large bios
+-+ * and James's work struct code is in
+-+ */
+-+struct scsi_tgt_cmd {
+-+	/* TODO replace work with James b's code */
+-+	struct work_struct work;
+-+	/* TODO replace the lists with a large bio */
+-+	struct bio_list xfer_done_list;
+-+	struct bio_list xfer_list;
+-+
+-+	struct list_head hash_list;
+-+	struct request *rq;
+-+	u64 tag;
+-+
+-+	void *buffer;
+-+	unsigned bufflen;
+-+};
+-+
+-+#define TGT_HASH_ORDER	4
+-+#define cmd_hashfn(tag)	hash_long((unsigned long) (tag), TGT_HASH_ORDER)
+-+
+-+struct scsi_tgt_queuedata {
+-+	struct Scsi_Host *shost;
+-+	struct list_head cmd_hash[1 &lt;&lt; TGT_HASH_ORDER];
+-+	spinlock_t cmd_hash_lock;
+-+};
+-+
+-+/*
+-+ * Function:	scsi_host_get_command()
+-+ *
+-+ * Purpose:	Allocate and setup a scsi command block and blk request
+-+ *
+-+ * Arguments:	shost	- scsi host
+-+ *		data_dir - dma data dir
+-+ *		gfp_mask- allocator flags
+-+ *
+-+ * Returns:	The allocated scsi command structure.
+-+ *
+-+ * This should be called by target LLDs to get a command.
+-+ */
+-+struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *shost,
+-+					enum dma_data_direction data_dir,
+-+					gfp_t gfp_mask)
+-+{
+-+	int write = (data_dir == DMA_TO_DEVICE);
+-+	struct request *rq;
+-+	struct scsi_cmnd *cmd;
+-+	struct scsi_tgt_cmd *tcmd;
+-+
+-+	/* Bail if we can't get a reference to the device */
+-+	if (!get_device(&amp;shost-&gt;shost_gendev))
+-+		return NULL;
+-+
+-+	tcmd = kmem_cache_alloc(scsi_tgt_cmd_cache, GFP_ATOMIC);
+-+	if (!tcmd)
+-+		goto put_dev;
+-+
+-+	rq = blk_get_request(shost-&gt;uspace_req_q, write, gfp_mask);
+-+	if (!rq)
+-+		goto free_tcmd;
+-+
+-+	cmd = __scsi_get_command(shost, gfp_mask);
+-+	if (!cmd)
+-+		goto release_rq;
+-+
+-+	memset(cmd, 0, sizeof(*cmd));
+-+	cmd-&gt;sc_data_direction = data_dir;
+-+	cmd-&gt;jiffies_at_alloc = jiffies;
+-+	cmd-&gt;request = rq;
+-+
+-+	rq-&gt;special = cmd;
+-+	rq-&gt;flags |= REQ_SPECIAL | REQ_BLOCK_PC;
+-+	rq-&gt;end_io_data = tcmd;
+-+
+-+	bio_list_init(&amp;tcmd-&gt;xfer_list);
+-+	bio_list_init(&amp;tcmd-&gt;xfer_done_list);
+-+	tcmd-&gt;rq = rq;
+-+
+-+	return cmd;
+-+
+-+release_rq:
+-+	blk_put_request(rq);
+-+free_tcmd:
+-+	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+-+put_dev:
+-+	put_device(&amp;shost-&gt;shost_gendev);
+-+	return NULL;
+-+
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_host_get_command);
+-+
+-+/*
+-+ * Function:	scsi_host_put_command()
+-+ *
+-+ * Purpose:	Free a scsi command block
+-+ *
+-+ * Arguments:	shost	- scsi host
+-+ * 		cmd	- command block to free
+-+ *
+-+ * Returns:	Nothing.
+-+ *
+-+ * Notes:	The command must not belong to any lists.
+-+ */
+-+void scsi_host_put_command(struct Scsi_Host *shost, struct scsi_cmnd *cmd)
+-+{
+-+	struct request_queue *q = shost-&gt;uspace_req_q;
+-+	struct request *rq = cmd-&gt;request;
+-+	struct scsi_tgt_cmd *tcmd = rq-&gt;end_io_data;
+-+	unsigned long flags;
+-+
+-+	kmem_cache_free(scsi_tgt_cmd_cache, tcmd);
+-+
+-+	spin_lock_irqsave(q-&gt;queue_lock, flags);
+-+	__blk_put_request(q, rq);
+-+	spin_unlock_irqrestore(q-&gt;queue_lock, flags);
+-+
+-+	__scsi_put_command(shost, cmd, &amp;shost-&gt;shost_gendev);
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_host_put_command);
+-+
+-+static void scsi_unmap_user_pages(struct scsi_tgt_cmd *tcmd)
+-+{
+-+	struct bio *bio;
+-+
+-+	/* must call bio_endio in case bio was bounced */
+-+	while ((bio = bio_list_pop(&amp;tcmd-&gt;xfer_done_list))) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+	}
+-+
+-+	while ((bio = bio_list_pop(&amp;tcmd-&gt;xfer_list))) {
+-+		bio_endio(bio, bio-&gt;bi_size, 0);
+-+		bio_unmap_user(bio);
+-+	}
+-+}
+-+
+-+static void cmd_hashlist_del(struct scsi_cmnd *cmd)
+-+{
+-+	struct request_queue *q = cmd-&gt;request-&gt;q;
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	unsigned long flags;
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_del(&amp;tcmd-&gt;hash_list);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+}
+-+
+-+static void scsi_tgt_cmd_destroy(void *data)
+-+{
+-+	struct scsi_cmnd *cmd = data;
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+
+-+	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
+-+		rq_data_dir(cmd-&gt;request));
+-+
+-+	cmd_hashlist_del(cmd);
+-+
+-+	scsi_unmap_user_pages(tcmd);
+-+	scsi_host_put_command(scsi_tgt_cmd_to_host(cmd), cmd);
+-+}
+-+
+-+static void init_scsi_tgt_cmd(struct request *rq, struct scsi_tgt_cmd *tcmd,
+-+			      u64 tag)
+-+{
+-+	struct scsi_tgt_queuedata *qdata = rq-&gt;q-&gt;queuedata;
+-+	unsigned long flags;
+-+	struct list_head *head;
+-+
+-+	tcmd-&gt;tag = tag;
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(tag)];
+-+	list_add(&amp;tcmd-&gt;hash_list, head);
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+}
+-+
+-+/*
+-+ * scsi_tgt_alloc_queue - setup queue used for message passing
+-+ * shost: scsi host
+-+ *
+-+ * This should be called by the LLD after host allocation.
+-+ * And will be released when the host is released.
+-+ */
+-+int scsi_tgt_alloc_queue(struct Scsi_Host *shost)
+-+{
+-+	struct scsi_tgt_queuedata *queuedata;
+-+	struct request_queue *q;
+-+	int err, i;
+-+
+-+	/*
+-+	 * Do we need to send a netlink event or should uspace
+-+	 * just respond to the hotplug event?
+-+	 */
+-+	q = __scsi_alloc_queue(shost, NULL);
+-+	if (!q)
+-+		return -ENOMEM;
+-+
+-+	queuedata = kzalloc(sizeof(*queuedata), GFP_KERNEL);
+-+	if (!queuedata) {
+-+		err = -ENOMEM;
+-+		goto cleanup_queue;
+-+	}
+-+	queuedata-&gt;shost = shost;
+-+	q-&gt;queuedata = queuedata;
+-+
+-+	/*
+-+	 * this is a silly hack. We should probably just queue as many
+-+	 * command as is recvd to userspace. uspace can then make
+-+	 * sure we do not overload the HBA
+-+	 */
+-+	q-&gt;nr_requests = shost-&gt;hostt-&gt;can_queue;
+-+	/*
+-+	 * We currently only support software LLDs so this does
+-+	 * not matter for now. Do we need this for the cards we support?
+-+	 * If so we should make it a host template value.
+-+	 */
+-+	blk_queue_dma_alignment(q, 0);
+-+	shost-&gt;uspace_req_q = q;
+-+
+-+	for (i = 0; i &lt; ARRAY_SIZE(queuedata-&gt;cmd_hash); i++)
+-+		INIT_LIST_HEAD(&amp;queuedata-&gt;cmd_hash[i]);
+-+	spin_lock_init(&amp;queuedata-&gt;cmd_hash_lock);
+-+
+-+	return 0;
+-+
+-+cleanup_queue:
+-+	blk_cleanup_queue(q);
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_alloc_queue);
+-+
+-+struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *cmd)
+-+{
+-+	struct scsi_tgt_queuedata *queue = cmd-&gt;request-&gt;q-&gt;queuedata;
+-+	return queue-&gt;shost;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_cmd_to_host);
+-+
+-+/*
+-+ * scsi_tgt_queue_command - queue command for userspace processing
+-+ * @cmd:	scsi command
+-+ * @scsilun:	scsi lun
+-+ * @tag:	unique value to identify this command for tmf
+-+ */
+-+int scsi_tgt_queue_command(struct scsi_cmnd *cmd, struct scsi_lun *scsilun,
+-+			   u64 tag)
+-+{
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	int err;
+-+
+-+	init_scsi_tgt_cmd(cmd-&gt;request, tcmd, tag);
+-+	err = scsi_tgt_uspace_send_cmd(cmd, scsilun, tag);
+-+	if (err)
+-+		cmd_hashlist_del(cmd);
+-+
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_queue_command);
+-+
+-+/*
+-+ * This is run from a interrpt handler normally and the unmap
+-+ * needs process context so we must queue
+-+ */
+-+static void scsi_tgt_cmd_done(struct scsi_cmnd *cmd)
+-+{
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+
+-+	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+-+
+-+	scsi_tgt_uspace_send_status(cmd, tcmd-&gt;tag);
+-+	INIT_WORK(&amp;tcmd-&gt;work, scsi_tgt_cmd_destroy, cmd);
+-+	queue_work(scsi_tgtd, &amp;tcmd-&gt;work);
+-+}
+-+
+-+static int __scsi_tgt_transfer_response(struct scsi_cmnd *cmd)
+-+{
+-+	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-+	int err;
+-+
+-+	dprintk(&quot;cmd %p %lu\n&quot;, cmd, rq_data_dir(cmd-&gt;request));
+-+
+-+	err = shost-&gt;hostt-&gt;transfer_response(cmd, scsi_tgt_cmd_done);
+-+	switch (err) {
+-+	case SCSI_MLQUEUE_HOST_BUSY:
+-+	case SCSI_MLQUEUE_DEVICE_BUSY:
+-+		return -EAGAIN;
+-+	}
+-+
+-+	return 0;
+-+}
+-+
+-+static void scsi_tgt_transfer_response(struct scsi_cmnd *cmd)
+-+{
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	int err;
+-+
+-+	err = __scsi_tgt_transfer_response(cmd);
+-+	if (!err)
+-+		return;
+-+
+-+	cmd-&gt;result = DID_BUS_BUSY &lt;&lt; 16;
+-+	err = scsi_tgt_uspace_send_status(cmd, tcmd-&gt;tag);
+-+	if (err &lt;= 0)
+-+		/* the eh will have to pick this up */
+-+		printk(KERN_ERR &quot;Could not send cmd %p status\n&quot;, cmd);
+-+}
+-+
+-+static int scsi_tgt_init_cmd(struct scsi_cmnd *cmd, gfp_t gfp_mask)
+-+{
+-+	struct request *rq = cmd-&gt;request;
+-+	struct scsi_tgt_cmd *tcmd = rq-&gt;end_io_data;
+-+	int count;
+-+
+-+	cmd-&gt;use_sg = rq-&gt;nr_phys_segments;
+-+	cmd-&gt;request_buffer = scsi_alloc_sgtable(cmd, gfp_mask);
+-+	if (!cmd-&gt;request_buffer)
+-+		return -ENOMEM;
+-+
+-+	cmd-&gt;request_bufflen = rq-&gt;data_len;
+-+
+-+	dprintk(&quot;cmd %p addr %p cnt %d %lu\n&quot;, cmd, tcmd-&gt;buffer, cmd-&gt;use_sg,
+-+		rq_data_dir(rq));
+-+	count = blk_rq_map_sg(rq-&gt;q, rq, cmd-&gt;request_buffer);
+-+	if (likely(count &lt;= cmd-&gt;use_sg)) {
+-+		cmd-&gt;use_sg = count;
+-+		return 0;
+-+	}
+-+
+-+	eprintk(&quot;cmd %p addr %p cnt %d\n&quot;, cmd, tcmd-&gt;buffer, cmd-&gt;use_sg);
+-+	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+-+	return -EINVAL;
+-+}
+-+
+-+/* TODO: test this crap and replace bio_map_user with new interface maybe */
+-+static int scsi_map_user_pages(struct scsi_tgt_cmd *tcmd, struct scsi_cmnd *cmd,
+-+			       int rw)
+-+{
+-+	struct request_queue *q = cmd-&gt;request-&gt;q;
+-+	struct request *rq = cmd-&gt;request;
+-+	void *uaddr = tcmd-&gt;buffer;
+-+	unsigned int len = tcmd-&gt;bufflen;
+-+	struct bio *bio;
+-+	int err;
+-+
+-+	while (len &gt; 0) {
+-+		dprintk(&quot;%lx %u\n&quot;, (unsigned long) uaddr, len);
+-+		bio = bio_map_user(q, NULL, (unsigned long) uaddr, len, rw);
+-+		if (IS_ERR(bio)) {
+-+			err = PTR_ERR(bio);
+-+			dprintk(&quot;fail to map %lx %u %d %x\n&quot;,
+-+				(unsigned long) uaddr, len, err, cmd-&gt;cmnd[0]);
+-+			goto unmap_bios;
+-+		}
+-+
+-+		uaddr += bio-&gt;bi_size;
+-+		len -= bio-&gt;bi_size;
+-+
+-+		/*
+-+		 * The first bio is added and merged. We could probably
+-+		 * try to add others using scsi_merge_bio() but for now
+-+		 * we keep it simple. The first bio should be pretty large
+-+		 * (either hitting the 1 MB bio pages limit or a queue limit)
+-+		 * already but for really large IO we may want to try and
+-+		 * merge these.
+-+		 */
+-+		if (!rq-&gt;bio) {
+-+			blk_rq_bio_prep(q, rq, bio);
+-+			rq-&gt;data_len = bio-&gt;bi_size;
+-+		} else
+-+			/* put list of bios to transfer in next go around */
+-+			bio_list_add(&amp;tcmd-&gt;xfer_list, bio);
+-+	}
+-+
+-+	cmd-&gt;offset = 0;
+-+	err = scsi_tgt_init_cmd(cmd, GFP_KERNEL);
+-+	if (err)
+-+		goto unmap_bios;
+-+
+-+	return 0;
+-+
+-+unmap_bios:
+-+	if (rq-&gt;bio) {
+-+		bio_unmap_user(rq-&gt;bio);
+-+		while ((bio = bio_list_pop(&amp;tcmd-&gt;xfer_list)))
+-+			bio_unmap_user(bio);
+-+	}
+-+
+-+	return err;
+-+}
+-+
+-+static int scsi_tgt_transfer_data(struct scsi_cmnd *);
+-+
+-+static void scsi_tgt_data_transfer_done(struct scsi_cmnd *cmd)
+-+{
+-+	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	struct bio *bio;
+-+	int err;
+-+
+-+	/* should we free resources here on error ? */
+-+	if (cmd-&gt;result) {
+-+send_uspace_err:
+-+		err = scsi_tgt_uspace_send_status(cmd, tcmd-&gt;tag);
+-+		if (err &lt;= 0)
+-+			/* the tgt uspace eh will have to pick this up */
+-+			printk(KERN_ERR &quot;Could not send cmd %p status\n&quot;, cmd);
+-+		return;
+-+	}
+-+
+-+	dprintk(&quot;cmd %p request_bufflen %u bufflen %u\n&quot;,
+-+		cmd, cmd-&gt;request_bufflen, tcmd-&gt;bufflen);
+-+
+-+	scsi_free_sgtable(cmd-&gt;request_buffer, cmd-&gt;sglist_len);
+-+	bio_list_add(&amp;tcmd-&gt;xfer_done_list, cmd-&gt;request-&gt;bio);
+-+
+-+	tcmd-&gt;buffer += cmd-&gt;request_bufflen;
+-+	cmd-&gt;offset += cmd-&gt;request_bufflen;
+-+
+-+	if (!tcmd-&gt;xfer_list.head) {
+-+		scsi_tgt_transfer_response(cmd);
+-+		return;
+-+	}
+-+
+-+	dprintk(&quot;cmd2 %p request_bufflen %u bufflen %u\n&quot;,
+-+		cmd, cmd-&gt;request_bufflen, tcmd-&gt;bufflen);
+-+
+-+	bio = bio_list_pop(&amp;tcmd-&gt;xfer_list);
+-+	BUG_ON(!bio);
+-+
+-+	blk_rq_bio_prep(cmd-&gt;request-&gt;q, cmd-&gt;request, bio);
+-+	cmd-&gt;request-&gt;data_len = bio-&gt;bi_size;
+-+	err = scsi_tgt_init_cmd(cmd, GFP_ATOMIC);
+-+	if (err) {
+-+		cmd-&gt;result = DID_ERROR &lt;&lt; 16;
+-+		goto send_uspace_err;
+-+	}
+-+
+-+	if (scsi_tgt_transfer_data(cmd)) {
+-+		cmd-&gt;result = DID_NO_CONNECT &lt;&lt; 16;
+-+		goto send_uspace_err;
+-+	}
+-+}
+-+
+-+static int scsi_tgt_transfer_data(struct scsi_cmnd *cmd)
+-+{
+-+	int err;
+-+	struct Scsi_Host *host = scsi_tgt_cmd_to_host(cmd);
+-+
+-+	err = host-&gt;hostt-&gt;transfer_data(cmd, scsi_tgt_data_transfer_done);
+-+	switch (err) {
+-+		case SCSI_MLQUEUE_HOST_BUSY:
+-+		case SCSI_MLQUEUE_DEVICE_BUSY:
+-+			return -EAGAIN;
+-+	default:
+-+		return 0;
+-+	}
+-+}
+-+
+-+static int scsi_tgt_copy_sense(struct scsi_cmnd *cmd, unsigned long uaddr,
+-+				unsigned len)
+-+{
+-+	char __user *p = (char __user *) uaddr;
+-+
+-+	if (copy_from_user(cmd-&gt;sense_buffer, p,
+-+			   min_t(unsigned, SCSI_SENSE_BUFFERSIZE, len))) {
+-+		printk(KERN_ERR &quot;Could not copy the sense buffer\n&quot;);
+-+		return -EIO;
+-+	}
+-+	return 0;
+-+}
+-+
+-+static int scsi_tgt_abort_cmd(struct Scsi_Host *host, struct scsi_cmnd *cmd)
+-+{
+-+	int err;
+-+
+-+	err = host-&gt;hostt-&gt;eh_abort_handler(cmd);
+-+	if (err)
+-+		eprintk(&quot;fail to abort %p\n&quot;, cmd);
+-+
+-+	scsi_tgt_cmd_destroy(cmd);
+-+	return err;
+-+}
+-+
+-+static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u64 tag)
+-+{
+-+	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+-+	struct request *rq = NULL;
+-+	struct list_head *head;
+-+	struct scsi_tgt_cmd *tcmd;
+-+	unsigned long flags;
+-+
+-+	head = &amp;qdata-&gt;cmd_hash[cmd_hashfn(tag)];
+-+	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+	list_for_each_entry(tcmd, head, hash_list) {
+-+		if (tcmd-&gt;tag == tag) {
+-+			rq = tcmd-&gt;rq;
+-+			break;
+-+		}
+-+	}
+-+	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
+-+
+-+	return rq;
+-+}
+-+
+-+int scsi_tgt_kspace_exec(int host_no, u64 tag, int result, u32 len,
+-+			 unsigned long uaddr, u8 rw)
+-+{
+-+	struct Scsi_Host *shost;
+-+	struct scsi_cmnd *cmd;
+-+	struct request *rq;
+-+	struct scsi_tgt_cmd *tcmd;
+-+	int err = 0;
+-+
+-+	dprintk(&quot;%d %llu %d %u %lx %u\n&quot;, host_no, (unsigned long long) tag,
+-+		result, len, uaddr, rw);
+-+
+-+	/* TODO: replace with a O(1) alg */
+-+	shost = scsi_host_lookup(host_no);
+-+	if (IS_ERR(shost)) {
+-+		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
+-+		return -EINVAL;
+-+	}
+-+
+-+	if (!shost-&gt;uspace_req_q) {
+-+		printk(KERN_ERR &quot;Not target scsi host %d\n&quot;, host_no);
+-+		goto done;
+-+	}
+-+
+-+	rq = tgt_cmd_hash_lookup(shost-&gt;uspace_req_q, tag);
+-+	if (!rq) {
+-+		printk(KERN_ERR &quot;Could not find tag %llu\n&quot;,
+-+		       (unsigned long long) tag);
+-+		err = -EINVAL;
+-+		goto done;
+-+	}
+-+	cmd = rq-&gt;special;
+-+
+-+	dprintk(&quot;cmd %p result %d len %d bufflen %u %lu %x\n&quot;, cmd,
+-+		result, len, cmd-&gt;request_bufflen, rq_data_dir(rq), cmd-&gt;cmnd[0]);
+-+
+-+	if (result == TASK_ABORTED) {
+-+		scsi_tgt_abort_cmd(shost, cmd);
+-+		goto done;
+-+	}
+-+	/*
+-+	 * store the userspace values here, the working values are
+-+	 * in the request_* values
+-+	 */
+-+	tcmd = cmd-&gt;request-&gt;end_io_data;
+-+	tcmd-&gt;buffer = (void *)uaddr;
+-+	tcmd-&gt;bufflen = len;
+-+	cmd-&gt;result = result;
+-+
+-+	if (!tcmd-&gt;bufflen || cmd-&gt;request_buffer) {
+-+		err = __scsi_tgt_transfer_response(cmd);
+-+		goto done;
+-+	}
+-+
+-+	/*
+-+	 * TODO: Do we need to handle case where request does not
+-+	 * align with LLD.
+-+	 */
+-+	err = scsi_map_user_pages(rq-&gt;end_io_data, cmd, rw);
+-+	if (err) {
+-+		eprintk(&quot;%p %d\n&quot;, cmd, err);
+-+		err = -EAGAIN;
+-+		goto done;
+-+	}
+-+
+-+	/* userspace failure */
+-+	if (cmd-&gt;result) {
+-+		if (status_byte(cmd-&gt;result) == CHECK_CONDITION)
+-+			scsi_tgt_copy_sense(cmd, uaddr, len);
+-+		err = __scsi_tgt_transfer_response(cmd);
+-+		goto done;
+-+	}
+-+	/* ask the target LLD to transfer the data to the buffer */
+-+	err = scsi_tgt_transfer_data(cmd);
+-+
+-+done:
+-+	scsi_host_put(shost);
+-+	return err;
+-+}
+-+
+-+int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *shost, int function, u64 tag,
+-+			      struct scsi_lun *scsilun, void *data)
+-+{
+-+	int err;
+-+
+-+	/* TODO: need to retry if this fails. */
+-+	err = scsi_tgt_uspace_send_tsk_mgmt(shost-&gt;host_no, function,
+-+					    tag, scsilun, data);
+-+	if (err &lt; 0)
+-+		eprintk(&quot;The task management request lost!\n&quot;);
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(scsi_tgt_tsk_mgmt_request);
+-+
+-+int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result)
+-+{
+-+	struct Scsi_Host *shost;
+-+	int err = -EINVAL;
+-+
+-+	dprintk(&quot;%d %d %llx\n&quot;, host_no, result, (unsigned long long) mid);
+-+
+-+	shost = scsi_host_lookup(host_no);
+-+	if (IS_ERR(shost)) {
+-+		printk(KERN_ERR &quot;Could not find host no %d\n&quot;, host_no);
+-+		return err;
+-+	}
+-+
+-+	if (!shost-&gt;uspace_req_q) {
+-+		printk(KERN_ERR &quot;Not target scsi host %d\n&quot;, host_no);
+-+		goto done;
+-+	}
+-+
+-+	err = shost-&gt;hostt-&gt;tsk_mgmt_response(mid, result);
+-+done:
+-+	scsi_host_put(shost);
+-+	return err;
+-+}
+-+
+-+static int __init scsi_tgt_init(void)
+-+{
+-+	int err;
+-+
+-+	scsi_tgt_cmd_cache = kmem_cache_create(&quot;scsi_tgt_cmd&quot;,
+-+					       sizeof(struct scsi_tgt_cmd),
+-+					       0, 0, NULL, NULL);
+-+	if (!scsi_tgt_cmd_cache)
+-+		return -ENOMEM;
+-+
+-+	scsi_tgtd = create_workqueue(&quot;scsi_tgtd&quot;);
+-+	if (!scsi_tgtd) {
+-+		err = -ENOMEM;
+-+		goto free_kmemcache;
+-+	}
+-+
+-+	err = scsi_tgt_if_init();
+-+	if (err)
+-+		goto destroy_wq;
+-+
+-+	return 0;
+-+
+-+destroy_wq:
+-+	destroy_workqueue(scsi_tgtd);
+-+free_kmemcache:
+-+	kmem_cache_destroy(scsi_tgt_cmd_cache);
+-+	return err;
+-+}
+-+
+-+static void __exit scsi_tgt_exit(void)
+-+{
+-+	destroy_workqueue(scsi_tgtd);
+-+	scsi_tgt_if_exit();
+-+	kmem_cache_destroy(scsi_tgt_cmd_cache);
+-+}
+-+
+-+module_init(scsi_tgt_init);
+-+module_exit(scsi_tgt_exit);
+-+
+-+MODULE_DESCRIPTION(&quot;SCSI target core&quot;);
+-+MODULE_LICENSE(&quot;GPL&quot;);
+-diff --git a/drivers/scsi/scsi_tgt_priv.h b/drivers/scsi/scsi_tgt_priv.h
+-new file mode 100644
+-index 0000000..84488c5
+---- /dev/null
+-+++ b/drivers/scsi/scsi_tgt_priv.h
+-@@ -0,0 +1,25 @@
+-+struct scsi_cmnd;
+-+struct scsi_lun;
+-+struct Scsi_Host;
+-+struct task_struct;
+-+
+-+/* tmp - will replace with SCSI logging stuff */
+-+#define eprintk(fmt, args...)					\
+-+do {								\
+-+	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-+} while (0)
+-+
+-+#define dprintk(fmt, args...)
+-+/* #define dprintk eprintk */
+-+
+-+extern void scsi_tgt_if_exit(void);
+-+extern int scsi_tgt_if_init(void);
+-+
+-+extern int scsi_tgt_uspace_send_cmd(struct scsi_cmnd *cmd, struct scsi_lun *lun,
+-+				    u64 tag);
+-+extern int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, u64 tag);
+-+extern int scsi_tgt_kspace_exec(int host_no, u64 tag, int result, u32 len,
+-+				unsigned long uaddr, u8 rw);
+-+extern int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+					 struct scsi_lun *scsilun, void *data);
+-+extern int scsi_tgt_kspace_tsk_mgmt(int host_no, u64 mid, int result);
+-diff --git a/include/scsi/scsi_tgt.h b/include/scsi/scsi_tgt.h
+-new file mode 100644
+-index 0000000..1771151
+---- /dev/null
+-+++ b/include/scsi/scsi_tgt.h
+-@@ -0,0 +1,18 @@
+-+/*
+-+ * SCSI target definitions
+-+ */
+-+
+-+#include &lt;linux/dma-mapping.h&gt;
+-+
+-+struct Scsi_Host;
+-+struct scsi_cmnd;
+-+struct scsi_lun;
+-+
+-+extern struct Scsi_Host *scsi_tgt_cmd_to_host(struct scsi_cmnd *);
+-+extern int scsi_tgt_alloc_queue(struct Scsi_Host *);
+-+extern int scsi_tgt_queue_command(struct scsi_cmnd *, struct scsi_lun *, u64);
+-+extern int scsi_tgt_tsk_mgmt_request(struct Scsi_Host *, int, u64, struct scsi_lun *,
+-+				     void *);
+-+extern struct scsi_cmnd *scsi_host_get_command(struct Scsi_Host *,
+-+					       enum dma_data_direction,	gfp_t);
+-+extern void scsi_host_put_command(struct Scsi_Host *, struct scsi_cmnd *);
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0006-scsi-tgt-scsi-target-user-and-kernel-communication-interface.txt
+===================================================================
+--- trunk/patchset/0006-scsi-tgt-scsi-target-user-and-kernel-communication-interface.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0006-scsi-tgt-scsi-target-user-and-kernel-communication-interface.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,481 +0,0 @@
+-From 4f1934d63d45a88066061f460a7e57fdddba6bf6 Mon Sep 17 00:00:00 2001
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: Fri, 18 Aug 2006 00:32:41 +0900
+-Subject: [PATCH 6/9] scsi tgt: scsi target user and kernel communication interface
+-
+-The user-space daemon and tgt kernel module need to exchange mmapped
+-addresses. netlink cannot do that. We need two-way kernel/user
+-high-performance interface, however, mainline kernel provides no
+-standard interface like that.
+-
+-This patch adds shared memory interface between kernel and user spaces
+-like some other drivers do by using own character device. The
+-user-space daemon and tgt kernel module creates shared memory via mmap
+-and use it like ring buffer. poll (kernel to user) and write (user to
+-kernel) system calls are used for notification.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+----
+- drivers/scsi/scsi_tgt_if.c |  350 ++++++++++++++++++++++++++++++++++++++++++++
+- include/scsi/scsi_tgt_if.h |   93 ++++++++++++
+- 2 files changed, 443 insertions(+), 0 deletions(-)
+-
+-diff --git a/drivers/scsi/scsi_tgt_if.c b/drivers/scsi/scsi_tgt_if.c
+-new file mode 100644
+-index 0000000..09c4ab1
+---- /dev/null
+-+++ b/drivers/scsi/scsi_tgt_if.c
+-@@ -0,0 +1,350 @@
+-+/*
+-+ * SCSI target kernel/user interface functions
+-+ *
+-+ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+-+ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-+ *
+-+ * This program is free software; you can redistribute it and/or
+-+ * modify it under the terms of the GNU General Public License as
+-+ * published by the Free Software Foundation; either version 2 of the
+-+ * License, or (at your option) any later version.
+-+ *
+-+ * This program is distributed in the hope that it will be useful, but
+-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-+ * General Public License for more details.
+-+ *
+-+ * You should have received a copy of the GNU General Public License
+-+ * along with this program; if not, write to the Free Software
+-+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+-+ * 02110-1301 USA
+-+ */
+-+#include &lt;linux/miscdevice.h&gt;
+-+#include &lt;linux/file.h&gt;
+-+#include &lt;net/tcp.h&gt;
+-+#include &lt;scsi/scsi.h&gt;
+-+#include &lt;scsi/scsi_cmnd.h&gt;
+-+#include &lt;scsi/scsi_device.h&gt;
+-+#include &lt;scsi/scsi_host.h&gt;
+-+#include &lt;scsi/scsi_tgt.h&gt;
+-+#include &lt;scsi/scsi_tgt_if.h&gt;
+-+
+-+#include &quot;scsi_tgt_priv.h&quot;
+-+
+-+struct tgt_ring {
+-+	u32 tr_idx;
+-+	unsigned long tr_pages[TGT_RING_PAGES];
+-+	spinlock_t tr_lock;
+-+};
+-+
+-+/* tx_ring : kernel-&gt;user, rx_ring : user-&gt;kernel */
+-+static struct tgt_ring tx_ring, rx_ring;
+-+static DECLARE_WAIT_QUEUE_HEAD(tgt_poll_wait);
+-+
+-+static inline void tgt_ring_idx_inc(struct tgt_ring *ring)
+-+{
+-+	if (ring-&gt;tr_idx == TGT_MAX_EVENTS - 1)
+-+		ring-&gt;tr_idx = 0;
+-+	else
+-+		ring-&gt;tr_idx++;
+-+}
+-+
+-+static struct tgt_event *tgt_head_event(struct tgt_ring *ring, u32 idx)
+-+{
+-+	u32 pidx, off;
+-+
+-+	pidx = idx / TGT_EVENT_PER_PAGE;
+-+	off = idx % TGT_EVENT_PER_PAGE;
+-+
+-+	return (struct tgt_event *)
+-+		(ring-&gt;tr_pages[pidx] + sizeof(struct tgt_event) * off);
+-+}
+-+
+-+static int tgt_uspace_send_event(u32 type, struct tgt_event *p)
+-+{
+-+	struct tgt_event *ev;
+-+	struct tgt_ring *ring = &amp;tx_ring;
+-+	unsigned long flags;
+-+	int err = 0;
+-+
+-+	spin_lock_irqsave(&amp;ring-&gt;tr_lock, flags);
+-+
+-+	ev = tgt_head_event(ring, ring-&gt;tr_idx);
+-+	if (ev-&gt;status == TGT_EVENT_STATUS_EMPTY)
+-+		tgt_ring_idx_inc(ring);
+-+	else
+-+		err = -BUSY;
+-+
+-+	spin_unlock_irqrestore(&amp;ring-&gt;tr_lock, flags);
+-+
+-+	if (err)
+-+		return err;
+-+
+-+	memcpy(ev, p, sizeof(*ev));
+-+	ev-&gt;type = type;
+-+	ev-&gt;status = TGT_EVENT_STATUS_USED;
+-+	mb();
+-+
+-+	flush_dcache_page(virt_to_page(ev));
+-+
+-+	wake_up_interruptible(&amp;tgt_poll_wait);
+-+
+-+	return 0;
+-+}
+-+
+-+int scsi_tgt_uspace_send_cmd(struct scsi_cmnd *cmd, struct scsi_lun *lun, u64 tag)
+-+{
+-+	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-+	struct tgt_event ev;
+-+	int err;
+-+
+-+	memset(&amp;ev, 0, sizeof(ev));
+-+	ev.k.cmd_req.host_no = shost-&gt;host_no;
+-+	ev.k.cmd_req.data_len = cmd-&gt;request_bufflen;
+-+	memcpy(ev.k.cmd_req.scb, cmd-&gt;cmnd, sizeof(ev.k.cmd_req.scb));
+-+	memcpy(ev.k.cmd_req.lun, lun, sizeof(ev.k.cmd_req.lun));
+-+	ev.k.cmd_req.attribute = cmd-&gt;tag;
+-+	ev.k.cmd_req.tag = tag;
+-+
+-+	dprintk(&quot;%p %d %u %x %llx\n&quot;, cmd, shost-&gt;host_no,
+-+		ev.k.cmd_req.data_len, cmd-&gt;tag,
+-+		(unsigned long long) ev.k.cmd_req.tag);
+-+
+-+	err = tgt_uspace_send_event(TGT_KEVENT_CMD_REQ, &amp;ev);
+-+	if (err)
+-+		eprintk(&quot;tx buf is full, could not send\n&quot;);
+-+
+-+	return err;
+-+}
+-+
+-+int scsi_tgt_uspace_send_status(struct scsi_cmnd *cmd, u64 tag)
+-+{
+-+	struct Scsi_Host *shost = scsi_tgt_cmd_to_host(cmd);
+-+	struct tgt_event ev;
+-+	int err;
+-+
+-+	memset(&amp;ev, 0, sizeof(ev));
+-+	ev.k.cmd_done.host_no = shost-&gt;host_no;
+-+	ev.k.cmd_done.tag = tag;
+-+	ev.k.cmd_done.result = cmd-&gt;result;
+-+
+-+	dprintk(&quot;%p %d %llu %u %x\n&quot;, cmd, shost-&gt;host_no,
+-+		(unsigned long long) ev.k.cmd_req.tag,
+-+		ev.k.cmd_req.data_len, cmd-&gt;tag);
+-+
+-+	err = tgt_uspace_send_event(TGT_KEVENT_CMD_DONE, &amp;ev);
+-+	if (err)
+-+		eprintk(&quot;tx buf is full, could not send\n&quot;);
+-+
+-+	return err;
+-+}
+-+
+-+int scsi_tgt_uspace_send_tsk_mgmt(int host_no, int function, u64 tag,
+-+				  struct scsi_lun *scsilun, void *data)
+-+{
+-+	struct tgt_event ev;
+-+	int err;
+-+
+-+	memset(&amp;ev, 0, sizeof(ev));
+-+	ev.k.tsk_mgmt_req.host_no = host_no;
+-+	ev.k.tsk_mgmt_req.function = function;
+-+	ev.k.tsk_mgmt_req.tag = tag;
+-+	memcpy(ev.k.tsk_mgmt_req.lun, scsilun, sizeof(ev.k.tsk_mgmt_req.lun));
+-+	ev.k.tsk_mgmt_req.mid = (u64) (unsigned long) data;
+-+
+-+	dprintk(&quot;%d %x %llx %llx\n&quot;, host_no, function, (unsigned long long) tag,
+-+		(unsigned long long) ev.k.tsk_mgmt_req.mid);
+-+
+-+	err = tgt_uspace_send_event(TGT_KEVENT_TSK_MGMT_REQ, &amp;ev);
+-+	if (err)
+-+		eprintk(&quot;tx buf is full, could not send\n&quot;);
+-+
+-+	return err;
+-+}
+-+
+-+static int event_recv_msg(struct tgt_event *ev)
+-+{
+-+	int err = 0;
+-+
+-+	switch (ev-&gt;type) {
+-+	case TGT_UEVENT_CMD_RSP:
+-+		err = scsi_tgt_kspace_exec(ev-&gt;u.cmd_rsp.host_no,
+-+					   ev-&gt;u.cmd_rsp.tag,
+-+					   ev-&gt;u.cmd_rsp.result,
+-+					   ev-&gt;u.cmd_rsp.len,
+-+					   ev-&gt;u.cmd_rsp.uaddr,
+-+					   ev-&gt;u.cmd_rsp.rw);
+-+		break;
+-+	case TGT_UEVENT_TSK_MGMT_RSP:
+-+		err = scsi_tgt_kspace_tsk_mgmt(ev-&gt;u.tsk_mgmt_rsp.host_no,
+-+					       ev-&gt;u.tsk_mgmt_rsp.mid,
+-+					       ev-&gt;u.tsk_mgmt_rsp.result);
+-+		break;
+-+	default:
+-+		eprintk(&quot;unknown type %d\n&quot;, ev-&gt;type);
+-+		err = -EINVAL;
+-+	}
+-+
+-+	return err;
+-+}
+-+
+-+static ssize_t tgt_write(struct file *file, const char __user * buffer,
+-+			 size_t count, loff_t * ppos)
+-+{
+-+	struct tgt_event *ev;
+-+	struct tgt_ring *ring = &amp;rx_ring;
+-+
+-+	while (1) {
+-+		ev = tgt_head_event(ring, ring-&gt;tr_idx);
+-+		if (ev-&gt;status == TGT_EVENT_STATUS_EMPTY)
+-+			break;
+-+
+-+		/* do we need this? */
+-+		flush_dcache_page(virt_to_page(ev));
+-+
+-+		tgt_ring_idx_inc(ring);
+-+		ev-&gt;status = TGT_EVENT_STATUS_EMPTY;
+-+		event_recv_msg(ev);
+-+	};
+-+
+-+	return count;
+-+}
+-+
+-+static unsigned int tgt_poll(struct file * file, struct poll_table_struct *wait)
+-+{
+-+	struct tgt_event *ev;
+-+	struct tgt_ring *ring = &amp;tx_ring;
+-+	unsigned long flags;
+-+	unsigned int mask = 0;
+-+	u32 idx;
+-+
+-+	poll_wait(file, &amp;tgt_poll_wait, wait);
+-+
+-+	spin_lock_irqsave(&amp;ring-&gt;tr_lock, flags);
+-+
+-+	idx = ring-&gt;tr_idx ? ring-&gt;tr_idx - 1 : TGT_MAX_EVENTS - 1;
+-+	ev = tgt_head_event(ring, idx);
+-+	if (ev-&gt;status == TGT_EVENT_STATUS_USED)
+-+		mask |= POLLIN | POLLRDNORM;
+-+
+-+	spin_unlock_irqrestore(&amp;ring-&gt;tr_lock, flags);
+-+
+-+	return mask;
+-+}
+-+
+-+static int uspace_ring_map(struct vm_area_struct *vma, unsigned long addr,
+-+			   struct tgt_ring *ring)
+-+{
+-+	int i, err;
+-+
+-+	for (i = 0; i &lt; TGT_RING_PAGES; i++) {
+-+		struct page *page = virt_to_page(ring-&gt;tr_pages[i]);
+-+		err = vm_insert_page(vma, addr, page);
+-+		if (err)
+-+			return err;
+-+		addr += PAGE_SIZE;
+-+	}
+-+
+-+	return 0;
+-+}
+-+
+-+static int tgt_mmap(struct file *filp, struct vm_area_struct *vma)
+-+{
+-+	unsigned long addr;
+-+	int err;
+-+
+-+	if (vma-&gt;vm_pgoff)
+-+		return -EINVAL;
+-+
+-+	if (vma-&gt;vm_end - vma-&gt;vm_start != TGT_RING_SIZE * 2) {
+-+		eprintk(&quot;mmap size must be %lu, not %lu \n&quot;,
+-+			TGT_RING_SIZE * 2, vma-&gt;vm_end - vma-&gt;vm_start);
+-+		return -EINVAL;
+-+	}
+-+
+-+	addr = vma-&gt;vm_start;
+-+	err = uspace_ring_map(vma, addr, &amp;tx_ring);
+-+	if (err)
+-+		return err;
+-+	err = uspace_ring_map(vma, addr + TGT_RING_SIZE, &amp;rx_ring);
+-+
+-+	return err;
+-+}
+-+
+-+static int tgt_open(struct inode *inode, struct file *file)
+-+{
+-+	tx_ring.tr_idx = rx_ring.tr_idx = 0;
+-+
+-+	return 0;
+-+}
+-+
+-+static struct file_operations tgt_fops = {
+-+	.owner		= THIS_MODULE,
+-+	.open		= tgt_open,
+-+	.poll		= tgt_poll,
+-+	.write		= tgt_write,
+-+	.mmap		= tgt_mmap,
+-+};
+-+
+-+static struct miscdevice tgt_miscdev = {
+-+	.minor = MISC_DYNAMIC_MINOR,
+-+	.name = &quot;tgt&quot;,
+-+	.fops = &amp;tgt_fops,
+-+};
+-+
+-+static void tgt_ring_exit(struct tgt_ring *ring)
+-+{
+-+	int i;
+-+
+-+	for (i = 0; i &lt; TGT_RING_PAGES; i++)
+-+		free_page(ring-&gt;tr_pages[i]);
+-+}
+-+
+-+static int tgt_ring_init(struct tgt_ring *ring)
+-+{
+-+	int i;
+-+
+-+	spin_lock_init(&amp;ring-&gt;tr_lock);
+-+
+-+	for (i = 0; i &lt; TGT_RING_PAGES; i++) {
+-+		ring-&gt;tr_pages[i] = get_zeroed_page(GFP_KERNEL);
+-+		if (!ring-&gt;tr_pages[i]) {
+-+			eprintk(&quot;out of memory\n&quot;);
+-+			return -ENOMEM;
+-+		}
+-+	}
+-+
+-+	return 0;
+-+}
+-+
+-+void scsi_tgt_if_exit(void)
+-+{
+-+	tgt_ring_exit(&amp;tx_ring);
+-+	tgt_ring_exit(&amp;rx_ring);
+-+	misc_deregister(&amp;tgt_miscdev);
+-+}
+-+
+-+int scsi_tgt_if_init(void)
+-+{
+-+	int err;
+-+
+-+	err = tgt_ring_init(&amp;tx_ring);
+-+	if (err)
+-+		return err;
+-+
+-+	err = tgt_ring_init(&amp;rx_ring);
+-+	if (err)
+-+		goto free_tx_ring;
+-+
+-+	err = misc_register(&amp;tgt_miscdev);
+-+	if (err)
+-+		goto free_rx_ring;
+-+
+-+	return 0;
+-+free_rx_ring:
+-+	tgt_ring_exit(&amp;rx_ring);
+-+free_tx_ring:
+-+	tgt_ring_exit(&amp;tx_ring);
+-+
+-+	return err;
+-+}
+-diff --git a/include/scsi/scsi_tgt_if.h b/include/scsi/scsi_tgt_if.h
+-new file mode 100644
+-index 0000000..5671920
+---- /dev/null
+-+++ b/include/scsi/scsi_tgt_if.h
+-@@ -0,0 +1,93 @@
+-+/*
+-+ * SCSI target kernel/user interface
+-+ *
+-+ * Copyright (C) 2005 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+-+ * Copyright (C) 2005 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-+ *
+-+ * This program is free software; you can redistribute it and/or
+-+ * modify it under the terms of the GNU General Public License as
+-+ * published by the Free Software Foundation; either version 2 of the
+-+ * License, or (at your option) any later version.
+-+ *
+-+ * This program is distributed in the hope that it will be useful, but
+-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-+ * General Public License for more details.
+-+ *
+-+ * You should have received a copy of the GNU General Public License
+-+ * along with this program; if not, write to the Free Software
+-+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+-+ * 02110-1301 USA
+-+ */
+-+#ifndef __SCSI_TARGET_IF_H
+-+#define __SCSI_TARGET_IF_H
+-+
+-+enum tgt_event_status {
+-+	TGT_EVENT_STATUS_EMPTY = 0,
+-+	TGT_EVENT_STATUS_USED,
+-+};
+-+
+-+enum tgt_event_type {
+-+	/* user -&gt; kernel */
+-+	TGT_UEVENT_CMD_RSP,
+-+	TGT_UEVENT_TSK_MGMT_RSP,
+-+
+-+	/* kernel -&gt; user */
+-+	TGT_KEVENT_CMD_REQ,
+-+	TGT_KEVENT_CMD_DONE,
+-+	TGT_KEVENT_TSK_MGMT_REQ,
+-+};
+-+
+-+struct tgt_event {
+-+	uint32_t status;
+-+	uint32_t type;
+-+
+-+	/* user-&gt; kernel */
+-+	union {
+-+		struct {
+-+			int host_no;
+-+			uint32_t len;
+-+			int result;
+-+			uint64_t uaddr;
+-+			uint8_t rw;
+-+			uint64_t tag;
+-+		} cmd_rsp;
+-+		struct {
+-+			int host_no;
+-+			uint64_t mid;
+-+			int result;
+-+		} tsk_mgmt_rsp;
+-+	} u;
+-+
+-+	/* kernel -&gt; user */
+-+	union {
+-+		struct {
+-+			int host_no;
+-+			uint32_t data_len;
+-+			uint8_t scb[16];
+-+			uint8_t lun[8];
+-+			int attribute;
+-+			uint64_t tag;
+-+		} cmd_req;
+-+		struct {
+-+			int host_no;
+-+			uint64_t tag;
+-+			int result;
+-+		} cmd_done;
+-+		struct {
+-+			int host_no;
+-+			int function;
+-+			uint64_t tag;
+-+			uint8_t lun[8];
+-+			uint64_t mid;
+-+		} tsk_mgmt_req;
+-+	} k;
+-+
+-+} __attribute__ ((aligned (sizeof(uint64_t))));
+-+
+-+#define TGT_RING_SIZE (1UL &lt;&lt; 16)
+-+#define TGT_RING_PAGES (TGT_RING_SIZE &gt;&gt; PAGE_SHIFT)
+-+#define TGT_EVENT_PER_PAGE (PAGE_SIZE / sizeof(struct tgt_event))
+-+#define TGT_MAX_EVENTS (TGT_EVENT_PER_PAGE * TGT_RING_PAGES)
+-+
+-+#endif
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0007-scsi-ml-Makefile-and-Kconfig-changes-for-tgt.txt
+===================================================================
+--- trunk/patchset/0007-scsi-ml-Makefile-and-Kconfig-changes-for-tgt.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0007-scsi-ml-Makefile-and-Kconfig-changes-for-tgt.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,57 +0,0 @@
+-From 4d62965a2d1d43b05529bf2f26563d3ddbe449cb Mon Sep 17 00:00:00 2001
+-From: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Date: Fri, 18 Aug 2006 00:33:17 +0900
+-Subject: [PATCH 7/9] scsi-ml: Makefile and Kconfig changes for tgt
+-
+-Makefile and Kconfig stuff.
+-
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- drivers/scsi/Kconfig  |    7 +++++++
+- drivers/scsi/Makefile |    3 +++
+- 2 files changed, 10 insertions(+), 0 deletions(-)
+-
+-diff --git a/drivers/scsi/Kconfig b/drivers/scsi/Kconfig
+-index 96a81cd..566626c 100644
+---- a/drivers/scsi/Kconfig
+-+++ b/drivers/scsi/Kconfig
+-@@ -27,6 +27,13 @@ config SCSI
+- 	  However, do not compile this as a module if your root file system
+- 	  (the one containing the directory /) is located on a SCSI device.
+- 
+-+config SCSI_TGT
+-+	tristate &quot;SCSI target support&quot;
+-+	depends on SCSI &amp;&amp; EXPERIMENTAL
+-+	---help---
+-+	  If you want to use SCSI target mode drivers enable this option.
+-+	  If you choose M, the module will be called scsi_tgt.
+-+
+- config SCSI_PROC_FS
+- 	bool &quot;legacy /proc/scsi/ support&quot;
+- 	depends on SCSI &amp;&amp; PROC_FS
+-diff --git a/drivers/scsi/Makefile b/drivers/scsi/Makefile
+-index ebd0cf0..ede0c45 100644
+---- a/drivers/scsi/Makefile
+-+++ b/drivers/scsi/Makefile
+-@@ -21,6 +21,7 @@ CFLAGS_seagate.o =   -DARBITRATE -DPARIT
+- subdir-$(CONFIG_PCMCIA)		+= pcmcia
+- 
+- obj-$(CONFIG_SCSI)		+= scsi_mod.o
+-+obj-$(CONFIG_SCSI_TGT)		+= scsi_tgt.o
+- 
+- obj-$(CONFIG_RAID_ATTRS)	+= raid_class.o
+- 
+-@@ -158,6 +159,8 @@ scsi_mod-y			+= scsi.o hosts.o scsi_ioct
+- scsi_mod-$(CONFIG_SYSCTL)	+= scsi_sysctl.o
+- scsi_mod-$(CONFIG_SCSI_PROC_FS)	+= scsi_proc.o
+- 
+-+scsi_tgt-y			+= scsi_tgt_lib.o scsi_tgt_if.o
+-+
+- sd_mod-objs	:= sd.o
+- sr_mod-objs	:= sr.o sr_ioctl.o sr_vendor.o
+- ncr53c8xx-flags-$(CONFIG_SCSI_ZALON) \
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0008-scsi-tgt-SCSI-RDMA-Protocol-library-functions.txt
+===================================================================
+--- trunk/patchset/0008-scsi-tgt-SCSI-RDMA-Protocol-library-functions.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0008-scsi-tgt-SCSI-RDMA-Protocol-library-functions.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,591 +0,0 @@
+-From b5ab4781574e70ed224a5dee7fe600880c98dda4 Mon Sep 17 00:00:00 2001
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: Fri, 18 Aug 2006 00:36:47 +0900
+-Subject: [PATCH 8/9] scsi tgt: SCSI RDMA Protocol library functions
+-
+-libsrp provides helper functions for SRP target drivers.
+-
+-The next step would be to add initiator support to merge the two SRP
+-initiator drivers (ibmvscsi and ib_srp) in mainline.
+-
+-Some SRP target drivers would be out of drivers/scsi/ so I added an
+-entry for libsrp in drivers/scsi/Kconfig, though I'm not sure about
+-it.
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- drivers/scsi/Kconfig  |    9 +
+- drivers/scsi/Makefile |    1 
+- drivers/scsi/libsrp.c |  441 +++++++++++++++++++++++++++++++++++++++++++++++++
+- include/scsi/libsrp.h |   79 +++++++++
+- 4 files changed, 530 insertions(+), 0 deletions(-)
+-
+-diff --git a/drivers/scsi/Kconfig b/drivers/scsi/Kconfig
+-index 566626c..e5098d3 100644
+---- a/drivers/scsi/Kconfig
+-+++ b/drivers/scsi/Kconfig
+-@@ -1846,6 +1846,15 @@ config ZFCP
+-           called zfcp. If you want to compile it as a module, say M here
+-           and read &lt;file:Documentation/modules.txt&gt;.
+- 
+-+config SCSI_SRP
+-+	tristate &quot;SCSI RDMA Protocol helper library&quot;
+-+	depends on SCSI
+-+	help
+-+	  If you wish to use SRP target drivers, say Y.
+-+
+-+	  To compile this driver as a module, choose M here: the
+-+	  module will be called libsrp.
+-+
+- endmenu
+- 
+- source &quot;drivers/scsi/pcmcia/Kconfig&quot;
+-diff --git a/drivers/scsi/Makefile b/drivers/scsi/Makefile
+-index ede0c45..d71bb59 100644
+---- a/drivers/scsi/Makefile
+-+++ b/drivers/scsi/Makefile
+-@@ -122,6 +122,7 @@ obj-$(CONFIG_SCSI_FCAL)		+= fcal.o
+- obj-$(CONFIG_SCSI_LASI700)	+= 53c700.o lasi700.o
+- obj-$(CONFIG_SCSI_NSP32)	+= nsp32.o
+- obj-$(CONFIG_SCSI_IPR)		+= ipr.o
+-+obj-$(CONFIG_SCSI_SRP)		+= libsrp.o
+- obj-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsi/
+- obj-$(CONFIG_SCSI_SATA_AHCI)	+= libata.o ahci.o
+- obj-$(CONFIG_SCSI_SATA_SVW)	+= libata.o sata_svw.o
+-diff --git a/drivers/scsi/libsrp.c b/drivers/scsi/libsrp.c
+-new file mode 100644
+-index 0000000..86b7718
+---- /dev/null
+-+++ b/drivers/scsi/libsrp.c
+-@@ -0,0 +1,441 @@
+-+/*
+-+ * SCSI RDAM Protocol lib functions
+-+ *
+-+ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+-+ *
+-+ * This program is free software; you can redistribute it and/or
+-+ * modify it under the terms of the GNU General Public License as
+-+ * published by the Free Software Foundation; either version 2 of the
+-+ * License, or (at your option) any later version.
+-+ *
+-+ * This program is distributed in the hope that it will be useful, but
+-+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-+ * General Public License for more details.
+-+ *
+-+ * You should have received a copy of the GNU General Public License
+-+ * along with this program; if not, write to the Free Software
+-+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+-+ * 02110-1301 USA
+-+ */
+-+#include &lt;linux/err.h&gt;
+-+#include &lt;linux/kfifo.h&gt;
+-+#include &lt;linux/scatterlist.h&gt;
+-+#include &lt;linux/dma-mapping.h&gt;
+-+#include &lt;linux/pci.h&gt;
+-+#include &lt;scsi/scsi.h&gt;
+-+#include &lt;scsi/scsi_cmnd.h&gt;
+-+#include &lt;scsi/scsi_tcq.h&gt;
+-+#include &lt;scsi/scsi_tgt.h&gt;
+-+#include &lt;scsi/srp.h&gt;
+-+#include &lt;scsi/libsrp.h&gt;
+-+
+-+enum srp_task_attributes {
+-+	SRP_SIMPLE_TASK = 0,
+-+	SRP_HEAD_TASK = 1,
+-+	SRP_ORDERED_TASK = 2,
+-+	SRP_ACA_TASK = 4
+-+};
+-+
+-+/* tmp - will replace with SCSI logging stuff */
+-+#define eprintk(fmt, args...)					\
+-+do {								\
+-+	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-+} while (0)
+-+/* #define dprintk eprintk */
+-+#define dprintk(fmt, args...)
+-+
+-+static int srp_iu_pool_alloc(struct srp_queue *q, size_t max,
+-+			     struct srp_buf **ring)
+-+{
+-+	int i;
+-+	struct iu_entry *iue;
+-+
+-+	q-&gt;pool = kcalloc(max, sizeof(struct iu_entry *), GFP_KERNEL);
+-+	if (!q-&gt;pool)
+-+		return -ENOMEM;
+-+	q-&gt;items = kcalloc(max, sizeof(struct iu_entry), GFP_KERNEL);
+-+	if (!q-&gt;items)
+-+		goto free_pool;
+-+
+-+	spin_lock_init(&amp;q-&gt;lock);
+-+	q-&gt;queue = kfifo_init((void *) q-&gt;pool, max * sizeof(void *),
+-+			      GFP_KERNEL, &amp;q-&gt;lock);
+-+	if (IS_ERR(q-&gt;queue))
+-+		goto free_item;
+-+
+-+	for (i = 0, iue = q-&gt;items; i &lt; max; i++) {
+-+		__kfifo_put(q-&gt;queue, (void *) &amp;iue, sizeof(void *));
+-+		iue-&gt;sbuf = ring[i];
+-+		iue++;
+-+	}
+-+	return 0;
+-+
+-+free_item:
+-+	kfree(q-&gt;items);
+-+free_pool:
+-+	kfree(q-&gt;pool);
+-+	return -ENOMEM;
+-+}
+-+
+-+static void srp_iu_pool_free(struct srp_queue *q)
+-+{
+-+	kfree(q-&gt;items);
+-+	kfree(q-&gt;pool);
+-+}
+-+
+-+static struct srp_buf **srp_ring_alloc(struct device *dev,
+-+				       size_t max, size_t size)
+-+{
+-+	int i;
+-+	struct srp_buf **ring;
+-+
+-+	ring = kcalloc(max, sizeof(struct srp_buf *), GFP_KERNEL);
+-+	if (!ring)
+-+		return NULL;
+-+
+-+	for (i = 0; i &lt; max; i++) {
+-+		ring[i] = kzalloc(sizeof(struct srp_buf), GFP_KERNEL);
+-+		if (!ring[i])
+-+			goto out;
+-+		ring[i]-&gt;buf = dma_alloc_coherent(dev, size, &amp;ring[i]-&gt;dma,
+-+						  GFP_KERNEL);
+-+		if (!ring[i]-&gt;buf)
+-+			goto out;
+-+	}
+-+	return ring;
+-+
+-+out:
+-+	for (i = 0; i &lt; max &amp;&amp; ring[i]; i++) {
+-+		if (ring[i]-&gt;buf)
+-+			dma_free_coherent(dev, size, ring[i]-&gt;buf, ring[i]-&gt;dma);
+-+		kfree(ring[i]);
+-+	}
+-+	kfree(ring);
+-+
+-+	return NULL;
+-+}
+-+
+-+static void srp_ring_free(struct device *dev, struct srp_buf **ring, size_t max,
+-+			  size_t size)
+-+{
+-+	int i;
+-+
+-+	for (i = 0; i &lt; max; i++) {
+-+		dma_free_coherent(dev, size, ring[i]-&gt;buf, ring[i]-&gt;dma);
+-+		kfree(ring[i]);
+-+	}
+-+}
+-+
+-+int srp_target_alloc(struct srp_target *target, struct device *dev,
+-+		     size_t nr, size_t iu_size)
+-+{
+-+	int err;
+-+
+-+	spin_lock_init(&amp;target-&gt;lock);
+-+	INIT_LIST_HEAD(&amp;target-&gt;cmd_queue);
+-+
+-+	target-&gt;dev = dev;
+-+	target-&gt;dev-&gt;driver_data = target;
+-+
+-+	target-&gt;srp_iu_size = iu_size;
+-+	target-&gt;rx_ring_size = nr;
+-+	target-&gt;rx_ring = srp_ring_alloc(target-&gt;dev, nr, iu_size);
+-+	if (!target-&gt;rx_ring)
+-+		return -ENOMEM;
+-+	err = srp_iu_pool_alloc(&amp;target-&gt;iu_queue, nr, target-&gt;rx_ring);
+-+	if (err)
+-+		goto free_ring;
+-+
+-+	return 0;
+-+
+-+free_ring:
+-+	srp_ring_free(target-&gt;dev, target-&gt;rx_ring, nr, iu_size);
+-+	return -ENOMEM;
+-+}
+-+EXPORT_SYMBOL_GPL(srp_target_alloc);
+-+
+-+void srp_target_free(struct srp_target *target)
+-+{
+-+	srp_ring_free(target-&gt;dev, target-&gt;rx_ring, target-&gt;rx_ring_size,
+-+		      target-&gt;srp_iu_size);
+-+	srp_iu_pool_free(&amp;target-&gt;iu_queue);
+-+}
+-+EXPORT_SYMBOL_GPL(srp_target_free);
+-+
+-+struct iu_entry *srp_iu_get(struct srp_target *target)
+-+{
+-+	struct iu_entry *iue = NULL;
+-+
+-+	kfifo_get(target-&gt;iu_queue.queue, (void *) &amp;iue, sizeof(void *));
+-+	BUG_ON(!iue);
+-+
+-+	iue-&gt;target = target;
+-+	INIT_LIST_HEAD(&amp;iue-&gt;ilist);
+-+	iue-&gt;flags = 0;
+-+	return iue;
+-+}
+-+EXPORT_SYMBOL_GPL(srp_iu_get);
+-+
+-+void srp_iu_put(struct iu_entry *iue)
+-+{
+-+	kfifo_put(iue-&gt;target-&gt;iu_queue.queue, (void *) &amp;iue, sizeof(void *));
+-+}
+-+EXPORT_SYMBOL_GPL(srp_iu_put);
+-+
+-+static int srp_direct_data(struct scsi_cmnd *sc, struct srp_direct_buf *md,
+-+			   enum dma_data_direction dir, srp_rdma_t rdma_io,
+-+			   int dma_map, int ext_desc)
+-+{
+-+	struct iu_entry *iue = NULL;
+-+	struct scatterlist *sg = NULL;
+-+	int err, nsg = 0, len;
+-+
+-+	if (dma_map) {
+-+		iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+		sg = sc-&gt;request_buffer;
+-+
+-+		dprintk(&quot;%p %u %u %d\n&quot;, iue, sc-&gt;request_bufflen,
+-+			md-&gt;len, sc-&gt;use_sg);
+-+
+-+		nsg = dma_map_sg(iue-&gt;target-&gt;dev, sg, sc-&gt;use_sg,
+-+				 DMA_BIDIRECTIONAL);
+-+		if (!nsg) {
+-+			printk(&quot;fail to map %p %d\n&quot;, iue, sc-&gt;use_sg);
+-+			return 0;
+-+		}
+-+		len = min(sc-&gt;request_bufflen, md-&gt;len);
+-+	} else
+-+		len = md-&gt;len;
+-+
+-+	err = rdma_io(sc, sg, nsg, md, 1, dir, len);
+-+
+-+	if (dma_map)
+-+		dma_unmap_sg(iue-&gt;target-&gt;dev, sg, nsg, DMA_BIDIRECTIONAL);
+-+
+-+	return err;
+-+}
+-+
+-+static int srp_indirect_data(struct scsi_cmnd *sc, struct srp_cmd *cmd,
+-+			     struct srp_indirect_buf *id,
+-+			     enum dma_data_direction dir, srp_rdma_t rdma_io,
+-+			     int dma_map, int ext_desc)
+-+{
+-+	struct iu_entry *iue = NULL;
+-+	struct srp_direct_buf *md = NULL;
+-+	struct scatterlist dummy, *sg = NULL;
+-+	dma_addr_t token = 0;
+-+	long err;
+-+	unsigned int done = 0;
+-+	int nmd, nsg = 0, len;
+-+
+-+	if (dma_map || ext_desc) {
+-+		iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+		sg = sc-&gt;request_buffer;
+-+
+-+		dprintk(&quot;%p %u %u %d %d\n&quot;,
+-+			iue, sc-&gt;request_bufflen, id-&gt;len,
+-+			cmd-&gt;data_in_desc_cnt, cmd-&gt;data_out_desc_cnt);
+-+	}
+-+
+-+	nmd = id-&gt;table_desc.len / sizeof(struct srp_direct_buf);
+-+
+-+	if ((dir == DMA_FROM_DEVICE &amp;&amp; nmd == cmd-&gt;data_in_desc_cnt) ||
+-+	    (dir == DMA_TO_DEVICE &amp;&amp; nmd == cmd-&gt;data_out_desc_cnt)) {
+-+		md = &amp;id-&gt;desc_list[0];
+-+		goto rdma;
+-+	}
+-+
+-+	if (ext_desc &amp;&amp; dma_map) {
+-+		md = dma_alloc_coherent(iue-&gt;target-&gt;dev, id-&gt;table_desc.len,
+-+				&amp;token, GFP_KERNEL);
+-+		if (!md) {
+-+			eprintk(&quot;Can't get dma memory %u\n&quot;, id-&gt;table_desc.len);
+-+			return -ENOMEM;
+-+		}
+-+
+-+		sg_init_one(&amp;dummy, md, id-&gt;table_desc.len);
+-+		sg_dma_address(&amp;dummy) = token;
+-+		err = rdma_io(sc, &amp;dummy, 1, &amp;id-&gt;table_desc, 1, DMA_TO_DEVICE,
+-+			      id-&gt;table_desc.len);
+-+		if (err &lt; 0) {
+-+			eprintk(&quot;Error copying indirect table %ld\n&quot;, err);
+-+			goto free_mem;
+-+		}
+-+	} else {
+-+		eprintk(&quot;This command uses external indirect buffer\n&quot;);
+-+		return -EINVAL;
+-+	}
+-+
+-+rdma:
+-+	if (dma_map) {
+-+		nsg = dma_map_sg(iue-&gt;target-&gt;dev, sg, sc-&gt;use_sg, DMA_BIDIRECTIONAL);
+-+		if (!nsg) {
+-+			eprintk(&quot;fail to map %p %d\n&quot;, iue, sc-&gt;use_sg);
+-+			goto free_mem;
+-+		}
+-+		len = min(sc-&gt;request_bufflen, id-&gt;len);
+-+	} else
+-+		len = id-&gt;len;
+-+
+-+	err = rdma_io(sc, sg, nsg, md, nmd, dir, len);
+-+
+-+	if (dma_map)
+-+		dma_unmap_sg(iue-&gt;target-&gt;dev, sg, nsg, DMA_BIDIRECTIONAL);
+-+
+-+free_mem:
+-+	if (token &amp;&amp; dma_map)
+-+		dma_free_coherent(iue-&gt;target-&gt;dev, id-&gt;table_desc.len, md, token);
+-+
+-+	return done;
+-+}
+-+
+-+static int data_out_desc_size(struct srp_cmd *cmd)
+-+{
+-+	int size = 0;
+-+	u8 fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
+-+
+-+	switch (fmt) {
+-+	case SRP_NO_DATA_DESC:
+-+		break;
+-+	case SRP_DATA_DESC_DIRECT:
+-+		size = sizeof(struct srp_direct_buf);
+-+		break;
+-+	case SRP_DATA_DESC_INDIRECT:
+-+		size = sizeof(struct srp_indirect_buf) +
+-+			sizeof(struct srp_direct_buf) * cmd-&gt;data_out_desc_cnt;
+-+		break;
+-+	default:
+-+		eprintk(&quot;client error. Invalid data_out_format %x\n&quot;, fmt);
+-+		break;
+-+	}
+-+	return size;
+-+}
+-+
+-+/*
+-+ * TODO: this can be called multiple times for a single command if it
+-+ * has very long data.
+-+ */
+-+int srp_transfer_data(struct scsi_cmnd *sc, struct srp_cmd *cmd,
+-+		      srp_rdma_t rdma_io, int dma_map, int ext_desc)
+-+{
+-+	struct srp_direct_buf *md;
+-+	struct srp_indirect_buf *id;
+-+	enum dma_data_direction dir;
+-+	int offset, err = 0;
+-+	u8 format;
+-+
+-+	offset = cmd-&gt;add_cdb_len * 4;
+-+
+-+	dir = srp_cmd_direction(cmd);
+-+	if (dir == DMA_FROM_DEVICE)
+-+		offset += data_out_desc_size(cmd);
+-+
+-+	if (dir == DMA_TO_DEVICE)
+-+		format = cmd-&gt;buf_fmt &gt;&gt; 4;
+-+	else
+-+		format = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
+-+
+-+	switch (format) {
+-+	case SRP_NO_DATA_DESC:
+-+		break;
+-+	case SRP_DATA_DESC_DIRECT:
+-+		md = (struct srp_direct_buf *)
+-+			(cmd-&gt;add_data + offset);
+-+		err = srp_direct_data(sc, md, dir, rdma_io, dma_map, ext_desc);
+-+		break;
+-+	case SRP_DATA_DESC_INDIRECT:
+-+		id = (struct srp_indirect_buf *)
+-+			(cmd-&gt;add_data + offset);
+-+		err = srp_indirect_data(sc, cmd, id, dir, rdma_io, dma_map,
+-+					ext_desc);
+-+		break;
+-+	default:
+-+		eprintk(&quot;Unknown format %d %x\n&quot;, dir, format);
+-+		break;
+-+	}
+-+
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(srp_transfer_data);
+-+
+-+static int vscsis_data_length(struct srp_cmd *cmd, enum dma_data_direction dir)
+-+{
+-+	struct srp_direct_buf *md;
+-+	struct srp_indirect_buf *id;
+-+	int len = 0, offset = cmd-&gt;add_cdb_len * 4;
+-+	u8 fmt;
+-+
+-+	if (dir == DMA_TO_DEVICE)
+-+		fmt = cmd-&gt;buf_fmt &gt;&gt; 4;
+-+	else {
+-+		fmt = cmd-&gt;buf_fmt &amp; ((1U &lt;&lt; 4) - 1);
+-+		offset += data_out_desc_size(cmd);
+-+	}
+-+
+-+	switch (fmt) {
+-+	case SRP_NO_DATA_DESC:
+-+		break;
+-+	case SRP_DATA_DESC_DIRECT:
+-+		md = (struct srp_direct_buf *) (cmd-&gt;add_data + offset);
+-+		len = md-&gt;len;
+-+		break;
+-+	case SRP_DATA_DESC_INDIRECT:
+-+		id = (struct srp_indirect_buf *) (cmd-&gt;add_data + offset);
+-+		len = id-&gt;len;
+-+		break;
+-+	default:
+-+		eprintk(&quot;invalid data format %x\n&quot;, fmt);
+-+		break;
+-+	}
+-+	return len;
+-+}
+-+
+-+int srp_cmd_queue(struct Scsi_Host *shost, struct srp_cmd *cmd, void *info,
+-+		  u64 addr)
+-+{
+-+	enum dma_data_direction dir;
+-+	struct scsi_cmnd *sc;
+-+	int tag, len, err;
+-+
+-+	switch (cmd-&gt;task_attr) {
+-+	case SRP_SIMPLE_TASK:
+-+		tag = MSG_SIMPLE_TAG;
+-+		break;
+-+	case SRP_ORDERED_TASK:
+-+		tag = MSG_ORDERED_TAG;
+-+		break;
+-+	case SRP_HEAD_TASK:
+-+		tag = MSG_HEAD_TAG;
+-+		break;
+-+	default:
+-+		eprintk(&quot;Task attribute %d not supported\n&quot;, cmd-&gt;task_attr);
+-+		tag = MSG_ORDERED_TAG;
+-+	}
+-+
+-+	dir = srp_cmd_direction(cmd);
+-+	len = vscsis_data_length(cmd, dir);
+-+
+-+	dprintk(&quot;%p %x %lx %d %d %d %llx\n&quot;, info, cmd-&gt;cdb[0],
+-+		cmd-&gt;lun, dir, len, tag, (unsigned long long) cmd-&gt;tag);
+-+
+-+	sc = scsi_host_get_command(shost, dir, GFP_KERNEL);
+-+	if (!sc)
+-+		return -ENOMEM;
+-+
+-+	sc-&gt;SCp.ptr = info;
+-+	memcpy(sc-&gt;cmnd, cmd-&gt;cdb, MAX_COMMAND_SIZE);
+-+	sc-&gt;request_bufflen = len;
+-+	sc-&gt;request_buffer = (void *) (unsigned long) addr;
+-+	sc-&gt;tag = tag;
+-+	err = scsi_tgt_queue_command(sc, (struct scsi_lun *) &amp;cmd-&gt;lun, cmd-&gt;tag);
+-+	if (err)
+-+		scsi_host_put_command(shost, sc);
+-+
+-+	return err;
+-+}
+-+EXPORT_SYMBOL_GPL(srp_cmd_queue);
+-+
+-+MODULE_DESCRIPTION(&quot;SCSI RDAM Protocol lib functions&quot;);
+-+MODULE_AUTHOR(&quot;FUJITA Tomonori&quot;);
+-+MODULE_LICENSE(&quot;GPL&quot;);
+-diff --git a/include/scsi/libsrp.h b/include/scsi/libsrp.h
+-new file mode 100644
+-index 0000000..8ec13b9
+---- /dev/null
+-+++ b/include/scsi/libsrp.h
+-@@ -0,0 +1,79 @@
+-+#ifndef __LIBSRP_H__
+-+#define __LIBSRP_H__
+-+
+-+#include &lt;linux/list.h&gt;
+-+#include &lt;scsi/scsi_cmnd.h&gt;
+-+#include &lt;scsi/scsi_host.h&gt;
+-+#include &lt;scsi/srp.h&gt;
+-+
+-+enum iue_flags {
+-+	V_DIOVER,
+-+	V_WRITE,
+-+	V_LINKED,
+-+	V_FLYING,
+-+};
+-+
+-+struct srp_buf {
+-+	dma_addr_t dma;
+-+	void *buf;
+-+};
+-+
+-+struct srp_queue {
+-+	void *pool;
+-+	void *items;
+-+	struct kfifo *queue;
+-+	spinlock_t lock;
+-+};
+-+
+-+struct srp_target {
+-+	struct Scsi_Host *shost;
+-+	struct device *dev;
+-+
+-+	spinlock_t lock;
+-+	struct list_head cmd_queue;
+-+
+-+	size_t srp_iu_size;
+-+	struct srp_queue iu_queue;
+-+	size_t rx_ring_size;
+-+	struct srp_buf **rx_ring;
+-+
+-+	/* IB needs tx_ring too */
+-+
+-+	void *ldata;
+-+};
+-+
+-+struct iu_entry {
+-+	struct srp_target *target;
+-+
+-+	struct list_head ilist;
+-+	dma_addr_t remote_token;
+-+	unsigned long flags;
+-+
+-+	struct srp_buf *sbuf;
+-+};
+-+
+-+typedef int (srp_rdma_t)(struct scsi_cmnd *, struct scatterlist *, int,
+-+			 struct srp_direct_buf *, int,
+-+			 enum dma_data_direction, unsigned int);
+-+extern int srp_target_alloc(struct srp_target *, struct device *, size_t, size_t);
+-+extern void srp_target_free(struct srp_target *);
+-+
+-+extern struct iu_entry *srp_iu_get(struct srp_target *);
+-+extern void srp_iu_put(struct iu_entry *);
+-+
+-+extern int srp_cmd_queue(struct Scsi_Host *, struct srp_cmd *, void *, u64);
+-+extern int srp_transfer_data(struct scsi_cmnd *, struct srp_cmd *,
+-+			     srp_rdma_t, int, int);
+-+
+-+
+-+static inline struct srp_target *host_to_srp_target(struct Scsi_Host *host)
+-+{
+-+	return (struct srp_target *) host-&gt;hostdata;
+-+}
+-+
+-+static inline int srp_cmd_direction(struct srp_cmd *cmd)
+-+{
+-+	return (cmd-&gt;buf_fmt &gt;&gt; 4) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
+-+}
+-+
+-+#endif
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/0009-scsi-tgt-IBM-eServer-i-pSeries-virtual-SCSI-target-driver.txt
+===================================================================
+--- trunk/patchset/0009-scsi-tgt-IBM-eServer-i-pSeries-virtual-SCSI-target-driver.txt	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/0009-scsi-tgt-IBM-eServer-i-pSeries-virtual-SCSI-target-driver.txt	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,1028 +0,0 @@
+-From eed708a465130a096f3ce2892198ed77ef2504b8 Mon Sep 17 00:00:00 2001
+-From: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Date: Fri, 18 Aug 2006 00:41:02 +0900
+-Subject: [PATCH 9/9] scsi tgt: IBM eServer i/pSeries virtual SCSI target driver
+-
+-This is IBM Virtual SCSI target driver for tgt. The driver is based on
+-the original ibmvscsis driver:
+-
+-<A HREF="http://lkml.org/lkml/2005/10/17/99">http://lkml.org/lkml/2005/10/17/99</A>
+-
+-Signed-off-by: FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">fujita.tomonori at lab.ntt.co.jp</A>&gt;
+-Signed-off-by: Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
+-Signed-off-by: James Bottomley &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">James.Bottomley at SteelEye.com</A>&gt;
+----
+- drivers/scsi/Kconfig             |   14 +
+- drivers/scsi/Makefile            |    1 
+- drivers/scsi/ibmvscsi/Makefile   |    2 
+- drivers/scsi/ibmvscsi/ibmvstgt.c |  952 ++++++++++++++++++++++++++++++++++++++
+- 4 files changed, 969 insertions(+), 0 deletions(-)
+-
+-diff --git a/drivers/scsi/Kconfig b/drivers/scsi/Kconfig
+-index e5098d3..c25154c 100644
+---- a/drivers/scsi/Kconfig
+-+++ b/drivers/scsi/Kconfig
+-@@ -917,6 +917,20 @@ config SCSI_IBMVSCSI
+- 	  To compile this driver as a module, choose M here: the
+- 	  module will be called ibmvscsic.
+- 
+-+config SCSI_IBMVSCSIS
+-+	tristate &quot;IBM Virtual SCSI Server support&quot;
+-+	depends on PPC_PSERIES &amp;&amp; SCSI_TGT &amp;&amp; SCSI_SRP
+-+	help
+-+	  This is the SRP target driver for IBM pSeries virtual environments.
+-+
+-+	  The userspace component needed to initialize the driver and
+-+	  documentation can be found:
+-+
+-+	  <A HREF="http://stgt.berlios.de/">http://stgt.berlios.de/</A>
+-+
+-+	  To compile this driver as a module, choose M here: the
+-+	  module will be called ibmvstgt.
+-+
+- config SCSI_INITIO
+- 	tristate &quot;Initio 9100U(W) support&quot;
+- 	depends on PCI &amp;&amp; SCSI
+-diff --git a/drivers/scsi/Makefile b/drivers/scsi/Makefile
+-index d71bb59..78544e3 100644
+---- a/drivers/scsi/Makefile
+-+++ b/drivers/scsi/Makefile
+-@@ -124,6 +124,7 @@ obj-$(CONFIG_SCSI_NSP32)	+= nsp32.o
+- obj-$(CONFIG_SCSI_IPR)		+= ipr.o
+- obj-$(CONFIG_SCSI_SRP)		+= libsrp.o
+- obj-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsi/
+-+obj-$(CONFIG_SCSI_IBMVSCSIS)	+= ibmvscsi/
+- obj-$(CONFIG_SCSI_SATA_AHCI)	+= libata.o ahci.o
+- obj-$(CONFIG_SCSI_SATA_SVW)	+= libata.o sata_svw.o
+- obj-$(CONFIG_SCSI_ATA_PIIX)	+= libata.o ata_piix.o
+-diff --git a/drivers/scsi/ibmvscsi/Makefile b/drivers/scsi/ibmvscsi/Makefile
+-index 4e247b6..6ac0633 100644
+---- a/drivers/scsi/ibmvscsi/Makefile
+-+++ b/drivers/scsi/ibmvscsi/Makefile
+-@@ -3,3 +3,5 @@ obj-$(CONFIG_SCSI_IBMVSCSI)	+= ibmvscsic
+- ibmvscsic-y			+= ibmvscsi.o
+- ibmvscsic-$(CONFIG_PPC_ISERIES)	+= iseries_vscsi.o 
+- ibmvscsic-$(CONFIG_PPC_PSERIES)	+= rpa_vscsi.o 
+-+
+-+obj-$(CONFIG_SCSI_IBMVSCSIS)	+= ibmvstgt.o
+-diff --git a/drivers/scsi/ibmvscsi/ibmvstgt.c b/drivers/scsi/ibmvscsi/ibmvstgt.c
+-new file mode 100644
+-index 0000000..7a98517
+---- /dev/null
+-+++ b/drivers/scsi/ibmvscsi/ibmvstgt.c
+-@@ -0,0 +1,952 @@
+-+/*
+-+ * IBM eServer i/pSeries Virtual SCSI Target Driver
+-+ * Copyright (C) 2003-2005 Dave Boutcher (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">boutcher at us.ibm.com</A>) IBM Corp.
+-+ *			   Santiago Leon (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">santil at us.ibm.com</A>) IBM Corp.
+-+ *			   Linda Xie (<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">lxie at us.ibm.com</A>) IBM Corp.
+-+ *
+-+ * Copyright (C) 2005-2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
+-+ *
+-+ * This program is free software; you can redistribute it and/or modify
+-+ * it under the terms of the GNU General Public License as published by
+-+ * the Free Software Foundation; either version 2 of the License, or
+-+ * (at your option) any later version.
+-+ *
+-+ * This program is distributed in the hope that it will be useful,
+-+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+-+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+-+ * GNU General Public License for more details.
+-+ *
+-+ * You should have received a copy of the GNU General Public License
+-+ * along with this program; if not, write to the Free Software
+-+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+-+ * USA
+-+ */
+-+#include &lt;linux/interrupt.h&gt;
+-+#include &lt;linux/module.h&gt;
+-+#include &lt;scsi/scsi.h&gt;
+-+#include &lt;scsi/scsi_host.h&gt;
+-+#include &lt;scsi/scsi_tgt.h&gt;
+-+#include &lt;scsi/libsrp.h&gt;
+-+#include &lt;asm/hvcall.h&gt;
+-+#include &lt;asm/iommu.h&gt;
+-+#include &lt;asm/prom.h&gt;
+-+#include &lt;asm/vio.h&gt;
+-+
+-+#include &quot;ibmvscsi.h&quot;
+-+
+-+#define	INITIAL_SRP_LIMIT	16
+-+#define	DEFAULT_MAX_SECTORS	512
+-+
+-+#define	TGT_NAME	&quot;ibmvstgt&quot;
+-+
+-+/*
+-+ * Hypervisor calls.
+-+ */
+-+#define h_copy_rdma(l, sa, sb, da, db) \
+-+			plpar_hcall_norets(H_COPY_RDMA, l, sa, sb, da, db)
+-+#define h_send_crq(ua, l, h) \
+-+			plpar_hcall_norets(H_SEND_CRQ, ua, l, h)
+-+#define h_reg_crq(ua, tok, sz)\
+-+			plpar_hcall_norets(H_REG_CRQ, ua, tok, sz);
+-+#define h_free_crq(ua) \
+-+			plpar_hcall_norets(H_FREE_CRQ, ua);
+-+
+-+/* tmp - will replace with SCSI logging stuff */
+-+#define eprintk(fmt, args...)					\
+-+do {								\
+-+	printk(&quot;%s(%d) &quot; fmt, __FUNCTION__, __LINE__, ##args);	\
+-+} while (0)
+-+/* #define dprintk eprintk */
+-+#define dprintk(fmt, args...)
+-+
+-+struct vio_port {
+-+	struct vio_dev *dma_dev;
+-+
+-+	struct crq_queue crq_queue;
+-+	struct work_struct crq_work;
+-+
+-+	unsigned long liobn;
+-+	unsigned long riobn;
+-+};
+-+
+-+static struct workqueue_struct *vtgtd;
+-+
+-+/*
+-+ * These are fixed for the system and come from the Open Firmware device tree.
+-+ * We just store them here to save getting them every time.
+-+ */
+-+static char system_id[64] = &quot;&quot;;
+-+static char partition_name[97] = &quot;UNKNOWN&quot;;
+-+static unsigned int partition_number = -1;
+-+
+-+static struct vio_port *target_to_port(struct srp_target *target)
+-+{
+-+	return (struct vio_port *) target-&gt;ldata;
+-+}
+-+
+-+static inline union viosrp_iu *vio_iu(struct iu_entry *iue)
+-+{
+-+	return (union viosrp_iu *) (iue-&gt;sbuf-&gt;buf);
+-+}
+-+
+-+static int send_iu(struct iu_entry *iue, uint64_t length, uint8_t format)
+-+{
+-+	struct srp_target *target = iue-&gt;target;
+-+	struct vio_port *vport = target_to_port(target);
+-+	long rc, rc1;
+-+	union {
+-+		struct viosrp_crq cooked;
+-+		uint64_t raw[2];
+-+	} crq;
+-+
+-+	/* First copy the SRP */
+-+	rc = h_copy_rdma(length, vport-&gt;liobn, iue-&gt;sbuf-&gt;dma,
+-+			 vport-&gt;riobn, iue-&gt;remote_token);
+-+
+-+	if (rc)
+-+		eprintk(&quot;Error %ld transferring data\n&quot;, rc);
+-+
+-+	crq.cooked.valid = 0x80;
+-+	crq.cooked.format = format;
+-+	crq.cooked.reserved = 0x00;
+-+	crq.cooked.timeout = 0x00;
+-+	crq.cooked.IU_length = length;
+-+	crq.cooked.IU_data_ptr = vio_iu(iue)-&gt;srp.rsp.tag;
+-+
+-+	if (rc == 0)
+-+		crq.cooked.status = 0x99;	/* Just needs to be non-zero */
+-+	else
+-+		crq.cooked.status = 0x00;
+-+
+-+	rc1 = h_send_crq(vport-&gt;dma_dev-&gt;unit_address, crq.raw[0], crq.raw[1]);
+-+
+-+	if (rc1) {
+-+		eprintk(&quot;%ld sending response\n&quot;, rc1);
+-+		return rc1;
+-+	}
+-+
+-+	return rc;
+-+}
+-+
+-+#define SRP_RSP_SENSE_DATA_LEN	18
+-+
+-+static int send_rsp(struct iu_entry *iue, struct scsi_cmnd *sc,
+-+		    unsigned char status, unsigned char asc)
+-+{
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	uint64_t tag = iu-&gt;srp.rsp.tag;
+-+
+-+	/* If the linked bit is on and status is good */
+-+	if (test_bit(V_LINKED, &amp;iue-&gt;flags) &amp;&amp; (status == NO_SENSE))
+-+		status = 0x10;
+-+
+-+	memset(iu, 0, sizeof(struct srp_rsp));
+-+	iu-&gt;srp.rsp.opcode = SRP_RSP;
+-+	iu-&gt;srp.rsp.req_lim_delta = 1;
+-+	iu-&gt;srp.rsp.tag = tag;
+-+
+-+	if (test_bit(V_DIOVER, &amp;iue-&gt;flags))
+-+		iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_DIOVER;
+-+
+-+	iu-&gt;srp.rsp.data_in_res_cnt = 0;
+-+	iu-&gt;srp.rsp.data_out_res_cnt = 0;
+-+
+-+	iu-&gt;srp.rsp.flags &amp;= ~SRP_RSP_FLAG_RSPVALID;
+-+
+-+	iu-&gt;srp.rsp.resp_data_len = 0;
+-+	iu-&gt;srp.rsp.status = status;
+-+	if (status) {
+-+		uint8_t *sense = iu-&gt;srp.rsp.data;
+-+
+-+		if (sc) {
+-+			iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
+-+			iu-&gt;srp.rsp.sense_data_len = SCSI_SENSE_BUFFERSIZE;
+-+			memcpy(sense, sc-&gt;sense_buffer, SCSI_SENSE_BUFFERSIZE);
+-+		} else {
+-+			iu-&gt;srp.rsp.status = SAM_STAT_CHECK_CONDITION;
+-+			iu-&gt;srp.rsp.flags |= SRP_RSP_FLAG_SNSVALID;
+-+			iu-&gt;srp.rsp.sense_data_len = SRP_RSP_SENSE_DATA_LEN;
+-+
+-+			/* Valid bit and 'current errors' */
+-+			sense[0] = (0x1 &lt;&lt; 7 | 0x70);
+-+			/* Sense key */
+-+			sense[2] = status;
+-+			/* Additional sense length */
+-+			sense[7] = 0xa;	/* 10 bytes */
+-+			/* Additional sense code */
+-+			sense[12] = asc;
+-+		}
+-+	}
+-+
+-+	send_iu(iue, sizeof(iu-&gt;srp.rsp) + SRP_RSP_SENSE_DATA_LEN,
+-+		VIOSRP_SRP_FORMAT);
+-+
+-+	return 0;
+-+}
+-+
+-+static void handle_cmd_queue(struct srp_target *target)
+-+{
+-+	struct Scsi_Host *shost = target-&gt;shost;
+-+	struct iu_entry *iue;
+-+	struct srp_cmd *cmd;
+-+	unsigned long flags;
+-+	int err;
+-+
+-+retry:
+-+	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-+
+-+	list_for_each_entry(iue, &amp;target-&gt;cmd_queue, ilist) {
+-+		if (!test_and_set_bit(V_FLYING, &amp;iue-&gt;flags)) {
+-+			spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-+			cmd = iue-&gt;sbuf-&gt;buf;
+-+			err = srp_cmd_queue(shost, cmd, iue, 0);
+-+			if (err) {
+-+				eprintk(&quot;cannot queue cmd %p %d\n&quot;, cmd, err);
+-+				srp_iu_put(iue);
+-+			}
+-+			goto retry;
+-+		}
+-+	}
+-+
+-+	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-+}
+-+
+-+static int ibmvstgt_rdma(struct scsi_cmnd *sc, struct scatterlist *sg, int nsg,
+-+			 struct srp_direct_buf *md, int nmd,
+-+			 enum dma_data_direction dir, unsigned int rest)
+-+{
+-+	struct iu_entry *iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+	struct srp_target *target = iue-&gt;target;
+-+	struct vio_port *vport = target_to_port(target);
+-+	dma_addr_t token;
+-+	long err;
+-+	unsigned int done = 0;
+-+	int i, sidx, soff;
+-+
+-+	sidx = soff = 0;
+-+	token = sg_dma_address(sg + sidx);
+-+
+-+	for (i = 0; i &lt; nmd &amp;&amp; rest; i++) {
+-+		unsigned int mdone, mlen;
+-+
+-+		mlen = min(rest, md[i].len);
+-+		for (mdone = 0; mlen;) {
+-+			int slen = min(sg_dma_len(sg + sidx) - soff, mlen);
+-+
+-+			if (dir == DMA_TO_DEVICE)
+-+				err = h_copy_rdma(slen,
+-+						  vport-&gt;riobn,
+-+						  md[i].va + mdone,
+-+						  vport-&gt;liobn,
+-+						  token + soff);
+-+			else
+-+				err = h_copy_rdma(slen,
+-+						  vport-&gt;liobn,
+-+						  token + soff,
+-+						  vport-&gt;riobn,
+-+						  md[i].va + mdone);
+-+
+-+			if (err != H_SUCCESS) {
+-+				eprintk(&quot;rdma error %d %d\n&quot;, dir, slen);
+-+				goto out;
+-+			}
+-+
+-+			mlen -= slen;
+-+			mdone += slen;
+-+			soff += slen;
+-+			done += slen;
+-+
+-+			if (soff == sg_dma_len(sg + sidx)) {
+-+				sidx++;
+-+				soff = 0;
+-+				token = sg_dma_address(sg + sidx);
+-+
+-+				if (sidx &gt; nsg) {
+-+					eprintk(&quot;out of sg %p %d %d\n&quot;,
+-+						iue, sidx, nsg);
+-+					goto out;
+-+				}
+-+			}
+-+		};
+-+
+-+		rest -= mlen;
+-+	}
+-+out:
+-+
+-+	return 0;
+-+}
+-+
+-+static int ibmvstgt_transfer_data(struct scsi_cmnd *sc,
+-+				  void (*done)(struct scsi_cmnd *))
+-+{
+-+	struct iu_entry	*iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+	int err;
+-+
+-+	err = srp_transfer_data(sc, &amp;vio_iu(iue)-&gt;srp.cmd, ibmvstgt_rdma, 1, 1);
+-+
+-+	done(sc);
+-+
+-+	return err;
+-+}
+-+
+-+static int ibmvstgt_cmd_done(struct scsi_cmnd *sc,
+-+			     void (*done)(struct scsi_cmnd *))
+-+{
+-+	unsigned long flags;
+-+	struct iu_entry *iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+	struct srp_target *target = iue-&gt;target;
+-+
+-+	dprintk(&quot;%p %p %x\n&quot;, iue, target, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+-+
+-+	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-+	list_del(&amp;iue-&gt;ilist);
+-+	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-+
+-+	if (sc-&gt;result != SAM_STAT_GOOD) {
+-+		eprintk(&quot;operation failed %p %d %x\n&quot;,
+-+			iue, sc-&gt;result, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+-+		send_rsp(iue, sc, HARDWARE_ERROR, 0x00);
+-+	} else
+-+		send_rsp(iue, sc, NO_SENSE, 0x00);
+-+
+-+	done(sc);
+-+	srp_iu_put(iue);
+-+	return 0;
+-+}
+-+
+-+int send_adapter_info(struct iu_entry *iue,
+-+		      dma_addr_t remote_buffer, uint16_t length)
+-+{
+-+	struct srp_target *target = iue-&gt;target;
+-+	struct vio_port *vport = target_to_port(target);
+-+	struct Scsi_Host *shost = target-&gt;shost;
+-+	dma_addr_t data_token;
+-+	struct mad_adapter_info_data *info;
+-+	int err;
+-+
+-+	info = dma_alloc_coherent(target-&gt;dev, sizeof(*info), &amp;data_token,
+-+				  GFP_KERNEL);
+-+	if (!info) {
+-+		eprintk(&quot;bad dma_alloc_coherent %p\n&quot;, target);
+-+		return 1;
+-+	}
+-+
+-+	/* Get remote info */
+-+	err = h_copy_rdma(sizeof(*info), vport-&gt;riobn, remote_buffer,
+-+			  vport-&gt;liobn, data_token);
+-+	if (err == H_SUCCESS) {
+-+		dprintk(&quot;Client connect: %s (%d)\n&quot;,
+-+			info-&gt;partition_name, info-&gt;partition_number);
+-+	}
+-+
+-+	memset(info, 0, sizeof(*info));
+-+
+-+	strcpy(info-&gt;srp_version, &quot;16.a&quot;);
+-+	strncpy(info-&gt;partition_name, partition_name,
+-+		sizeof(info-&gt;partition_name));
+-+	info-&gt;partition_number = partition_number;
+-+	info-&gt;mad_version = 1;
+-+	info-&gt;os_type = 2;
+-+	info-&gt;port_max_txu[0] = shost-&gt;hostt-&gt;max_sectors &lt;&lt; 9;
+-+
+-+	/* Send our info to remote */
+-+	err = h_copy_rdma(sizeof(*info), vport-&gt;liobn, data_token,
+-+			  vport-&gt;riobn, remote_buffer);
+-+
+-+	dma_free_coherent(target-&gt;dev, sizeof(*info), info, data_token);
+-+
+-+	if (err != H_SUCCESS) {
+-+		eprintk(&quot;Error sending adapter info %d\n&quot;, err);
+-+		return 1;
+-+	}
+-+
+-+	return 0;
+-+}
+-+
+-+static void process_login(struct iu_entry *iue)
+-+{
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	struct srp_login_rsp *rsp = &amp;iu-&gt;srp.login_rsp;
+-+	uint64_t tag = iu-&gt;srp.rsp.tag;
+-+
+-+	/* TODO handle case that requested size is wrong and
+-+	 * buffer format is wrong
+-+	 */
+-+	memset(iu, 0, sizeof(struct srp_login_rsp));
+-+	rsp-&gt;opcode = SRP_LOGIN_RSP;
+-+	rsp-&gt;req_lim_delta = INITIAL_SRP_LIMIT;
+-+	rsp-&gt;tag = tag;
+-+	rsp-&gt;max_it_iu_len = sizeof(union srp_iu);
+-+	rsp-&gt;max_ti_iu_len = sizeof(union srp_iu);
+-+	/* direct and indirect */
+-+	rsp-&gt;buf_fmt = SRP_BUF_FORMAT_DIRECT | SRP_BUF_FORMAT_INDIRECT;
+-+
+-+	send_iu(iue, sizeof(*rsp), VIOSRP_SRP_FORMAT);
+-+}
+-+
+-+static inline void queue_cmd(struct iu_entry *iue)
+-+{
+-+	struct srp_target *target = iue-&gt;target;
+-+	unsigned long flags;
+-+
+-+	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-+	list_add_tail(&amp;iue-&gt;ilist, &amp;target-&gt;cmd_queue);
+-+	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-+}
+-+
+-+static int process_tsk_mgmt(struct iu_entry *iue)
+-+{
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	int fn;
+-+
+-+	dprintk(&quot;%p %u\n&quot;, iue, iu-&gt;srp.tsk_mgmt.tsk_mgmt_func);
+-+
+-+	switch (iu-&gt;srp.tsk_mgmt.tsk_mgmt_func) {
+-+	case SRP_TSK_ABORT_TASK:
+-+		fn = ABORT_TASK;
+-+		break;
+-+	case SRP_TSK_ABORT_TASK_SET:
+-+		fn = ABORT_TASK_SET;
+-+		break;
+-+	case SRP_TSK_CLEAR_TASK_SET:
+-+		fn = CLEAR_TASK_SET;
+-+		break;
+-+	case SRP_TSK_LUN_RESET:
+-+		fn = LOGICAL_UNIT_RESET;
+-+		break;
+-+	case SRP_TSK_CLEAR_ACA:
+-+		fn = CLEAR_ACA;
+-+		break;
+-+	default:
+-+		fn = 0;
+-+	}
+-+	if (fn)
+-+		scsi_tgt_tsk_mgmt_request(iue-&gt;target-&gt;shost, fn,
+-+					  iu-&gt;srp.tsk_mgmt.task_tag,
+-+					  (struct scsi_lun *) &amp;iu-&gt;srp.tsk_mgmt.lun,
+-+					  iue);
+-+	else
+-+		send_rsp(iue, NULL, ILLEGAL_REQUEST, 0x20);
+-+
+-+	return !fn;
+-+}
+-+
+-+static int process_mad_iu(struct iu_entry *iue)
+-+{
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	struct viosrp_adapter_info *info;
+-+	struct viosrp_host_config *conf;
+-+
+-+	switch (iu-&gt;mad.empty_iu.common.type) {
+-+	case VIOSRP_EMPTY_IU_TYPE:
+-+		eprintk(&quot;%s\n&quot;, &quot;Unsupported EMPTY MAD IU&quot;);
+-+		break;
+-+	case VIOSRP_ERROR_LOG_TYPE:
+-+		eprintk(&quot;%s\n&quot;, &quot;Unsupported ERROR LOG MAD IU&quot;);
+-+		iu-&gt;mad.error_log.common.status = 1;
+-+		send_iu(iue, sizeof(iu-&gt;mad.error_log),	VIOSRP_MAD_FORMAT);
+-+		break;
+-+	case VIOSRP_ADAPTER_INFO_TYPE:
+-+		info = &amp;iu-&gt;mad.adapter_info;
+-+		info-&gt;common.status = send_adapter_info(iue, info-&gt;buffer,
+-+							info-&gt;common.length);
+-+		send_iu(iue, sizeof(*info), VIOSRP_MAD_FORMAT);
+-+		break;
+-+	case VIOSRP_HOST_CONFIG_TYPE:
+-+		conf = &amp;iu-&gt;mad.host_config;
+-+		conf-&gt;common.status = 1;
+-+		send_iu(iue, sizeof(*conf), VIOSRP_MAD_FORMAT);
+-+		break;
+-+	default:
+-+		eprintk(&quot;Unknown type %u\n&quot;, iu-&gt;srp.rsp.opcode);
+-+	}
+-+
+-+	return 1;
+-+}
+-+
+-+static int process_srp_iu(struct iu_entry *iue)
+-+{
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	int done = 1;
+-+	u8 opcode = iu-&gt;srp.rsp.opcode;
+-+
+-+	switch (opcode) {
+-+	case SRP_LOGIN_REQ:
+-+		process_login(iue);
+-+		break;
+-+	case SRP_TSK_MGMT:
+-+		done = process_tsk_mgmt(iue);
+-+		break;
+-+	case SRP_CMD:
+-+		queue_cmd(iue);
+-+		done = 0;
+-+		break;
+-+	case SRP_LOGIN_RSP:
+-+	case SRP_I_LOGOUT:
+-+	case SRP_T_LOGOUT:
+-+	case SRP_RSP:
+-+	case SRP_CRED_REQ:
+-+	case SRP_CRED_RSP:
+-+	case SRP_AER_REQ:
+-+	case SRP_AER_RSP:
+-+		eprintk(&quot;Unsupported type %u\n&quot;, opcode);
+-+		break;
+-+	default:
+-+		eprintk(&quot;Unknown type %u\n&quot;, opcode);
+-+	}
+-+
+-+	return done;
+-+}
+-+
+-+static void process_iu(struct viosrp_crq *crq, struct srp_target *target)
+-+{
+-+	struct vio_port *vport = target_to_port(target);
+-+	struct iu_entry *iue;
+-+	long err, done;
+-+
+-+	iue = srp_iu_get(target);
+-+	if (!iue) {
+-+		eprintk(&quot;Error getting IU from pool, %p\n&quot;, target);
+-+		return;
+-+	}
+-+
+-+	iue-&gt;remote_token = crq-&gt;IU_data_ptr;
+-+
+-+	err = h_copy_rdma(crq-&gt;IU_length, vport-&gt;riobn,
+-+			  iue-&gt;remote_token, vport-&gt;liobn, iue-&gt;sbuf-&gt;dma);
+-+
+-+	if (err != H_SUCCESS)
+-+		eprintk(&quot;%ld transferring data error %p\n&quot;, err, iue);
+-+
+-+	if (crq-&gt;format == VIOSRP_MAD_FORMAT)
+-+		done = process_mad_iu(iue);
+-+	else
+-+		done = process_srp_iu(iue);
+-+
+-+	if (done)
+-+		srp_iu_put(iue);
+-+}
+-+
+-+static irqreturn_t ibmvstgt_interrupt(int irq, void *data, struct pt_regs *regs)
+-+{
+-+	struct srp_target *target = (struct srp_target *) data;
+-+	struct vio_port *vport = target_to_port(target);
+-+
+-+	vio_disable_interrupts(vport-&gt;dma_dev);
+-+	queue_work(vtgtd, &amp;vport-&gt;crq_work);
+-+
+-+	return IRQ_HANDLED;
+-+}
+-+
+-+static int crq_queue_create(struct crq_queue *queue, struct srp_target *target)
+-+{
+-+	int err;
+-+	struct vio_port *vport = target_to_port(target);
+-+
+-+	queue-&gt;msgs = (struct viosrp_crq *) get_zeroed_page(GFP_KERNEL);
+-+	if (!queue-&gt;msgs)
+-+		goto malloc_failed;
+-+	queue-&gt;size = PAGE_SIZE / sizeof(*queue-&gt;msgs);
+-+
+-+	queue-&gt;msg_token = dma_map_single(target-&gt;dev, queue-&gt;msgs,
+-+					  queue-&gt;size * sizeof(*queue-&gt;msgs),
+-+					  DMA_BIDIRECTIONAL);
+-+
+-+	if (dma_mapping_error(queue-&gt;msg_token))
+-+		goto map_failed;
+-+
+-+	err = h_reg_crq(vport-&gt;dma_dev-&gt;unit_address, queue-&gt;msg_token,
+-+			PAGE_SIZE);
+-+
+-+	/* If the adapter was left active for some reason (like kexec)
+-+	 * try freeing and re-registering
+-+	 */
+-+	if (err == H_RESOURCE) {
+-+	    do {
+-+		err = h_free_crq(vport-&gt;dma_dev-&gt;unit_address);
+-+	    } while (err == H_BUSY || H_IS_LONG_BUSY(err));
+-+
+-+	    err = h_reg_crq(vport-&gt;dma_dev-&gt;unit_address, queue-&gt;msg_token,
+-+			    PAGE_SIZE);
+-+	}
+-+
+-+	if (err != H_SUCCESS &amp;&amp; err != 2) {
+-+		eprintk(&quot;Error 0x%x opening virtual adapter\n&quot;, err);
+-+		goto reg_crq_failed;
+-+	}
+-+
+-+	err = request_irq(vport-&gt;dma_dev-&gt;irq, &amp;ibmvstgt_interrupt,
+-+			  SA_INTERRUPT, &quot;ibmvstgt&quot;, target);
+-+	if (err)
+-+		goto req_irq_failed;
+-+
+-+	vio_enable_interrupts(vport-&gt;dma_dev);
+-+
+-+	h_send_crq(vport-&gt;dma_dev-&gt;unit_address, 0xC001000000000000, 0);
+-+
+-+	queue-&gt;cur = 0;
+-+	spin_lock_init(&amp;queue-&gt;lock);
+-+
+-+	return 0;
+-+
+-+req_irq_failed:
+-+	do {
+-+		err = h_free_crq(vport-&gt;dma_dev-&gt;unit_address);
+-+	} while (err == H_BUSY || H_IS_LONG_BUSY(err));
+-+
+-+reg_crq_failed:
+-+	dma_unmap_single(target-&gt;dev, queue-&gt;msg_token,
+-+			 queue-&gt;size * sizeof(*queue-&gt;msgs), DMA_BIDIRECTIONAL);
+-+map_failed:
+-+	free_page((unsigned long) queue-&gt;msgs);
+-+
+-+malloc_failed:
+-+	return -ENOMEM;
+-+}
+-+
+-+static void crq_queue_destroy(struct srp_target *target)
+-+{
+-+	struct vio_port *vport = target_to_port(target);
+-+	struct crq_queue *queue = &amp;vport-&gt;crq_queue;
+-+	int err;
+-+
+-+	free_irq(vport-&gt;dma_dev-&gt;irq, target);
+-+	do {
+-+		err = h_free_crq(vport-&gt;dma_dev-&gt;unit_address);
+-+	} while (err == H_BUSY || H_IS_LONG_BUSY(err));
+-+
+-+	dma_unmap_single(target-&gt;dev, queue-&gt;msg_token,
+-+			 queue-&gt;size * sizeof(*queue-&gt;msgs), DMA_BIDIRECTIONAL);
+-+
+-+	free_page((unsigned long) queue-&gt;msgs);
+-+}
+-+
+-+static void process_crq(struct viosrp_crq *crq,	struct srp_target *target)
+-+{
+-+	struct vio_port *vport = target_to_port(target);
+-+	dprintk(&quot;%x %x\n&quot;, crq-&gt;valid, crq-&gt;format);
+-+
+-+	switch (crq-&gt;valid) {
+-+	case 0xC0:
+-+		/* initialization */
+-+		switch (crq-&gt;format) {
+-+		case 0x01:
+-+			h_send_crq(vport-&gt;dma_dev-&gt;unit_address,
+-+				   0xC002000000000000, 0);
+-+			break;
+-+		case 0x02:
+-+			break;
+-+		default:
+-+			eprintk(&quot;Unknown format %u\n&quot;, crq-&gt;format);
+-+		}
+-+		break;
+-+	case 0xFF:
+-+		/* transport event */
+-+		break;
+-+	case 0x80:
+-+		/* real payload */
+-+		switch (crq-&gt;format) {
+-+		case VIOSRP_SRP_FORMAT:
+-+		case VIOSRP_MAD_FORMAT:
+-+			process_iu(crq, target);
+-+			break;
+-+		case VIOSRP_OS400_FORMAT:
+-+		case VIOSRP_AIX_FORMAT:
+-+		case VIOSRP_LINUX_FORMAT:
+-+		case VIOSRP_INLINE_FORMAT:
+-+			eprintk(&quot;Unsupported format %u\n&quot;, crq-&gt;format);
+-+			break;
+-+		default:
+-+			eprintk(&quot;Unknown format %u\n&quot;, crq-&gt;format);
+-+		}
+-+		break;
+-+	default:
+-+		eprintk(&quot;unknown message type 0x%02x!?\n&quot;, crq-&gt;valid);
+-+	}
+-+}
+-+
+-+static inline struct viosrp_crq *next_crq(struct crq_queue *queue)
+-+{
+-+	struct viosrp_crq *crq;
+-+	unsigned long flags;
+-+
+-+	spin_lock_irqsave(&amp;queue-&gt;lock, flags);
+-+	crq = &amp;queue-&gt;msgs[queue-&gt;cur];
+-+	if (crq-&gt;valid &amp; 0x80) {
+-+		if (++queue-&gt;cur == queue-&gt;size)
+-+			queue-&gt;cur = 0;
+-+	} else
+-+		crq = NULL;
+-+	spin_unlock_irqrestore(&amp;queue-&gt;lock, flags);
+-+
+-+	return crq;
+-+}
+-+
+-+static void handle_crq(void *data)
+-+{
+-+	struct srp_target *target = (struct srp_target *) data;
+-+	struct vio_port *vport = target_to_port(target);
+-+	struct viosrp_crq *crq;
+-+	int done = 0;
+-+
+-+	while (!done) {
+-+		while ((crq = next_crq(&amp;vport-&gt;crq_queue)) != NULL) {
+-+			process_crq(crq, target);
+-+			crq-&gt;valid = 0x00;
+-+		}
+-+
+-+		vio_enable_interrupts(vport-&gt;dma_dev);
+-+
+-+		crq = next_crq(&amp;vport-&gt;crq_queue);
+-+		if (crq) {
+-+			vio_disable_interrupts(vport-&gt;dma_dev);
+-+			process_crq(crq, target);
+-+			crq-&gt;valid = 0x00;
+-+		} else
+-+			done = 1;
+-+	}
+-+
+-+	handle_cmd_queue(target);
+-+}
+-+
+-+
+-+static int ibmvstgt_eh_abort_handler(struct scsi_cmnd *sc)
+-+{
+-+	unsigned long flags;
+-+	struct iu_entry *iue = (struct iu_entry *) sc-&gt;SCp.ptr;
+-+	struct srp_target *target = iue-&gt;target;
+-+
+-+	dprintk(&quot;%p %p %x\n&quot;, iue, target, vio_iu(iue)-&gt;srp.cmd.cdb[0]);
+-+
+-+	spin_lock_irqsave(&amp;target-&gt;lock, flags);
+-+	list_del(&amp;iue-&gt;ilist);
+-+	spin_unlock_irqrestore(&amp;target-&gt;lock, flags);
+-+
+-+	srp_iu_put(iue);
+-+
+-+	return 0;
+-+}
+-+
+-+static int ibmvstgt_tsk_mgmt_response(u64 mid, int result)
+-+{
+-+	struct iu_entry *iue = (struct iu_entry *) ((void *) mid);
+-+	union viosrp_iu *iu = vio_iu(iue);
+-+	unsigned char status, asc;
+-+
+-+	eprintk(&quot;%p %d\n&quot;, iue, result);
+-+	status = NO_SENSE;
+-+	asc = 0;
+-+
+-+	switch (iu-&gt;srp.tsk_mgmt.tsk_mgmt_func) {
+-+	case SRP_TSK_ABORT_TASK:
+-+		asc = 0x14;
+-+		if (result)
+-+			status = ABORTED_COMMAND;
+-+		break;
+-+	default:
+-+		break;
+-+	}
+-+
+-+	send_rsp(iue, NULL, status, asc);
+-+	srp_iu_put(iue);
+-+
+-+	return 0;
+-+}
+-+
+-+static ssize_t system_id_show(struct class_device *cdev, char *buf)
+-+{
+-+	return snprintf(buf, PAGE_SIZE, &quot;%s\n&quot;, system_id);
+-+}
+-+
+-+static ssize_t partition_number_show(struct class_device *cdev, char *buf)
+-+{
+-+	return snprintf(buf, PAGE_SIZE, &quot;%x\n&quot;, partition_number);
+-+}
+-+
+-+static ssize_t unit_address_show(struct class_device *cdev, char *buf)
+-+{
+-+	struct Scsi_Host *shost = class_to_shost(cdev);
+-+	struct srp_target *target = host_to_srp_target(shost);
+-+	struct vio_port *vport = target_to_port(target);
+-+	return snprintf(buf, PAGE_SIZE, &quot;%x\n&quot;, vport-&gt;dma_dev-&gt;unit_address);
+-+}
+-+
+-+static CLASS_DEVICE_ATTR(system_id, S_IRUGO, system_id_show, NULL);
+-+static CLASS_DEVICE_ATTR(partition_number, S_IRUGO, partition_number_show, NULL);
+-+static CLASS_DEVICE_ATTR(unit_address, S_IRUGO, unit_address_show, NULL);
+-+
+-+static struct class_device_attribute *ibmvstgt_attrs[] = {
+-+	&amp;class_device_attr_system_id,
+-+	&amp;class_device_attr_partition_number,
+-+	&amp;class_device_attr_unit_address,
+-+	NULL,
+-+};
+-+
+-+static struct scsi_host_template ibmvstgt_sht = {
+-+	.name			= TGT_NAME,
+-+	.module			= THIS_MODULE,
+-+	.can_queue		= INITIAL_SRP_LIMIT,
+-+	.sg_tablesize		= SG_ALL,
+-+	.use_clustering		= DISABLE_CLUSTERING,
+-+	.max_sectors		= DEFAULT_MAX_SECTORS,
+-+	.transfer_response	= ibmvstgt_cmd_done,
+-+	.transfer_data		= ibmvstgt_transfer_data,
+-+	.eh_abort_handler	= ibmvstgt_eh_abort_handler,
+-+	.tsk_mgmt_response	= ibmvstgt_tsk_mgmt_response,
+-+	.shost_attrs		= ibmvstgt_attrs,
+-+	.proc_name		= TGT_NAME,
+-+};
+-+
+-+static int ibmvstgt_probe(struct vio_dev *dev, const struct vio_device_id *id)
+-+{
+-+	struct Scsi_Host *shost;
+-+	struct srp_target *target;
+-+	struct vio_port *vport;
+-+	unsigned int *dma, dma_size;
+-+	int err = -ENOMEM;
+-+
+-+	vport = kzalloc(sizeof(struct vio_port), GFP_KERNEL);
+-+	if (!vport)
+-+		return err;
+-+	shost = scsi_host_alloc(&amp;ibmvstgt_sht, sizeof(struct srp_target));
+-+	if (!shost)
+-+		goto free_vport;
+-+	err = scsi_tgt_alloc_queue(shost);
+-+	if (err)
+-+		goto put_host;
+-+
+-+	target = host_to_srp_target(shost);
+-+	target-&gt;shost = shost;
+-+	vport-&gt;dma_dev = dev;
+-+	target-&gt;ldata = vport;
+-+	err = srp_target_alloc(target, &amp;dev-&gt;dev, INITIAL_SRP_LIMIT,
+-+			       SRP_MAX_IU_LEN);
+-+	if (err)
+-+		goto put_host;
+-+
+-+	dma = (unsigned int *) vio_get_attribute(dev, &quot;ibm,my-dma-window&quot;,
+-+						 &amp;dma_size);
+-+	if (!dma || dma_size != 40) {
+-+		eprintk(&quot;Couldn't get window property %d\n&quot;, dma_size);
+-+		err = -EIO;
+-+		goto free_srp_target;
+-+	}
+-+	vport-&gt;liobn = dma[0];
+-+	vport-&gt;riobn = dma[5];
+-+
+-+	INIT_WORK(&amp;vport-&gt;crq_work, handle_crq, target);
+-+
+-+	err = crq_queue_create(&amp;vport-&gt;crq_queue, target);
+-+	if (err)
+-+		goto free_srp_target;
+-+
+-+	err = scsi_add_host(shost, target-&gt;dev);
+-+	if (err)
+-+		goto destroy_queue;
+-+	return 0;
+-+
+-+destroy_queue:
+-+	crq_queue_destroy(target);
+-+free_srp_target:
+-+	srp_target_free(target);
+-+put_host:
+-+	scsi_host_put(shost);
+-+free_vport:
+-+	kfree(vport);
+-+	return err;
+-+}
+-+
+-+static int ibmvstgt_remove(struct vio_dev *dev)
+-+{
+-+	struct srp_target *target = (struct srp_target *) dev-&gt;dev.driver_data;
+-+	struct Scsi_Host *shost = target-&gt;shost;
+-+
+-+	srp_target_free(target);
+-+	crq_queue_destroy(target);
+-+	scsi_remove_host(shost);
+-+	scsi_host_put(shost);
+-+	return 0;
+-+}
+-+
+-+static struct vio_device_id ibmvstgt_device_table[] __devinitdata = {
+-+	{&quot;v-scsi-host&quot;, &quot;IBM,v-scsi-host&quot;},
+-+	{&quot;&quot;,&quot;&quot;}
+-+};
+-+
+-+MODULE_DEVICE_TABLE(vio, ibmvstgt_device_table);
+-+
+-+static struct vio_driver ibmvstgt_driver = {
+-+	.id_table = ibmvstgt_device_table,
+-+	.probe = ibmvstgt_probe,
+-+	.remove = ibmvstgt_remove,
+-+	.driver = {
+-+		.name = &quot;ibmvscsis&quot;,
+-+		.owner = THIS_MODULE,
+-+	}
+-+};
+-+
+-+static int get_system_info(void)
+-+{
+-+	struct device_node *rootdn;
+-+	char *id, *model, *name;
+-+	unsigned int *num;
+-+
+-+	rootdn = find_path_device(&quot;/&quot;);
+-+	if (!rootdn)
+-+		return -ENOENT;
+-+
+-+	model = get_property(rootdn, &quot;model&quot;, NULL);
+-+	id = get_property(rootdn, &quot;system-id&quot;, NULL);
+-+	if (model &amp;&amp; id)
+-+		snprintf(system_id, sizeof(system_id), &quot;%s-%s&quot;, model, id);
+-+
+-+	name = get_property(rootdn, &quot;ibm,partition-name&quot;, NULL);
+-+	if (name)
+-+		strncpy(partition_name, name, sizeof(partition_name));
+-+
+-+	num = (unsigned int *) get_property(rootdn, &quot;ibm,partition-no&quot;, NULL);
+-+	if (num)
+-+		partition_number = *num;
+-+
+-+	return 0;
+-+}
+-+
+-+static int ibmvstgt_init(void)
+-+{
+-+	int err = -ENOMEM;
+-+
+-+	printk(&quot;IBM eServer i/pSeries Virtual SCSI Target Driver\n&quot;);
+-+
+-+	vtgtd = create_workqueue(&quot;ibmvtgtd&quot;);
+-+	if (!vtgtd)
+-+		return err;
+-+
+-+	err = get_system_info();
+-+	if (err)
+-+		goto destroy_wq;
+-+
+-+	err = vio_register_driver(&amp;ibmvstgt_driver);
+-+	if (err)
+-+		goto destroy_wq;
+-+
+-+	return 0;
+-+
+-+destroy_wq:
+-+	destroy_workqueue(vtgtd);
+-+	return err;
+-+}
+-+
+-+static void ibmvstgt_exit(void)
+-+{
+-+	printk(&quot;Unregister IBM virtual SCSI driver\n&quot;);
+-+
+-+	destroy_workqueue(vtgtd);
+-+	vio_unregister_driver(&amp;ibmvstgt_driver);
+-+}
+-+
+-+MODULE_DESCRIPTION(&quot;IBM Virtual SCSI Target&quot;);
+-+MODULE_AUTHOR(&quot;Dave Boutcher&quot;);
+-+MODULE_LICENSE(&quot;GPL&quot;);
+-+
+-+module_init(ibmvstgt_init);
+-+module_exit(ibmvstgt_exit);
+--- 
+-1.4.1
+-
+
+Deleted: trunk/patchset/README
+===================================================================
+--- trunk/patchset/README	2006-08-31 12:31:13 UTC (rev 570)
++++ trunk/patchset/README	2006-08-31 12:48:02 UTC (rev 571)
+@@ -1,6 +0,0 @@
+-This patchset for scsi-rc-fixes git tree:
+-
+-<A HREF="http://www.kernel.org/git/?p=linux/kernel/git/jejb/scsi-rc-fixes-2.6.git;a=summary">http://www.kernel.org/git/?p=linux/kernel/git/jejb/scsi-rc-fixes-2.6.git;a=summary</A>
+-
+-Get the tree and apply all the patches. Sorry for the
+-inconvenience. We will create our own git tree shortly.
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000557.html">[Stgt-svn] r570 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000559.html">[Stgt-svn] r572 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#558">[ date ]</a>
+              <a href="thread.html#558">[ thread ]</a>
+              <a href="subject.html#558">[ subject ]</a>
+              <a href="author.html#558">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

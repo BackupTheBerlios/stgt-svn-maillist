@@ -1,0 +1,119 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r370 - branches/use-scsi-ml/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r370%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200603041348.k24DmVBY030743%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000356.html">
+   <LINK REL="Next"  HREF="000358.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r370 - branches/use-scsi-ml/kernel</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r370%20-%20branches/use-scsi-ml/kernel&In-Reply-To=%3C200603041348.k24DmVBY030743%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r370 - branches/use-scsi-ml/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Sat Mar  4 14:48:31 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000356.html">[Stgt-svn] r369 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000358.html">[Stgt-svn] r371 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#357">[ date ]</a>
+              <a href="thread.html#357">[ thread ]</a>
+              <a href="subject.html#357">[ subject ]</a>
+              <a href="author.html#357">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-03-04 14:48:29 +0100 (Sat, 04 Mar 2006)
+New Revision: 370
+
+Modified:
+   branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+Log:
+scsi_tgt_cmd_destroy() delete commands from hash lists instead of scsi_tgt_kspace_exec() because we possibly need to send back commands to tgtd.
+
+
+Modified: branches/use-scsi-ml/kernel/scsi_tgt_lib.c
+===================================================================
+--- branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-03-04 12:46:38 UTC (rev 369)
++++ branches/use-scsi-ml/kernel/scsi_tgt_lib.c	2006-03-04 13:48:29 UTC (rev 370)
+@@ -87,9 +87,16 @@
+ {
+ 	struct scsi_cmnd *cmd = data;
+ 	struct scsi_tgt_cmd *tcmd = cmd-&gt;request-&gt;end_io_data;
++	struct scsi_tgt_queuedata *qdata = cmd-&gt;request-&gt;q-&gt;queuedata;
++	unsigned long flags;
+ 
+ 	dprintk(&quot;cmd %p %d %lu\n&quot;, cmd, cmd-&gt;sc_data_direction,
+ 		rq_data_dir(cmd-&gt;request));
++
++	spin_lock_irqsave(&amp;qdata-&gt;cmd_hash_lock, flags);
++	list_del(&amp;tcmd-&gt;hash_list);
++	spin_unlock_irqrestore(&amp;qdata-&gt;cmd_hash_lock, flags);
++
+ 	/*
+ 	 * We must set rq-&gt;flags here because bio_map_user and
+ 	 * blk_rq_bio_prep ruined ti.
+@@ -491,7 +498,7 @@
+ 	return 0;
+ }
+ 
+-static struct request *tgt_cmd_hash_end(struct request_queue *q, u32 cid)
++static struct request *tgt_cmd_hash_lookup(struct request_queue *q, u32 cid)
+ {
+ 	struct scsi_tgt_queuedata *qdata = q-&gt;queuedata;
+ 	struct request *rq = NULL;
+@@ -504,7 +511,6 @@
+ 	list_for_each_entry(tcmd, head, hash_list) {
+ 		if (tcmd-&gt;rq-&gt;tag == cid) {
+ 			rq = tcmd-&gt;rq;
+-			list_del(&amp;tcmd-&gt;hash_list);
+ 			break;
+ 		}
+ 	}
+@@ -532,7 +538,7 @@
+ 	}
+ 	scsi_host_put(shost);
+ 
+-	rq = tgt_cmd_hash_end(shost-&gt;uspace_req_q, cid);
++	rq = tgt_cmd_hash_lookup(shost-&gt;uspace_req_q, cid);
+ 	if (!rq) {
+ 		printk(KERN_ERR &quot;Could not find cid %u\n&quot;, cid);
+ 		err = -EINVAL;
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000356.html">[Stgt-svn] r369 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000358.html">[Stgt-svn] r371 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#357">[ date ]</a>
+              <a href="thread.html#357">[ thread ]</a>
+              <a href="subject.html#357">[ subject ]</a>
+              <a href="author.html#357">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

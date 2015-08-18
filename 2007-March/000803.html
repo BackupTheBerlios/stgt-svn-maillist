@@ -1,0 +1,201 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r816 - in trunk/usr: . iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r816%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703100858.l2A8wgke011754%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000802.html">
+   <LINK REL="Next"  HREF="000804.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r816 - in trunk/usr: . iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r816%20-%20in%20trunk/usr%3A%20.%20iscsi&In-Reply-To=%3C200703100858.l2A8wgke011754%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r816 - in trunk/usr: . iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Mar 10 09:58:42 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000802.html">[Stgt-svn] r815 - in trunk/usr: . iscsi
+</A></li>
+        <LI>Next message: <A HREF="000804.html">[Stgt-svn] r817 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#803">[ date ]</a>
+              <a href="thread.html#803">[ thread ]</a>
+              <a href="subject.html#803">[ subject ]</a>
+              <a href="author.html#803">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-10 09:58:41 +0100 (Sat, 10 Mar 2007)
+New Revision: 816
+
+Modified:
+   trunk/usr/iscsi/session.c
+   trunk/usr/target.c
+   trunk/usr/tgtd.h
+Log:
+rename TAB* difines because they conflict with ppc defines.
+
+
+Modified: trunk/usr/iscsi/session.c
+===================================================================
+--- trunk/usr/iscsi/session.c	2007-03-10 07:16:20 UTC (rev 815)
++++ trunk/usr/iscsi/session.c	2007-03-10 08:58:41 UTC (rev 816)
+@@ -103,9 +103,9 @@
+ 	memset(addr, 0, sizeof(addr));
+ 	conn-&gt;tp-&gt;ep_show(conn-&gt;fd, addr, sizeof(addr));
+ 
+-	snprintf(session-&gt;info, 1024, TAB3 &quot;Initiator: %s\n&quot;
+-		 TAB3 &quot;Connection: %u\n&quot;
+-		 TAB4 &quot;%s\n&quot;, session-&gt;initiator, conn-&gt;cid, addr);
++	snprintf(session-&gt;info, 1024, _TAB3 &quot;Initiator: %s\n&quot;
++		 _TAB3 &quot;Connection: %u\n&quot;
++		 _TAB4 &quot;%s\n&quot;, session-&gt;initiator, conn-&gt;cid, addr);
+ 
+ 	err = it_nexus_create(target-&gt;tid, session-&gt;info, &amp;nexus_id);
+ 	if (err) {
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-10 07:16:20 UTC (rev 815)
++++ trunk/usr/target.c	2007-03-10 08:58:41 UTC (rev 816)
+@@ -1058,33 +1058,33 @@
+ 	list_for_each_entry(target, &amp;target_list, target_siblings) {
+ 		shprintf(total, buf, rest,
+ 			 &quot;Target %d: %s\n&quot;
+-			 TAB1 &quot;System information:\n&quot;
+-			 TAB2 &quot;Type: %s\n&quot;
+-			 TAB2 &quot;Driver: %s\n&quot;
+-			 TAB2 &quot;Status: %s\n&quot;,
++			 _TAB1 &quot;System information:\n&quot;
++			 _TAB2 &quot;Type: %s\n&quot;
++			 _TAB2 &quot;Driver: %s\n&quot;
++			 _TAB2 &quot;Status: %s\n&quot;,
+ 			 target-&gt;tid,
+ 			 target-&gt;name,
+ 			 target-&gt;dev_type_template-&gt;name,
+ 			 tgt_drivers[target-&gt;lid]-&gt;name,
+ 			 target_state_name(target-&gt;target_state));
+ 
+-		shprintf(total, buf, rest, TAB1 &quot;I_T nexus information:\n&quot;);
++		shprintf(total, buf, rest, _TAB1 &quot;I_T nexus information:\n&quot;);
+ 
+ 		list_for_each_entry(nexus, &amp;target-&gt;it_nexus_list, nexus_siblings) {
+-			shprintf(total, buf, rest, TAB2 &quot;I_T nexus: %u\n&quot;,
++			shprintf(total, buf, rest, _TAB2 &quot;I_T nexus: %u\n&quot;,
+ 				 nexus-&gt;nexus_id);
+ 			if (nexus-&gt;info)
+ 				shprintf(total, buf, rest, &quot;%s&quot;, nexus-&gt;info);
+ 		}
+ 
+-		shprintf(total, buf, rest, TAB1 &quot;LUN information:\n&quot;);
++		shprintf(total, buf, rest, _TAB1 &quot;LUN information:\n&quot;);
+ 		list_for_each_entry(device, &amp;target-&gt;device_list, device_siblings)
+ 			shprintf(total, buf, rest,
+-				 TAB2 &quot;LUN: %&quot; PRIu64 &quot;\n&quot;
+-				 TAB3 &quot;SCSI ID: %s\n&quot;
+-				 TAB3 &quot;SCSI SN: %s\n&quot;
+-				 TAB3 &quot;Size: %s\n&quot;
+-				 TAB3 &quot;Backing store: %s\n&quot;,
++				 _TAB2 &quot;LUN: %&quot; PRIu64 &quot;\n&quot;
++				 _TAB3 &quot;SCSI ID: %s\n&quot;
++				 _TAB3 &quot;SCSI SN: %s\n&quot;
++				 _TAB3 &quot;Size: %s\n&quot;
++				 _TAB3 &quot;Backing store: %s\n&quot;,
+ 				 device-&gt;lun,
+ 				 device-&gt;scsi_id,
+ 				 device-&gt;scsi_sn,
+@@ -1094,24 +1094,24 @@
+ 		if (!strcmp(tgt_drivers[target-&gt;lid]-&gt;name, &quot;iscsi&quot;)) {
+ 			int i, aid;
+ 
+-			shprintf(total, buf, rest, TAB1
++			shprintf(total, buf, rest, _TAB1
+ 				 &quot;Account information:\n&quot;);
+ 			for (i = 0; i &lt; target-&gt;account.nr_inaccount; i++) {
+ 				aid = target-&gt;account.in_aids[i];
+-				shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;,
++				shprintf(total, buf, rest, _TAB2 &quot;%s\n&quot;,
+ 					 __account_lookup_id(aid)-&gt;user);
+ 			}
+ 			if (target-&gt;account.out_aid) {
+ 				aid = target-&gt;account.out_aid;
+ 				shprintf(total, buf, rest,
+-					 TAB2 &quot;%s (outgoing)\n&quot;,
++					 _TAB2 &quot;%s (outgoing)\n&quot;,
+ 					 __account_lookup_id(aid)-&gt;user);
+ 			}
+ 		}
+ 
+-		shprintf(total, buf, rest, TAB1 &quot;ACL information:\n&quot;);
++		shprintf(total, buf, rest, _TAB1 &quot;ACL information:\n&quot;);
+ 		list_for_each_entry(acl, &amp;target-&gt;acl_list, aclent_list)
+-			shprintf(total, buf, rest, TAB2 &quot;%s\n&quot;, acl-&gt;address);
++			shprintf(total, buf, rest, _TAB2 &quot;%s\n&quot;, acl-&gt;address);
+ 	}
+ 	return total;
+ overflow:
+@@ -1269,7 +1269,7 @@
+ 		shprintf(total, buf, rest, &quot;Account list:\n&quot;);
+ 
+ 	list_for_each_entry(ac, &amp;account_list, account_siblings)
+-		shprintf(total, buf, rest, TAB1 &quot;%s\n&quot;, ac-&gt;user);
++		shprintf(total, buf, rest, _TAB1 &quot;%s\n&quot;, ac-&gt;user);
+ 
+ 	return total;
+ overflow:
+
+Modified: trunk/usr/tgtd.h
+===================================================================
+--- trunk/usr/tgtd.h	2007-03-10 07:16:20 UTC (rev 815)
++++ trunk/usr/tgtd.h	2007-03-10 08:58:41 UTC (rev 816)
+@@ -13,10 +13,10 @@
+ #define NID64(tid, nid) ((uint64_t) tid &lt;&lt; TID_SHIFT | nid)
+ #define NID2TID(nid) (nid &gt;&gt; TID_SHIFT)
+ 
+-#define TAB1 &quot;    &quot;
+-#define TAB2 TAB1 TAB1
+-#define TAB3 TAB1 TAB1 TAB1
+-#define TAB4 TAB2 TAB2
++#define _TAB1 &quot;    &quot;
++#define _TAB2 _TAB1 _TAB1
++#define _TAB3 _TAB1 _TAB1 _TAB1
++#define _TAB4 _TAB2 _TAB2
+ 
+ enum scsi_target_state {
+ 	SCSI_TARGET_SUSPENDED = 1,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000802.html">[Stgt-svn] r815 - in trunk/usr: . iscsi
+</A></li>
+	<LI>Next message: <A HREF="000804.html">[Stgt-svn] r817 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#803">[ date ]</a>
+              <a href="thread.html#803">[ thread ]</a>
+              <a href="subject.html#803">[ subject ]</a>
+              <a href="author.html#803">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

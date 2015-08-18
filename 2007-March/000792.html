@@ -1,0 +1,190 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r805 - trunk/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r805%20-%20trunk/usr&In-Reply-To=%3C200703040951.l249ptVo012945%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000791.html">
+   <LINK REL="Next"  HREF="000793.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r805 - trunk/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r805%20-%20trunk/usr&In-Reply-To=%3C200703040951.l249ptVo012945%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r805 - trunk/usr">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sun Mar  4 10:51:55 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000791.html">[Stgt-svn] r804 - trunk/usr
+</A></li>
+        <LI>Next message: <A HREF="000793.html">[Stgt-svn] r806 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#792">[ date ]</a>
+              <a href="thread.html#792">[ thread ]</a>
+              <a href="subject.html#792">[ subject ]</a>
+              <a href="author.html#792">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-04 10:51:55 +0100 (Sun, 04 Mar 2007)
+New Revision: 805
+
+Modified:
+   trunk/usr/scsi.h
+   trunk/usr/target.c
+   trunk/usr/tgtadm.c
+   trunk/usr/tgtadm.h
+Log:
+Remove tgtadm_target_type
+
+
+Modified: trunk/usr/scsi.h
+===================================================================
+--- trunk/usr/scsi.h	2007-03-04 09:38:58 UTC (rev 804)
++++ trunk/usr/scsi.h	2007-03-04 09:51:55 UTC (rev 805)
+@@ -127,8 +127,11 @@
+ #define TYPE_RAID           0x0c
+ #define TYPE_ENCLOSURE      0x0d
+ #define TYPE_RBC	    0x0e
++#define TYPE_OSD	    0x11
+ #define TYPE_NO_LUN         0x7f
+ 
++#define TYPE_SPT	    0xff
++
+ #define	MSG_SIMPLE_TAG	0x20
+ #define	MSG_HEAD_TAG	0x21
+ #define	MSG_ORDERED_TAG	0x22
+
+Modified: trunk/usr/target.c
+===================================================================
+--- trunk/usr/target.c	2007-03-04 09:38:58 UTC (rev 804)
++++ trunk/usr/target.c	2007-03-04 09:51:55 UTC (rev 805)
+@@ -1204,13 +1204,13 @@
+ 		return TGTADM_NOMEM;
+ 
+ 	switch (t_type) {
+-	case TARGET_SBC:
++	case TYPE_DISK:
+ 		target-&gt;dev_cmd_ops = sbc_ops;
+ 		break;
+-	case TARGET_MMC:
++	case TYPE_ROM:
+ 		target-&gt;dev_cmd_ops = mmc_ops;
+ 		break;
+-	case TARGET_SPT:
++	case TYPE_SPT:
+ 		target-&gt;dev_cmd_ops = spt_ops;
+ 		break;
+ 	default:
+@@ -1239,7 +1239,7 @@
+ 	INIT_LIST_HEAD(&amp;target-&gt;device_list);
+ 
+ 	/* FIXME */
+-	if (t_type == TARGET_SPT) {
++	if (t_type == TYPE_SPT) {
+ 		target-&gt;target_iotype = SCSI_TARGET_RAWIO;
+ 		target-&gt;bdt = &amp;sg_bdt;
+ 	} else {
+
+Modified: trunk/usr/tgtadm.c
+===================================================================
+--- trunk/usr/tgtadm.c	2007-03-04 09:38:58 UTC (rev 804)
++++ trunk/usr/tgtadm.c	2007-03-04 09:51:55 UTC (rev 805)
+@@ -36,6 +36,7 @@
+ #include &lt;sys/types.h&gt;
+ #include &lt;sys/un.h&gt;
+ 
++#include &quot;scsi.h&quot;
+ #include &quot;util.h&quot;
+ #include &quot;list.h&quot;
+ #include &quot;tgtadm.h&quot;
+@@ -305,18 +306,18 @@
+ static int target_type(char *str)
+ {
+ 	if (!strcmp(str, &quot;disk&quot;))
+-		return TARGET_SBC;
++		return TYPE_DISK;
+ 	else if (!strcmp(str, &quot;tape&quot;)) {
+ 		eprintf(&quot;type emulation isn't supported yet\n&quot;);
+ 		exit(EINVAL);
+-	} else if (!strcmp(str, &quot;cd&quot;)) {
+-		return TARGET_MMC;
+-	} else if (!strcmp(str, &quot;osd&quot;)) {
++	} else if (!strcmp(str, &quot;cd&quot;))
++		return TYPE_ROM;
++	else if (!strcmp(str, &quot;osd&quot;)) {
+ 		eprintf(&quot;osd isn't supported yet\n&quot;);
+ 		exit(EINVAL);
+-	} else if (!strcmp(str, &quot;pt&quot;)) {
+-		return TARGET_SPT;
+-	} else {
++	} else if (!strcmp(str, &quot;pt&quot;))
++		return TYPE_SPT;
++	else {
+ 		eprintf(&quot;unknown target type: %s\n&quot;, str);
+ 		exit(EINVAL);
+ 	}
+@@ -373,7 +374,7 @@
+ 
+ 	op = tid = mode = -1;
+ 	total = cid = hostno = sid = lun = 0;
+-	t_type = TARGET_SBC;
++	t_type = TYPE_DISK;
+ 	bs_type = LU_BS_FILE;
+ 	ac_dir = ACCOUNT_TYPE_INCOMING;
+ 	rest = BUFSIZE;
+
+Modified: trunk/usr/tgtadm.h
+===================================================================
+--- trunk/usr/tgtadm.h	2007-03-04 09:38:58 UTC (rev 804)
++++ trunk/usr/tgtadm.h	2007-03-04 09:51:55 UTC (rev 805)
+@@ -49,14 +49,6 @@
+ 	MODE_ACCOUNT,
+ };
+ 
+-enum tgtadm_target_type {
+-	TARGET_SBC, /* disk */
+-	TARGET_SSC, /* tape */
+-	TARGET_MMC, /* cdrom */
+-	TARGET_OSD, /* object storage device */
+-	TARGET_SPT, /* pass through */
+-};
+-
+ /* backing store type */
+ enum tgtadm_lu_bs_type {
+ 	LU_BS_FILE,
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000791.html">[Stgt-svn] r804 - trunk/usr
+</A></li>
+	<LI>Next message: <A HREF="000793.html">[Stgt-svn] r806 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#792">[ date ]</a>
+              <a href="thread.html#792">[ thread ]</a>
+              <a href="subject.html#792">[ subject ]</a>
+              <a href="author.html#792">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

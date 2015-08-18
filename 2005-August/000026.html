@@ -1,0 +1,104 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r31 - trunk/kernel
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2005-August/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r31%20-%20trunk/kernel&In-Reply-To=%3C200508311534.j7VFYRx5001112%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000024.html">
+   <LINK REL="Next"  HREF="000025.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r31 - trunk/kernel</H1>
+    <B>Tomonori Fujita at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r31%20-%20trunk/kernel&In-Reply-To=%3C200508311534.j7VFYRx5001112%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r31 - trunk/kernel">tomo at berlios.de
+       </A><BR>
+    <I>Wed Aug 31 17:34:27 CEST 2005</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000024.html">[Stgt-svn] r30 - trunk/kernel
+</A></li>
+        <LI>Next message: <A HREF="000025.html">[Stgt-svn] r32 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#26">[ date ]</a>
+              <a href="thread.html#26">[ thread ]</a>
+              <a href="subject.html#26">[ subject ]</a>
+              <a href="author.html#26">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2005-08-31 17:34:25 +0200 (Wed, 31 Aug 2005)
+New Revision: 31
+
+Modified:
+   trunk/kernel/stgt.c
+Log:
+Makeshift fix for access to nonexistent lun.
+
+Modified: trunk/kernel/stgt.c
+===================================================================
+--- trunk/kernel/stgt.c	2005-08-31 03:24:14 UTC (rev 30)
++++ trunk/kernel/stgt.c	2005-08-31 15:34:25 UTC (rev 31)
+@@ -794,7 +794,18 @@
+ 
+ 	/* Should we do this earlier? */
+ 	device = stgt_device_find(target, cmnd-&gt;lun);
+-
++	if (!device) {
++		switch (cmnd-&gt;scb[0]) {
++		case INQUIRY:
++		case REPORT_LUNS:
++			break;
++		default:
++			eprintk(&quot;FIXME: access to nonexistent lun %u\n&quot;,
++				cmnd-&gt;lun);
++			cmnd_done(cmnd);
++			break;
++		}
++	}
+ 	/*
+ 	 * seperate vsd (virtual disk from sd (real sd))
+ 	 * call scsi_device_temaplte-&gt;prepcommand to see if they want it
+@@ -809,8 +820,6 @@
+ 	if (device &amp;&amp; device-&gt;sdt-&gt;prepcommand)
+ 		type = device-&gt;sdt-&gt;prepcommand(device, cmnd);
+ 
+-	dprintk(&quot;type %u\n&quot;, type);
+-
+ 	switch (type) {
+ 	case STGT_CMND_KSPACE:
+ 		err = device-&gt;sdt-&gt;queuecommand(device, cmnd);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000024.html">[Stgt-svn] r30 - trunk/kernel
+</A></li>
+	<LI>Next message: <A HREF="000025.html">[Stgt-svn] r32 - in trunk: kernel usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#26">[ date ]</a>
+              <a href="thread.html#26">[ thread ]</a>
+              <a href="subject.html#26">[ subject ]</a>
+              <a href="author.html#26">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

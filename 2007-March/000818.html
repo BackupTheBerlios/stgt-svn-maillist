@@ -1,0 +1,118 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r831 - trunk/usr/iscsi
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-March/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r831%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703151626.l2FGQAdk013535%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000817.html">
+   <LINK REL="Next"  HREF="000819.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r831 - trunk/usr/iscsi</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r831%20-%20trunk/usr/iscsi&In-Reply-To=%3C200703151626.l2FGQAdk013535%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r831 - trunk/usr/iscsi">tomo at mail.berlios.de
+       </A><BR>
+    <I>Thu Mar 15 17:26:10 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000817.html">[Stgt-svn] r830 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000819.html">[Stgt-svn] r832 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#818">[ date ]</a>
+              <a href="thread.html#818">[ thread ]</a>
+              <a href="subject.html#818">[ subject ]</a>
+              <a href="author.html#818">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-03-15 17:26:10 +0100 (Thu, 15 Mar 2007)
+New Revision: 831
+
+Modified:
+   trunk/usr/iscsi/iscsid.c
+Log:
+add AHS support to iscsi_rx_handler()
+
+Signed-off-by: Pete Wyckoff &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">pw at osc.edu</A>&gt;
+
+
+Modified: trunk/usr/iscsi/iscsid.c
+===================================================================
+--- trunk/usr/iscsi/iscsid.c	2007-03-15 16:23:12 UTC (rev 830)
++++ trunk/usr/iscsi/iscsid.c	2007-03-15 16:26:10 UTC (rev 831)
+@@ -1597,32 +1597,25 @@
+ 
+ 		switch (conn-&gt;rx_iostate) {
+ 		case IOSTATE_READ_BHS:
+-			conn-&gt;rx_iostate = IOSTATE_READ_AHS_DATA;
+ 			conn-&gt;req.ahssize = conn-&gt;req.bhs.hlength * 4;
+ 			conn-&gt;req.datasize = ntoh24(conn-&gt;req.bhs.dlength);
+-			conn-&gt;rx_size = (conn-&gt;req.ahssize + conn-&gt;req.datasize + 3) &amp; -4;
+ 
+-			if (conn-&gt;req.ahssize) {
+-				eprintf(&quot;FIXME: we cannot handle ahs\n&quot;);
+-				conn-&gt;state = STATE_CLOSE;
+-				break;
+-			}
+-
+ 			if (conn-&gt;state == STATE_SCSI) {
+ 				res = iscsi_task_rx_start(conn);
+ 				if (res) {
+ 					conn-&gt;state = STATE_CLOSE;
+ 					break;
+ 				}
++			} else {
++				conn-&gt;rx_buffer = conn-&gt;req_buffer;
++				conn-&gt;req.ahs = conn-&gt;rx_buffer;
++				conn-&gt;rx_size = roundup(conn-&gt;req.ahssize, 4);
++				conn-&gt;req.data = conn-&gt;rx_buffer + conn-&gt;rx_size;
++				conn-&gt;rx_size += roundup(conn-&gt;req.datasize, 4);
+ 			}
+ 
+ 			if (conn-&gt;rx_size) {
+-				if (conn-&gt;state != STATE_SCSI) {
+-					conn-&gt;rx_buffer = conn-&gt;req_buffer;
+-					conn-&gt;req.ahs = conn-&gt;rx_buffer;
+-				}
+-				conn-&gt;req.data =
+-					conn-&gt;rx_buffer + conn-&gt;req.ahssize;
++				conn-&gt;rx_iostate = IOSTATE_READ_AHS_DATA;
+ 				goto read_again;
+ 			}
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000817.html">[Stgt-svn] r830 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000819.html">[Stgt-svn] r832 - trunk/usr/iscsi
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#818">[ date ]</a>
+              <a href="thread.html#818">[ thread ]</a>
+              <a href="subject.html#818">[ subject ]</a>
+              <a href="author.html#818">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

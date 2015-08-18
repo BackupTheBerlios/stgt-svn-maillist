@@ -1,0 +1,1122 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r684 - in trunk/usr: . xen
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-December/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r684%20-%20in%20trunk/usr%3A%20.%20xen&In-Reply-To=%3C200612161738.kBGHcYN2028990%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000670.html">
+   <LINK REL="Next"  HREF="000672.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r684 - in trunk/usr: . xen</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r684%20-%20in%20trunk/usr%3A%20.%20xen&In-Reply-To=%3C200612161738.kBGHcYN2028990%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r684 - in trunk/usr: . xen">tomo at mail.berlios.de
+       </A><BR>
+    <I>Sat Dec 16 18:38:34 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000670.html">[Stgt-svn] r683 - trunk
+</A></li>
+        <LI>Next message: <A HREF="000672.html">[Stgt-svn] r685 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#671">[ date ]</a>
+              <a href="thread.html#671">[ thread ]</a>
+              <a href="subject.html#671">[ subject ]</a>
+              <a href="author.html#671">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-12-16 18:38:32 +0100 (Sat, 16 Dec 2006)
+New Revision: 684
+
+Added:
+   trunk/usr/bd_xen.c
+   trunk/usr/xen/
+   trunk/usr/xen/xen.c
+   trunk/usr/xen/xen.h
+   trunk/usr/xen/xenbus.c
+   trunk/usr/xen/xs_api.c
+   trunk/usr/xen/xs_api.h
+Modified:
+   trunk/usr/Makefile
+Log:
+Add xen stuff
+
+
+Modified: trunk/usr/Makefile
+===================================================================
+--- trunk/usr/Makefile	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/Makefile	2006-12-16 17:38:32 UTC (rev 684)
+@@ -1,43 +1,59 @@
+-CFLAGS += -O2 -fno-inline -Wall -Wstrict-prototypes -g -D_LARGEFILE64_SOURCE \
+-	-I$(KERNELSRC)/include -I../include -I.
+-
+-PROGRAMS = tgtd tgtadm tgtadm-iscsi
+-TGTD_OBJS = tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o bd_sg.o
++ifneq ($(XEN),)
++XEN_ROOT = ../..
++include $(XEN_ROOT)/tools/Rules.mk
++LINUX_ROOT := $(wildcard $(XEN_ROOT)/linux-2.6.*-xen)
++INCLUDES += -I$(XEN_LIBXC) -I$(XEN_XENSTORE) -I$(XEN_ROOT)/xen/include
++INCLUDES += -I$(LINUX_ROOT)/include -I.
++LIBAIO_DIR = ../libaio/src
++AIOLIBS := $(LIBAIO_DIR)/libaio.a
++CFLAGS += -I$(XEN_LIBXC) -I$(LIBAIO_DIR)
++CFLAGS += $(INCLUDES) -I. -I../../xenstore 
++CFLAGS += -DXEN -DUSE_KERNEL
++LIBS := -L. -L.. -L../lib
++LIBS += -L$(XEN_LIBXC)
++LIBS += -lxenctrl
++LIBS += -L$(XEN_XENSTORE) -lxenstore $(AIOLIBS)
++TGTD_OBJS += $(addprefix xen/, xen.o xs_api.o xenbus.o)
++TGTD_OBJS += tgtif.o bd_xen.o
++else
++INCLUDES += -I../include -I$(KERNELSRC)/include
+ LIBS += -laio
++endif
+ 
+ ifneq ($(IBMVIO),)
+ CFLAGS += -DIBMVIO -DUSE_KERNEL
+ TGTD_OBJS += $(addprefix ibmvio/, ibmvio.o)
++TGTD_OBJS += bd_mmap.o tgtif.o
+ BD_MMAP=1
+ endif
+ 
+ ifneq ($(ISCSI),)
+ CFLAGS += -DISCSI
+ TGTD_OBJS += $(addprefix iscsi/, conn.o param.o session.o iscsid.o target.o \
+-	account.o chap.o transport.o)
+-TGTD_OBJS += $(addprefix iscsi/, iscsi_tcp.o)
++	account.o chap.o transport.o iscsi_tcp.o)
++TGTD_OBJS += bd_aio.o
+ LIBS += -lcrypto
+ BD_AIO=1
+ endif
+ 
+-ifneq ($(BD_MMAP),)
+-TGTD_OBJS += bd_mmap.o tgtif.o
+-endif
++INCLUDES += -I.
++CFLAGS += -Wall -O2 -Wstrict-prototypes -fPIC -D_LARGEFILE64_SOURCE $(INCLUDES)
+ 
+-ifneq ($(BD_AIO),)
+-TGTD_OBJS += bd_aio.o
+-endif
++PROGRAMS += tgtd tgtadm
++TGTD_OBJS += tgtd.o mgmt.o target.o scsi.o log.o driver.o util.o work.o bd_sg.o
+ 
+ all: $(PROGRAMS)
+ 
+ tgtd: $(TGTD_OBJS)
+-	$(CC) $^ -g -o $@ $(LIBS)
++	$(CC) $^ -o $@ $(LIBS)
+ 
+ tgtadm: tgtadm.o
+ 	$(CC) $^ -o $@
+ 
+-tgtadm-iscsi: tgtadm-iscsi.o
+-	$(CC) $^ -o $@
++ifneq ($(XEN),)
++install: $(PROGRAMS)
++	install -m0755 $(PROGRAMS) $(DESTDIR)/usr/sbin
++endif
+ 
+ clean:
+-	rm -f *.o $(PROGRAMS) iscsi/*.o ibmvio/*.o
++	rm -f *.o $(PROGRAMS) iscsi/*.o ibmvio/*.o xen/*.o
+
+Added: trunk/usr/bd_xen.c
+===================================================================
+--- trunk/usr/bd_xen.c	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/bd_xen.c	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,67 @@
++/*
++ * Xen file backed routine
++ *
++ * Copyright (C) 2006 FUJITA Tomonori &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">tomof at acm.org</A>&gt;
++ * Copyright (C) 2006 Mike Christie &lt;<A HREF="https://lists.berlios.de/mailman/listinfo/stgt-svn">michaelc at cs.wisc.edu</A>&gt;
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++#include &lt;errno.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;inttypes.h&gt;
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;string.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;libaio.h&gt;
++
++#include &lt;linux/fs.h&gt;
++#include &lt;sys/epoll.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++
++static int bd_xen_open(struct tgt_device *dev, char *path, int *fd, uint64_t *size)
++{
++	*fd = backed_file_open(path, O_RDWR| O_LARGEFILE, size);
++
++	return *fd &gt;= 0 ? 0 : *fd;
++}
++
++static void bd_xen_close(struct tgt_device *dev)
++{
++	close(dev-&gt;fd);
++}
++
++static int bd_xen_cmd_submit(struct tgt_device *dev, uint8_t *scb, int rw,
++			     uint32_t datalen, unsigned long *uaddr,
++			     uint64_t offset, int *async, void *key)
++{
++	return 0;
++}
++
++static int bd_xen_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len)
++{
++	return 0;
++}
++
++struct backedio_template xen_bdt = {
++	.bd_open		= bd_xen_open,
++	.bd_close		= bd_xen_close,
++	.bd_cmd_submit		= bd_xen_cmd_submit,
++	.bd_cmd_done		= bd_xen_cmd_done,
++};
+
+Added: trunk/usr/xen/xen.c
+===================================================================
+--- trunk/usr/xen/xen.c	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/xen/xen.c	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,43 @@
++#include &lt;string.h&gt;
++#include &lt;sys/epoll.h&gt;
++#include &lt;xs.h&gt;
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;xs_api.h&quot;
++
++/* xenstore/xenbus: */
++extern int add_blockdevice_probe_watch(struct xs_handle *h,
++                                       const char *domname);
++extern int xs_fire_next_watch(struct xs_handle *h);
++
++static void xen_event_handle(int fd, int events, void *data)
++{
++	xs_fire_next_watch((struct xs_handle *) data);
++}
++
++int xen_init(int index)
++{
++	int err;
++	struct xs_handle *xsh;
++
++	xsh = xs_daemon_open();
++	if (!xsh) {
++		eprintf(&quot;xs_daemon_open\n&quot;);
++		goto open_failed;
++	}
++
++	err = add_blockdevice_probe_watch(xsh, &quot;Domain-0&quot;);
++	if (err) {
++		eprintf(&quot;adding device probewatch\n&quot;);
++		goto open_failed;
++	}
++
++	err = tgt_event_add(xs_fileno(xsh), EPOLLIN, xen_event_handle, xsh);
++
++	return 0;
++
++open_failed:
++	return -1;
++}
+
+Added: trunk/usr/xen/xen.h
+===================================================================
+--- trunk/usr/xen/xen.h	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/xen/xen.h	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,15 @@
++#ifndef __TGTXEN_H__
++#define __TGTXEN_H__
++
++extern int xen_init(void);
++
++struct tgt_driver xen = {
++	.name			= &quot;xen&quot;,
++	.use_kernel		= 1,
++	.init			= xen_init,
++	.cmd_end_notify		= kspace_send_cmd_res,
++	.mgmt_end_notify	= kspace_send_tsk_mgmt_res,
++	.default_bdt		= &amp;xen_bdt,
++};
++
++#endif
+
+Added: trunk/usr/xen/xenbus.c
+===================================================================
+--- trunk/usr/xen/xenbus.c	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/xen/xenbus.c	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,398 @@
++/*
++ * xenbus.c
++ *
++ * xenbus interface to the blocktap.
++ *
++ * this handles the top-half of integration with block devices through the
++ * store -- the tap driver negotiates the device channel etc, while the
++ * userland tap client needs to sort out the disk parameters etc.
++ *
++ * (c) 2005 Andrew Warfield and Julian Chesterfield
++ *
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the &quot;Software&quot;), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;printf.h&gt;
++#include &lt;string.h&gt;
++#include &lt;err.h&gt;
++#include &lt;stdarg.h&gt;
++#include &lt;unistd.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;xs.h&gt;
++#include &lt;sys/mman.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;sys/types.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;poll.h&gt;
++#include &lt;time.h&gt;
++#include &lt;sys/time.h&gt;
++
++/* FIXME */
++#define SRP_RING_PAGES 1
++#define SRP_MAPPED_PAGES 88
++
++#include &quot;list.h&quot;
++#include &quot;util.h&quot;
++#include &quot;tgtd.h&quot;
++#include &quot;xs_api.h&quot;
++
++struct backend_info
++{
++	int frontend_id;
++
++	char *path;
++	char *backpath;
++	char *frontpath;
++
++	struct list_head list;
++};
++
++static LIST_HEAD(belist);
++
++static int strsep_len(const char *str, char c, unsigned int len)
++{
++	unsigned int i;
++
++	for (i = 0; str[i]; i++)
++		if (str[i] == c) {
++			if (len == 0)
++				return i;
++			len--;
++		}
++	return (len == 0) ? i : -ERANGE;
++}
++
++static int get_be_id(const char *str)
++{
++	int len,end;
++	const char *ptr;
++	char *tptr, num[10];
++
++	len = strsep_len(str, '/', 6);
++	end = strlen(str);
++	if((len &lt; 0) || (end &lt; 0)) return -1;
++
++	ptr = str + len + 1;
++	strncpy(num,ptr,end - len);
++	tptr = num + (end - (len + 1));
++	*tptr = '\0';
++
++	return atoi(num);
++}
++
++static struct backend_info *be_lookup_be(const char *bepath)
++{
++	struct backend_info *be;
++
++	list_for_each_entry(be, &amp;belist, list)
++		if (strcmp(bepath, be-&gt;backpath) == 0)
++			return be;
++	return (struct backend_info *)NULL;
++}
++
++static int be_exists_be(const char *bepath)
++{
++	return (be_lookup_be(bepath) != NULL);
++}
++
++static struct backend_info *be_lookup_fe(const char *fepath)
++{
++	struct backend_info *be;
++
++	list_for_each_entry(be, &amp;belist, list)
++		if (strcmp(fepath, be-&gt;frontpath) == 0)
++			return be;
++	return (struct backend_info *)NULL;
++}
++
++#if 0
++static int backend_remove(struct xs_handle *h, struct backend_info *be)
++{
++	/* Unhook from be list. */
++	list_del(&amp;be-&gt;list);
++	dprintf(&quot;Removing backend\n&quot;);
++
++	/* Free everything else. */
++	if (be-&gt;blkif) {
++		dprintf(&quot;Freeing blkif dev [%d]\n&quot;,be-&gt;blkif-&gt;devnum);
++		free_blkif(be-&gt;blkif);
++	}
++	if (be-&gt;frontpath)
++		free(be-&gt;frontpath);
++	if (be-&gt;backpath)
++		free(be-&gt;backpath);
++	free(be);
++	return 0;
++}
++#endif
++
++static int tgt_device_setup(struct xs_handle *h, char *bepath)
++{
++	struct backend_info *be;
++	char *path = NULL, *p, *dev;
++	int len, err = -EINVAL;
++	long int handle;
++	uint64_t lun;
++
++	be = be_lookup_be(bepath);
++	if (!be) {
++		dprintf(&quot;ERROR: backend changed called for nonexistent &quot;
++			&quot;backend! (%s)\n&quot;, bepath);
++		return err;
++	}
++
++        err = xs_gather(h, bepath, &quot;dev&quot;, NULL, &amp;path, NULL);
++        if (err) {
++                eprintf(&quot;cannot get dev %d\n&quot;, err);
++		return err;
++	}
++
++	/* TODO: we need to lun param. */
++	lun = 0;
++
++	err = tgt_device_create(be-&gt;frontend_id, lun);
++	{
++		char line[1024];
++		int len;
++
++		memset(line, 0, sizeof(line));
++		len = snprintf(line, sizeof(line), &quot;path&quot;);
++		len += 1;
++		snprintf(line + len, sizeof(line) - len, &quot;%s&quot;, path);
++		err = tgt_device_update(be-&gt;frontend_id, lun, line);
++	}
++
++	dprintf(&quot;%d path %s\n&quot;, err, path);
++	if (err)
++		return err;
++
++	err = xs_printf(h, be-&gt;backpath, &quot;info&quot;, &quot;%d&quot;, be-&gt;frontend_id);
++	if (!err)
++		dprintf(&quot;ERROR: Failed writing info&quot;);
++
++	dprintf(&quot;[SETUP] Complete\n\n&quot;);
++
++	return err;
++}
++
++static int xen_chrdev_open(char *name, uint8_t minor)
++{
++	FILE *f;
++	char devname[256];
++	char buf[256];
++	int devn;
++	int ctlfd;
++
++	f = fopen(&quot;/proc/devices&quot;, &quot;r&quot;);
++	if (!f) {
++		eprintf(&quot;Cannot open control path to the driver\n&quot;);
++		return -1;
++	}
++
++	devn = 0;
++	while (!feof(f)) {
++		if (!fgets(buf, sizeof (buf), f))
++			break;
++
++		if (sscanf(buf, &quot;%d %s&quot;, &amp;devn, devname) != 2)
++			continue;
++
++		if (!strcmp(devname, name))
++			break;
++
++		devn = 0;
++	}
++
++	fclose(f);
++	if (!devn) {
++		eprintf(&quot;cannot find %s in /proc/devices - &quot;
++			&quot;make sure the module is loaded\n&quot;, name);
++		return -1;
++	}
++
++	snprintf(devname, sizeof(devname), &quot;/dev/%s%d&quot;, name, minor);
++
++	unlink(devname);
++	if (mknod(devname, (S_IFCHR | 0600), (devn &lt;&lt; 8) | minor)) {
++		eprintf(&quot;cannot create %s %s\n&quot;, devname, strerror(errno));
++		return -1;
++	}
++
++	ctlfd = open(devname, O_RDWR);
++	if (ctlfd &lt; 0) {
++		eprintf(&quot;cannot open %s %s\n&quot;, devname, strerror(errno));
++		return -1;
++	}
++
++	return ctlfd;
++}
++
++/*
++ * Xenstore watch callback entry point. This code replaces the hotplug scripts,
++ * and as soon as the xenstore backend driver entries are created, this script
++ * gets called.
++ */
++static void tgt_probe(struct xs_handle *h, struct xenbus_watch *w,
++		      const char *bepath_im)
++{
++	struct backend_info *be = NULL;
++	char *frontend = NULL, *bepath = NULL, *p;
++	int err, len, fd, msize = (SRP_RING_PAGES + SRP_MAPPED_PAGES) * PAGE_SIZE;
++	void *addr;
++	uint32_t hostno;
++
++	bepath = strdup(bepath_im);
++	if (!bepath) {
++		dprintf(&quot;No path\n&quot;);
++		return;
++	}
++
++	/*
++	 *asserts that xenstore structure is always 7 levels deep
++	 *e.g. /local/domain/0/backend/vbd/1/2049
++	 */
++        len = strsep_len(bepath, '/', 7);
++        if (len &lt; 0)
++		goto free_be;
++        bepath[len] = '\0';
++
++	be = calloc(1, sizeof(*be));
++	if (!be) {
++		dprintf(&quot;ERROR: allocating backend structure\n&quot;);
++		goto free_be;
++	}
++
++	err = xs_gather(h, bepath,
++			&quot;frontend-id&quot;, &quot;%d&quot;, &amp;be-&gt;frontend_id,
++			&quot;frontend&quot;, NULL, &amp;frontend,
++			NULL);
++
++	dprintf(&quot;%d %d %s\n&quot;, err, be-&gt;frontend_id, frontend);
++	if (err) {
++		/*
++		 *Unable to find frontend entries,
++		 *bus-id is no longer valid
++		 */
++		dprintf(&quot;ERROR: Frontend-id check failed, removing backend: [%s]\n&quot;,bepath);
++
++		/*BE info should already exist, free new mem and find old entry*/
++		free(be);
++		be = be_lookup_be(bepath);
++/* 		if (be &amp;&amp; be-&gt;blkif) */
++/* 			backend_remove(h, be); */
++/* 		else */
++/* 			goto free_be; */
++	        if (bepath)
++			free(bepath);
++		return;
++	}
++
++        /* Are we already tracking this device? */
++        if (be_exists_be(bepath))
++		goto free_be;
++
++        err = xs_gather(h, bepath, &quot;hostno&quot;, &quot;%u&quot;, &amp;hostno, NULL);
++	if (err)
++		goto free_be;
++
++	fd = xen_chrdev_open(&quot;scsiback&quot;, hostno);
++	if (fd &lt; 0)
++		goto free_be;
++
++	addr = mmap(NULL, msize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
++	if (addr == MAP_FAILED) {
++		eprintf(&quot;failed to mmap %u %s\n&quot;, msize, strerror(errno));
++		goto close_fd;
++	}
++	dprintf(&quot;addr: %p size: %d\n&quot;, addr, msize);
++
++	err = tgt_target_create(0, be-&gt;frontend_id);
++	if (err &amp;&amp; err != -EEXIST)
++		goto close_fd;
++
++	be-&gt;backpath = bepath;
++       	be-&gt;frontpath = frontend;
++
++	/* FIXME */
++	err = tgt_target_bind(be-&gt;frontend_id, hostno, 0);
++
++        list_add(&amp;be-&gt;list, &amp;belist);
++
++        dprintf(&quot;[PROBE]\tADDED NEW DEVICE (%s)\n&quot;, bepath);
++	dprintf(&quot;\tFRONTEND (%s),(%d)\n&quot;, frontend, be-&gt;frontend_id);
++
++	tgt_device_setup(h, bepath);
++	return;
++
++close_fd:
++	close(fd);
++free_be:
++	if (frontend)
++		free(frontend);
++        if (bepath)
++		free(bepath);
++	if(be)
++		free(be);
++	return;
++}
++
++/*
++ *We set a general watch on the backend vbd directory
++ *ueblktap_probe is called for every update
++ *Our job is simply to monitor for new entries, and to
++ *create the state and attach a disk.
++ */
++
++int add_blockdevice_probe_watch(struct xs_handle *h, const char *domname)
++{
++	char *domid, *path;
++	struct xenbus_watch *watch;
++	int er;
++
++	domid = get_dom_domid(h, domname);
++
++	dprintf(&quot;%s: %s\n&quot;, domname, (domid != NULL) ? domid : &quot;[ not found! ]&quot;);
++
++	asprintf(&amp;path, &quot;/local/domain/%s/backend/scsi&quot;, domid);
++	if (path == NULL)
++		return -ENOMEM;
++
++	watch = (struct xenbus_watch *)malloc(sizeof(struct xenbus_watch));
++	if (!watch) {
++		dprintf(&quot;ERROR: unable to malloc vbd_watch [%s]\n&quot;, path);
++		return -EINVAL;
++	}
++	watch-&gt;node = path;
++	watch-&gt;callback = tgt_probe;
++	er = register_xenbus_watch(h, watch);
++	if (er == 0) {
++		dprintf(&quot;ERROR: adding vbd probe watch %s\n&quot;, path);
++		return -EINVAL;
++	}
++	return 0;
++}
+
+Added: trunk/usr/xen/xs_api.c
+===================================================================
+--- trunk/usr/xen/xs_api.c	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/xen/xs_api.c	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,352 @@
++/*
++ * xs_api.c
++ * 
++ * blocktap interface functions to xenstore
++ *
++ * (c) 2005 Andrew Warfield and Julian Chesterfield
++ *
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the &quot;Software&quot;), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ *
++ */
++
++#include &lt;stdio.h&gt;
++#include &lt;stdlib.h&gt;
++#include &lt;printf.h&gt;
++#include &lt;string.h&gt;
++#include &lt;err.h&gt;
++#include &lt;stdarg.h&gt;
++#include &lt;errno.h&gt;
++#include &lt;xs.h&gt;
++#include &lt;sys/types.h&gt;
++#include &lt;sys/stat.h&gt;
++#include &lt;fcntl.h&gt;
++#include &lt;poll.h&gt;
++/* #include &quot;blktaplib.h&quot; */
++#include &quot;list.h&quot;
++#include &quot;xs_api.h&quot;
++
++#if 0
++#define DPRINTF(_f, _a...) printf ( _f , ## _a )
++#else
++#define DPRINTF(_f, _a...) ((void)0)
++#endif
++
++static LIST_HEAD(watches);
++#define BASE_DEV_VAL 2048
++
++int xs_gather(struct xs_handle *xs, const char *dir, ...)
++{
++	va_list ap;
++	const char *name;
++	char *path, **e;
++	int ret = 0, num,i;
++	unsigned int len;
++	xs_transaction_t xth;
++
++again:
++	if( (xth = xs_transaction_start(xs)) == XBT_NULL ) {
++		printf(&quot;unable to start xs trasanction\n&quot;);
++		ret = ENOMEM;
++		return ret;
++	}
++	
++	va_start(ap, dir);
++	while (ret == 0 &amp;&amp; (name = va_arg(ap, char *)) != NULL) {
++		const char *fmt = va_arg(ap, char *);
++		void *result = va_arg(ap, void *);
++		char *p;
++		
++		if (asprintf(&amp;path, &quot;%s/%s&quot;, dir, name) == -1)
++		{
++			printf(&quot;allocation error in xs_gather!\n&quot;);
++			ret = ENOMEM;
++			break;
++		}
++		
++		p = xs_read(xs, xth, path, &amp;len);
++		
++		
++		free(path);
++		if (p == NULL) {
++			ret = ENOENT;
++			break;
++		}
++		if (fmt) {
++			if (sscanf(p, fmt, result) == 0)
++				ret = EINVAL;
++			free(p);
++		} else
++			*(char **)result = p;
++	}
++	va_end(ap);
++
++	if (!xs_transaction_end(xs, xth, ret)) {
++		if (ret == 0 &amp;&amp; errno == EAGAIN)
++			goto again;
++                else
++			ret = errno;
++	}
++
++	return ret;
++}
++
++
++/* Single printf and write: returns -errno or 0. */
++int xs_printf(struct xs_handle *h, const char *dir, const char *node, 
++	      const char *fmt, ...)
++{
++        char *buf, *path;
++        va_list ap;
++        int ret;
++	
++        va_start(ap, fmt);
++        ret = vasprintf(&amp;buf, fmt, ap);
++        va_end(ap);
++	
++        asprintf(&amp;path, &quot;%s/%s&quot;, dir, node);
++	
++        if ((path == NULL) || (buf == NULL))
++		return 0;
++
++        ret = xs_write(h, XBT_NULL, path, buf, strlen(buf)+1);
++	
++        free(buf);
++        free(path);
++	
++        return ret;
++}
++
++
++int xs_exists(struct xs_handle *h, const char *path)
++{
++	char **d;
++	unsigned int num;
++	xs_transaction_t xth;
++	
++	if( (xth = xs_transaction_start(h)) == XBT_NULL ) {
++		printf(&quot;unable to start xs trasanction\n&quot;);
++		return 0;
++	}	
++	
++	d = xs_directory(h, xth, path, &amp;num);
++	xs_transaction_end(h, xth, 0);
++	if (d == NULL)
++		return 0;
++	free(d);
++	return 1;
++}
++
++
++
++/* This assumes that the domain name we are looking for is unique! Name parameter Domain-0 */
++char *get_dom_domid(struct xs_handle *h, const char *name)
++{
++	char **e, *val, *domid = NULL;
++	unsigned int num, len;
++	int i;
++	char *path;
++	xs_transaction_t xth;
++	
++	if ( (xth = xs_transaction_start(h)) == XBT_NULL ) {
++		warn(&quot;unable to start xs trasanction\n&quot;);
++		return NULL;
++	}
++	
++	e = xs_directory(h, xth, &quot;/local/domain&quot;, &amp;num);
++	
++	i=0;
++	while (i &lt; num) {
++		asprintf(&amp;path, &quot;/local/domain/%s/name&quot;, e[i]);
++		val = xs_read(h, xth, path, &amp;len);
++		free(path);
++		if (val == NULL)
++			continue;
++		
++		if (strcmp(val, name) == 0) {
++			/* match! */
++			asprintf(&amp;path, &quot;/local/domain/%s/domid&quot;, e[i]);
++			domid = xs_read(h, xth, path, &amp;len);
++			free(val);
++			free(path);
++			break;
++		}
++		free(val);
++		i++;
++	}
++	xs_transaction_end(h, xth, 0);
++	
++	free(e);
++	return domid;
++}
++
++int convert_dev_name_to_num(char *name) {
++	char *p_sd, *p_hd, *p_xvd, *p_plx, *p, *alpha,*ptr;
++	int majors[10] = {3,22,33,34,56,57,88,89,90,91};
++	int maj,i;
++
++	asprintf(&amp;p_sd,&quot;/dev/sd&quot;);
++	asprintf(&amp;p_hd,&quot;/dev/hd&quot;);
++	asprintf(&amp;p_xvd,&quot;/dev/xvd&quot;);
++	asprintf(&amp;p_plx,&quot;plx&quot;);
++	asprintf(&amp;alpha,&quot;abcdefghijklmnop&quot;);
++	
++
++	if(strstr(name,p_sd)!=NULL) {
++		p = name + strlen(p_sd);
++		for(i=0,ptr=alpha;i&lt;strlen(alpha);i++) {
++			if(*ptr==*p)
++				break;
++			*ptr++;
++		}
++		*p++;
++		return BASE_DEV_VAL + (16*i) + atoi(p);
++	} else if(strstr(name,p_hd)!=NULL) {
++		p = name + strlen(p_hd);
++		for(i=0,ptr=alpha;i&lt;strlen(alpha);i++) {
++			if(*ptr==*p) break;
++			*ptr++;
++		}
++		*p++;
++		return (majors[i/2]*256) + atoi(p);
++
++	} else if(strstr(name,p_xvd)!=NULL) {
++		p = name + strlen(p_xvd);
++		for(i=0,ptr=alpha;i&lt;strlen(alpha);i++) {
++			if(*ptr==*p) break;
++			*ptr++;
++		}
++		*p++;
++		return (202*256) + (16*i) + atoi(p);
++
++	} else if(strstr(name,p_plx)!=NULL) {
++		p = name + strlen(p_plx);
++		return atoi(p);
++
++	} else {
++		DPRINTF(&quot;Unknown device type, setting to default.\n&quot;);
++		return BASE_DEV_VAL;
++	}
++	return 0;
++}
++
++/* A little paranoia: we don't just trust token. */
++static struct xenbus_watch *find_watch(const char *token)
++{
++	struct xenbus_watch *i, *cmp;
++	
++	cmp = (void *)strtoul(token, NULL, 16);
++	
++	list_for_each_entry(i, &amp;watches, list)
++		if (i == cmp)
++			return i;
++	return NULL;
++}
++
++/* Register callback to watch this node. like xs_watch, return 0 on failure */
++int register_xenbus_watch(struct xs_handle *h, struct xenbus_watch *watch)
++{
++	/* Pointer in ascii is the token. */
++	char token[sizeof(watch) * 2 + 1];
++	int er;
++	
++	sprintf(token, &quot;%lX&quot;, (long)watch);
++	if (find_watch(token)) 
++	{
++		warn(&quot;watch collision!&quot;);
++		return -EINVAL;
++	}
++	
++	er = xs_watch(h, watch-&gt;node, token);
++	if (er != 0) {
++		list_add(&amp;watch-&gt;list, &amp;watches);
++	} 
++        
++	return er;
++}
++
++int unregister_xenbus_watch(struct xs_handle *h, struct xenbus_watch *watch)
++{
++	char token[sizeof(watch) * 2 + 1];
++	int er;
++	
++	sprintf(token, &quot;%lX&quot;, (long)watch);
++	if (!find_watch(token))
++	{
++		warn(&quot;no such watch!&quot;);
++		return -EINVAL;
++	}
++	
++	
++	er = xs_unwatch(h, watch-&gt;node, token);
++	list_del(&amp;watch-&gt;list);
++	
++	if (er == 0)
++		warn(&quot;XENBUS Failed to release watch %s: %i&quot;,
++		     watch-&gt;node, er);
++	return 0;
++}
++
++/* Re-register callbacks to all watches. */
++void reregister_xenbus_watches(struct xs_handle *h)
++{
++	struct xenbus_watch *watch;
++	char token[sizeof(watch) * 2 + 1];
++	
++	list_for_each_entry(watch, &amp;watches, list) {
++		sprintf(token, &quot;%lX&quot;, (long)watch);
++		xs_watch(h, watch-&gt;node, token);
++	}
++}
++
++/* based on watch_thread() */
++int xs_fire_next_watch(struct xs_handle *h)
++{
++	char **res;
++	char *token;
++	char *node = NULL;
++	struct xenbus_watch *w;
++	int er;
++	unsigned int num;
++	
++	res = xs_read_watch(h, &amp;num);
++	if (res == NULL) 
++		return -EAGAIN; /* in O_NONBLOCK, read_watch returns 0... */
++	
++	node  = res[XS_WATCH_PATH];
++	token = res[XS_WATCH_TOKEN];
++	
++	w = find_watch(token);
++	if (!w)
++	{
++		warn(&quot;unregistered watch fired&quot;);
++		goto done;
++	}
++	w-&gt;callback(h, w, node);
++	
++ done:
++	free(res);
++	return 1;
++}
+
+Added: trunk/usr/xen/xs_api.h
+===================================================================
+--- trunk/usr/xen/xs_api.h	2006-12-16 14:13:20 UTC (rev 683)
++++ trunk/usr/xen/xs_api.h	2006-12-16 17:38:32 UTC (rev 684)
+@@ -0,0 +1,50 @@
++/*
++ * xs_api.h
++ *
++ * (c) 2005 Andrew Warfield and Julian Chesterfield
++ *
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation; or, when distributed
++ * separately from the Linux kernel or incorporated into other
++ * software packages, subject to the following license:
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy
++ * of this source file (the &quot;Software&quot;), to deal in the Software without
++ * restriction, including without limitation the rights to use, copy, modify,
++ * merge, publish, distribute, sublicense, and/or sell copies of the Software,
++ * and to permit persons to whom the Software is furnished to do so, subject to
++ * the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++struct xenbus_watch
++{
++        struct list_head list;
++        char *node;
++        void (*callback)(struct xs_handle *h, 
++                         struct xenbus_watch *, 
++                         const  char *node);
++};
++
++int xs_gather(struct xs_handle *xs, const char *dir, ...);
++int xs_printf(struct xs_handle *h, const char *dir, const char *node, 
++	      const char *fmt, ...);
++int xs_exists(struct xs_handle *h, const char *path);
++char *get_dom_domid(struct xs_handle *h, const char *name);
++int convert_dev_name_to_num(char *name);
++int register_xenbus_watch(struct xs_handle *h, struct xenbus_watch *watch);
++int unregister_xenbus_watch(struct xs_handle *h, struct xenbus_watch *watch);
++void reregister_xenbus_watches(struct xs_handle *h);
++int xs_fire_next_watch(struct xs_handle *h);
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000670.html">[Stgt-svn] r683 - trunk
+</A></li>
+	<LI>Next message: <A HREF="000672.html">[Stgt-svn] r685 - trunk
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#671">[ date ]</a>
+              <a href="thread.html#671">[ thread ]</a>
+              <a href="subject.html#671">[ subject ]</a>
+              <a href="author.html#671">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

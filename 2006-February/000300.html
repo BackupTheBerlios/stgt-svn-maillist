@@ -1,0 +1,330 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r313 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r313%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602230556.k1N5uN2Q018856%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000299.html">
+   <LINK REL="Next"  HREF="000301.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r313 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r313%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602230556.k1N5uN2Q018856%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r313 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Thu Feb 23 06:56:23 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000299.html">[Stgt-svn] r312 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+        <LI>Next message: <A HREF="000301.html">[Stgt-svn] r314 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#300">[ date ]</a>
+              <a href="thread.html#300">[ thread ]</a>
+              <a href="subject.html#300">[ subject ]</a>
+              <a href="author.html#300">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-23 06:56:15 +0100 (Thu, 23 Feb 2006)
+New Revision: 313
+
+Modified:
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Add another nasty hack for ibmvstgt. I need to separete them from stuff for generic LLDs later on.
+
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-23 05:27:50 UTC (rev 312)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-23 05:56:15 UTC (rev 313)
+@@ -65,6 +65,10 @@
+ #define max_t(type,x,y) \
+ 	({ type __x = (x); type __y = (y); __x &gt; __y ? __x: __y; })
+ 
++#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
++#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
++#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
++
+ static int device_info(int tid, uint64_t lun, uint64_t *size)
+ {
+ 	int fd, err;
+@@ -166,6 +170,8 @@
+ 	uint8_t pcode = scb[2] &amp; 0x3f;
+ 	uint64_t size;
+ 
++	eprintf(&quot;%d %&quot; PRIx64 &quot; %x %x\n&quot;, tid, lun, pcode, scb[1]);
++
+ 	if (device_info(tid, lun, &amp;size) &lt; 0) {
+ 		*len = sense_data_build(data, 0x70, ILLEGAL_REQUEST,
+ 					0x25, 0);
+@@ -229,17 +235,102 @@
+ #define PRODUCT_ID	&quot;VIRTUAL-DISK&quot;
+ #define PRODUCT_REV	&quot;0&quot;
+ 
+-static int inquiry(int tid, uint64_t lun, uint8_t *scb, uint8_t *data, int *len)
++struct inquiry_data {
++	uint8_t qual_type;
++	uint8_t rmb_reserve;
++	uint8_t version;
++	uint8_t aerc_naca_hisup_format;
++	uint8_t addl_len;
++	uint8_t sccs_reserved;
++	uint8_t bque_encserv_vs_multip_mchngr_reserved;
++	uint8_t reladr_reserved_linked_cmdqueue_vs;
++	char vendor[8];
++	char product[16];
++	char revision[4];
++	char vendor_specific[20];
++	char reserved1[2];
++	char version_descriptor[16];
++	char reserved2[22];
++	char unique[158];
++};
++
++#define	IBMVSTGT_HOSTDIR	&quot;/sys/class/scsi_host/host&quot;
++
++static int ibmvstgt_inquiry(int host_no, uint64_t lun, uint8_t *data)
+ {
+-	uint64_t size;
++	struct inquiry_data *id = (struct inquiry_data *) data;
++	char system_id[256], path[256], buf[32];
++	int fd, err, partition_number;
++	unsigned int unit_address;
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/system_id&quot;, host_no);
++	fd = open(path, O_RDONLY);
++	memset(system_id, 0, sizeof(system_id));
++	err = read(fd, system_id, sizeof(system_id));
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/partition_number&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	partition_number = strtoul(buf, NULL, 10);
++	close(fd);
++
++	snprintf(path, sizeof(path), IBMVSTGT_HOSTDIR &quot;%d/unit_address&quot;,
++		 host_no);
++	fd = open(path, O_RDONLY);
++	err = read(fd, buf, sizeof(buf));
++	unit_address = strtoul(buf, NULL, 0);
++	close(fd);
++
++	eprintf(&quot;%d %s %d %x %&quot; PRIx64 &quot;\n&quot;,
++		host_no, system_id, partition_number, unit_address, lun);
++
++	id-&gt;qual_type = TYPE_DISK;
++	id-&gt;rmb_reserve = 0x00;
++	id-&gt;version = 0x84;	/* ISO/IE		  */
++	id-&gt;aerc_naca_hisup_format = 0x22;/* naca &amp; fmt 0x02 */
++	id-&gt;addl_len = sizeof(*id) - 4;
++	id-&gt;bque_encserv_vs_multip_mchngr_reserved = 0x00;
++	id-&gt;reladr_reserved_linked_cmdqueue_vs = 0x02;/*CMDQ*/
++	memcpy(id-&gt;vendor, &quot;IBM	    &quot;, 8);
++	/* Don't even ask about the next bit.  AIX uses
++	 * hardcoded device naming to recognize device types
++	 * and their client won't  work unless we use VOPTA and
++	 * VDASD.
++	 */
++	memcpy(id-&gt;product, &quot;VDASD blkdev    &quot;, 16);
++	memcpy(id-&gt;revision, &quot;0001&quot;, 4);
++	snprintf(id-&gt;unique,sizeof(id-&gt;unique),
++		 &quot;IBM-VSCSI-%s-P%d-%x-%d-%d-%d\n&quot;,
++		 system_id,
++		 partition_number,
++		 unit_address,
++		 GETBUS(lun),
++		 GETTARGET(lun),
++		 GETLUN(lun));
++
++	return sizeof(*id);
++}
++
++static int inquiry(int host_no, int tid, uint8_t *lun_buf,
++		   uint8_t *scb, uint8_t *data, int *len)
++{
++	uint64_t size, lun;
+ 	int err, result = SAM_STAT_CHECK_CONDITION;
+ 
++	lun = scsi_get_devid(lun_buf);
++
+ 	if (((scb[1] &amp; 0x3) == 0x3) || (!(scb[1] &amp; 0x3) &amp;&amp; scb[2]))
+ 		goto err;
+ 
+ 	err = device_info(tid, lun, &amp;size);
+ 
++	dprintf(&quot;%&quot; PRIx64 &quot; %d %x %x\n&quot;, lun, err, scb[1], scb[2]);
++
+ 	if (!(scb[1] &amp; 0x3)) {
++		*len = ibmvstgt_inquiry(host_no, *((uint64_t *) lun_buf), data);
++#if 0
+ 		data[2] = 4;
+ 		data[3] = 0x42;
+ 		data[4] = 59;
+@@ -258,6 +349,7 @@
+ 		data[62] = 0x03;
+ 		data[63] = 0x00;
+ 		*len = 64;
++#endif
+ 		result = SAM_STAT_GOOD;
+ 	} else if (scb[1] &amp; 0x2) {
+ 		/* CmdDt bit is set */
+@@ -316,7 +408,8 @@
+ 	return SAM_STAT_CHECK_CONDITION;
+ }
+ 
+-static int report_luns(int tid, uint32_t unused, uint8_t *scb, uint8_t *p, int *len)
++static int report_luns(int tid, uint8_t *lun_buf, uint8_t *scb, uint8_t *p,
++		       int *len)
+ {
+ 	uint64_t lun, *data = (uint64_t *) p;
+ 	int idx, alen, oalen, nr_luns, rbuflen = 4096;
+@@ -344,6 +437,12 @@
+ 	alen &amp;= ~(8 - 1);
+ 	oalen = alen;
+ 
++	if ((*((uint64_t *) lun_buf))) {
++		eprintf(&quot;Another sick hack for ibmvstgt\n&quot;);
++		nr_luns = 1;
++		goto done;
++	}
++
+ 	alen -= 8;
+ 	rbuflen -= 8; /* FIXME */
+ 	idx = 1;
+@@ -372,7 +471,8 @@
+ 		}
+ 	}
+ 
+-	*data = (cpu_to_be64(nr_luns * 8) &lt;&lt; 32);
++done:
++	*((uint32_t *) data) = cpu_to_be32(nr_luns * 8);
+ 	*len = min(oalen, nr_luns * 8 + 8);
+ out:
+ 	closedir(dir);
+@@ -605,10 +705,6 @@
+ 
+ #define        TGT_INVALID_DEV_ID      ~0ULL
+ 
+-#define GETTARGET(x) ((int)((((uint64_t)(x)) &gt;&gt; 56) &amp; 0x003f))
+-#define GETBUS(x) ((int)((((uint64_t)(x)) &gt;&gt; 53) &amp; 0x0007))
+-#define GETLUN(x) ((int)((((uint64_t)(x)) &gt;&gt; 48) &amp; 0x001f))
+-
+ uint64_t scsi_get_devid(uint8_t *p)
+ {
+ 	uint64_t lun = TGT_INVALID_DEV_ID;
+@@ -638,13 +734,16 @@
+ 	return lun;
+ }
+ 
+-int scsi_cmd_process(int tid, uint8_t *pdu, int *len,
++int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
+ 		     uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-		     uint8_t *try_map, uint64_t *offset, uint64_t lun)
++		     uint8_t *try_map, uint64_t *offset, uint8_t *lun_buf)
+ {
+ 	int fd, result = SAM_STAT_GOOD;
+ 	uint8_t *data = NULL, *scb = pdu;
++	uint64_t lun;
+ 
++	lun = scsi_get_devid(lun_buf);
++
+ 	dprintf(&quot;%d %&quot; PRIu64 &quot; %x %u\n&quot;, tid, lun, scb[0], datalen);
+ 
+ 	*offset = 0;
+@@ -669,10 +768,10 @@
+ 
+ 	switch (scb[0]) {
+ 	case INQUIRY:
+-		result = inquiry(tid, lun, scb, data, len);
++		result = inquiry(host_no, tid, lun_buf, scb, data, len);
+ 		break;
+ 	case REPORT_LUNS:
+-		result = report_luns(tid, lun, scb, data, len);
++		result = report_luns(tid, lun_buf, scb, data, len);
+ 		break;
+ 	case READ_CAPACITY:
+ 		result = read_capacity(tid, lun, scb, data, len);
+@@ -725,7 +824,7 @@
+ 	case RESERVE_10:
+ 	case RELEASE_10:
+ 	default:
+-		dprintf(&quot;BUG? %u %&quot; PRIu64 &quot;\n&quot;, scb[0], lun);
++		eprintf(&quot;BUG? %u %&quot; PRIu64 &quot;\n&quot;, scb[0], lun);
+ 		*len = 0;
+ 		break;
+ 	}
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-23 05:27:50 UTC (rev 312)
++++ branches/use-scsi-ml/usr/target.c	2006-02-23 05:56:15 UTC (rev 313)
+@@ -371,9 +371,9 @@
+ 	if (device)
+ 		uaddr = target-&gt;devt[dev_id]-&gt;addr;
+ 
+-	result = scsi_cmd_process(target-&gt;tid, scmd-&gt;scb, &amp;len,
++	result = scsi_cmd_process(host_no, target-&gt;tid, scmd-&gt;scb, &amp;len,
+ 				  ev_req-&gt;k.cmd_req.data_len,
+-				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset, dev_id);
++				  &amp;uaddr, &amp;rw, &amp;try_map, &amp;offset, scmd-&gt;lun);
+ 
+ 	dprintf(&quot;%u %x %lx %&quot; PRIu64 &quot; %d\n&quot;,
+ 		cid, scmd-&gt;scb[0], uaddr, offset, result);
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-23 05:27:50 UTC (rev 312)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-23 05:56:15 UTC (rev 313)
+@@ -24,9 +24,9 @@
+ extern int tgt_target_bind(int tid, int host_no);
+ 
+ extern uint64_t scsi_get_devid(uint8_t *pdu);
+-extern int scsi_cmd_process(int tid, uint8_t *pdu, int *len,
++extern int scsi_cmd_process(int host_no, int tid, uint8_t *pdu, int *len,
+ 			    uint32_t datalen, unsigned long *uaddr, uint8_t *rw,
+-			    uint8_t *try_map, uint64_t *offset, uint64_t lun);
++			    uint8_t *try_map, uint64_t *offset, uint8_t *lun);
+ extern int scsi_cmd_done(int do_munmap, int do_free, uint64_t uaddr, int len);
+ 
+ #endif
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000299.html">[Stgt-svn] r312 - branches/use-scsi-ml/ibmvstgt/kernel
+</A></li>
+	<LI>Next message: <A HREF="000301.html">[Stgt-svn] r314 - branches/use-scsi-ml/kernel
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#300">[ date ]</a>
+              <a href="thread.html#300">[ thread ]</a>
+              <a href="subject.html#300">[ subject ]</a>
+              <a href="author.html#300">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

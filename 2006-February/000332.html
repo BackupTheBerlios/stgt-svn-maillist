@@ -1,0 +1,268 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r345 - branches/use-scsi-ml/usr
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2006-February/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r345%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602281125.k1SBP88j031872%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000331.html">
+   <LINK REL="Next"  HREF="000333.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r345 - branches/use-scsi-ml/usr</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r345%20-%20branches/use-scsi-ml/usr&In-Reply-To=%3C200602281125.k1SBP88j031872%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r345 - branches/use-scsi-ml/usr">tomo at berlios.de
+       </A><BR>
+    <I>Tue Feb 28 12:25:08 CET 2006</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000331.html">[Stgt-svn] r344 - branches/use-scsi-ml/kernel
+</A></li>
+        <LI>Next message: <A HREF="000333.html">[Stgt-svn] r346 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#332">[ date ]</a>
+              <a href="thread.html#332">[ thread ]</a>
+              <a href="subject.html#332">[ subject ]</a>
+              <a href="author.html#332">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2006-02-28 12:25:07 +0100 (Tue, 28 Feb 2006)
+New Revision: 345
+
+Modified:
+   branches/use-scsi-ml/usr/mgmt.c
+   branches/use-scsi-ml/usr/netlink.c
+   branches/use-scsi-ml/usr/scsi.c
+   branches/use-scsi-ml/usr/target.c
+   branches/use-scsi-ml/usr/tgtd.c
+   branches/use-scsi-ml/usr/tgtd.h
+Log:
+Rename struct device struct tgt_device.
+
+Modified: branches/use-scsi-ml/usr/mgmt.c
+===================================================================
+--- branches/use-scsi-ml/usr/mgmt.c	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/mgmt.c	2006-02-28 11:25:07 UTC (rev 345)
+@@ -38,7 +38,6 @@
+ #include &lt;scsi/scsi_tgt_if.h&gt;
+ 
+ #include &quot;tgtd.h&quot;
+-#include &quot;dl.h&quot;
+ #include &quot;log.h&quot;
+ #include &quot;tgtadm.h&quot;
+ 
+
+Modified: branches/use-scsi-ml/usr/netlink.c
+===================================================================
+--- branches/use-scsi-ml/usr/netlink.c	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/netlink.c	2006-02-28 11:25:07 UTC (rev 345)
+@@ -16,16 +16,15 @@
+ #include &lt;string.h&gt;
+ #include &lt;stdint.h&gt;
+ #include &lt;unistd.h&gt;
++#include &lt;asm/types.h&gt;
+ #include &lt;sys/mman.h&gt;
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/signal.h&gt;
+ #include &lt;sys/socket.h&gt;
+-#include &lt;asm/types.h&gt;
++#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &lt;linux/netlink.h&gt;
+ 
+-#include &lt;scsi/scsi_tgt_if.h&gt;
+ #include &quot;tgtd.h&quot;
+-#include &quot;dl.h&quot;
+ 
+ #define	NL_BUFSIZE	1024
+ 
+
+Modified: branches/use-scsi-ml/usr/scsi.c
+===================================================================
+--- branches/use-scsi-ml/usr/scsi.c	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/scsi.c	2006-02-28 11:25:07 UTC (rev 345)
+@@ -30,7 +30,6 @@
+ 
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+-#include &quot;util.h&quot;
+ 
+ #define cpu_to_be32 __cpu_to_be32
+ #define be32_to_cpu __be32_to_cpu
+
+Modified: branches/use-scsi-ml/usr/target.c
+===================================================================
+--- branches/use-scsi-ml/usr/target.c	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/target.c	2006-02-28 11:25:07 UTC (rev 345)
+@@ -40,9 +40,7 @@
+ 
+ #include &quot;tgtd.h&quot;
+ #include &quot;tgtadm.h&quot;
+-#include &quot;dl.h&quot;
+ #include &quot;tgt_sysfs.h&quot;
+-#include &quot;util.h&quot;
+ 
+ #define	MAX_NR_TARGET		1024
+ #define	MAX_NR_HOST		1024
+@@ -58,18 +56,9 @@
+ 	int mmap;
+ };
+ 
+-struct device {
+-	int fd;
+-	uint64_t addr; /* persistent mapped address */
+-	uint64_t size;
+-	int state;
+-
+-	/* queue */
+-};
+-
+ struct target {
+ 	int tid;
+-	struct device **devt;
++	struct tgt_device **devt;
+ 	uint64_t max_device;
+ 
+ 	/* TODO: move to device */
+@@ -91,7 +80,7 @@
+ 	return tgtt[tid];
+ }
+ 
+-static struct device *device_get(struct target *target, uint64_t dev_id)
++static struct tgt_device *device_get(struct target *target, uint64_t dev_id)
+ {
+ 	if (dev_id &lt; target-&gt;max_device || dev_id &lt; MAX_NR_DEVICE)
+ 		return target-&gt;devt[dev_id];
+@@ -110,7 +99,7 @@
+ 
+ static void resize_device_table(struct target *target, uint64_t did)
+ {
+-	struct device *device;
++	struct tgt_device *device;
+ 	void *p, *q;
+ 
+ 	p = calloc(did + 1, sizeof(device));
+@@ -185,7 +174,7 @@
+ int tgt_device_create(int tid, uint64_t dev_id, char *path)
+ {
+ 	struct target *target;
+-	struct device *device;
++	struct tgt_device *device;
+ 	int err, dev_fd;
+ 	uint64_t size;
+ 
+@@ -270,7 +259,7 @@
+ int tgt_device_destroy(int tid, uint64_t dev_id)
+ {
+ 	struct target *target;
+-	struct device *device;
++	struct tgt_device *device;
+ 	char path[PATH_MAX], buf[64];
+ 	int dev_fd, fd, err;
+ 
+@@ -346,7 +335,7 @@
+ static int cmd_queue(struct tgt_event *ev_req, int nl_fd)
+ {
+ 	struct target *target;
+-	struct device *device;
++	struct tgt_device *device;
+ 	int result, len = 0;
+ 	char resbuf[NLMSG_SPACE(sizeof(struct tgt_event))];
+ 	struct tgt_event *ev_res = NLMSG_DATA(resbuf);
+@@ -420,7 +409,7 @@
+ static void cmd_done(struct tgt_event *ev)
+ {
+ 	struct target *target;
+-	struct device *device;
++	struct tgt_device *device;
+ 	struct cmd *cmd;
+ 	int err, do_munmap, host_no = ev-&gt;k.cmd_done.host_no;
+ 	uint32_t cid = ev-&gt;k.cmd_done.cid;
+@@ -557,7 +546,7 @@
+ 	target-&gt;tid = tid;
+ 	INIT_LIST_HEAD(&amp;target-&gt;cqueue);
+ 
+-	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct device *));
++	target-&gt;devt = calloc(DEFAULT_NR_DEVICE, sizeof(struct tgt_device *));
+ 	if (!target-&gt;devt) {
+ 		eprintf(&quot;Out of memoryn\n&quot;);
+ 		err = 0;
+
+Modified: branches/use-scsi-ml/usr/tgtd.c
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.c	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/tgtd.c	2006-02-28 11:25:07 UTC (rev 345)
+@@ -33,12 +33,11 @@
+ #include &lt;sys/poll.h&gt;
+ #include &lt;sys/signal.h&gt;
+ #include &lt;sys/stat.h&gt;
+-#include &lt;dirent.h&gt;
+-
+ #include &lt;scsi/scsi_tgt_if.h&gt;
++
+ #include &quot;tgtd.h&quot;
+-#include &quot;dl.h&quot;
+ 
++
+ enum {
+ 	POLL_NL, /* netlink socket between kernel and user space */
+ 	POLL_UD, /* unix domain socket for tgtdadm */
+
+Modified: branches/use-scsi-ml/usr/tgtd.h
+===================================================================
+--- branches/use-scsi-ml/usr/tgtd.h	2006-02-28 10:22:10 UTC (rev 344)
++++ branches/use-scsi-ml/usr/tgtd.h	2006-02-28 11:25:07 UTC (rev 345)
+@@ -3,7 +3,19 @@
+ 
+ #include &quot;log.h&quot;
+ #include &quot;dl.h&quot;
++#include &quot;util.h&quot;
+ 
++struct tgt_device {
++	int fd;
++	uint64_t addr; /* persistent mapped address */
++	uint64_t size;
++	unsigned long state;
++
++	struct qelem cmd_list;
++
++	struct tgt_device *next_device;
++};
++
+ /* makeshift */
+ #define	POLLS_PER_DRV	32
+ 
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000331.html">[Stgt-svn] r344 - branches/use-scsi-ml/kernel
+</A></li>
+	<LI>Next message: <A HREF="000333.html">[Stgt-svn] r346 - branches/use-scsi-ml/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#332">[ date ]</a>
+              <a href="thread.html#332">[ thread ]</a>
+              <a href="subject.html#332">[ subject ]</a>
+              <a href="author.html#332">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>

@@ -1,0 +1,133 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+ <HEAD>
+   <TITLE> [Stgt-svn] r768 - trunk/doc
+   </TITLE>
+   <LINK REL="Index" HREF="http://lists.berlios.de/pipermail/stgt-svn/2007-January/index.html" >
+   <LINK REL="made" HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r768%20-%20trunk/doc&In-Reply-To=%3C200701221124.l0MBO8rU006919%40sheep.berlios.de%3E">
+   <META NAME="robots" CONTENT="index,nofollow">
+   <style type="text/css">
+       pre {
+           white-space: pre-wrap;       /* css-2.1, curent FF, Opera, Safari */
+           }
+   </style>
+   <META http-equiv="Content-Type" content="text/html; charset=us-ascii">
+   <LINK REL="Previous"  HREF="000754.html">
+   <LINK REL="Next"  HREF="000756.html">
+ </HEAD>
+ <BODY BGCOLOR="#ffffff">
+   <H1>[Stgt-svn] r768 - trunk/doc</H1>
+    <B>tomo at BerliOS</B> 
+    <A HREF="mailto:stgt-svn%40lists.berlios.de?Subject=Re%3A%20%5BStgt-svn%5D%20r768%20-%20trunk/doc&In-Reply-To=%3C200701221124.l0MBO8rU006919%40sheep.berlios.de%3E"
+       TITLE="[Stgt-svn] r768 - trunk/doc">tomo at mail.berlios.de
+       </A><BR>
+    <I>Mon Jan 22 12:24:08 CET 2007</I>
+    <P><UL>
+        <LI>Previous message: <A HREF="000754.html">[Stgt-svn] r767 - trunk/usr/iscsi
+</A></li>
+        <LI>Next message: <A HREF="000756.html">[Stgt-svn] r769 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#755">[ date ]</a>
+              <a href="thread.html#755">[ thread ]</a>
+              <a href="subject.html#755">[ subject ]</a>
+              <a href="author.html#755">[ author ]</a>
+         </LI>
+       </UL>
+    <HR>  
+<!--beginarticle-->
+<PRE>Author: tomo
+Date: 2007-01-22 12:24:08 +0100 (Mon, 22 Jan 2007)
+New Revision: 768
+
+Added:
+   trunk/doc/TODO
+Log:
+Add TODO
+
+Added: trunk/doc/TODO
+===================================================================
+--- trunk/doc/TODO	2007-01-20 13:39:17 UTC (rev 767)
++++ trunk/doc/TODO	2007-01-22 11:24:08 UTC (rev 768)
+@@ -0,0 +1,57 @@
++- FC target mode drivers
++
++First, we need to figure out how to add target mode support to
++mainline scsi_transport_fc. Then we need more tweaks in the user-space
++code.
++
++
++- user-space passthrough
++
++sg v4 is necessary for the user-space target drivers' passthrough.
++
++
++- AIO event notification
++
++The user-space target drivers (only iSCSI now, possibly SRP later on)
++need the event notification to handle both synchronous and
++asynchronous file descriptors. We use the aio epoll patch (that would
++be merged into mainline at 2.6.21), but it's not effective. We need
++something like kevent.
++
++
++- backing-storage disk images
++
++bd_mmap/aio support only raw images. They should support fancy disk
++images (like QCOW, vmdk, etc) to enjoy snapshot without using LVM.
++Adding QCOW to bd_mmap is quite simple, but a bit tricky to bd_aio
++(see Xen's blktap code). Without code duplication, we need to add disk
++images to both bd_mmap/aio.
++
++
++- rearrange backing storage code
++
++Now the backing storage code includes: file I/O (bd_mmap/aio/xen) and
++user-space passthrough (bd_sg). The design are hacky. The backing
++storage code will be more complicated (supports the fancy disk images,
++OSD, etc). We need to reconsider the design at some future time.
++
++
++- kernel-space passthrough
++
++We need a new kernel module for the kernel-space target drivers'
++passthrough. Seems it's ok by James as long as it's cleanly
++implemented.
++
++
++- persistent reservations
++
++Nice though I'm not sure this is that important.
++
++
++- backing-storage virtualization
++
++Virtual tape support would be nice but it needs lot of work and I have
++no plan to implement this.
++
++Virtual cdrom support isn't difficult but I'm not sure people really
++need it.
+
+
+</PRE>
+
+<!--endarticle-->
+    <HR>
+    <P><UL>
+        <!--threads-->
+	<LI>Previous message: <A HREF="000754.html">[Stgt-svn] r767 - trunk/usr/iscsi
+</A></li>
+	<LI>Next message: <A HREF="000756.html">[Stgt-svn] r769 - trunk/usr
+</A></li>
+         <LI> <B>Messages sorted by:</B> 
+              <a href="date.html#755">[ date ]</a>
+              <a href="thread.html#755">[ thread ]</a>
+              <a href="subject.html#755">[ subject ]</a>
+              <a href="author.html#755">[ author ]</a>
+         </LI>
+       </UL>
+
+<hr>
+<a href="https://lists.berlios.de/mailman/listinfo/stgt-svn">More information about the Stgt-svn
+mailing list</a><br>
+</body></html>
